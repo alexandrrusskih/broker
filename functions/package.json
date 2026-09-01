@@ -1,0 +1,14 @@
+{
+  "name": "hltm-broker-functions",
+  "description": "Token broker Cloud Functions (deployed by @pbl/broker)",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^5.0.2",
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "private": true
+}

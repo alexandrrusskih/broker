@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // This package is only safe in a dedicated Firebase project. The broker uses
+    // firebase-admin, which bypasses client rules, so clients need no Firestore
+    // access at all.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

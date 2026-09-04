@@ -133,6 +133,24 @@ WINDOW_SECONDS = {"five_hour": 5 * 3600, "seven_day": 7 * 86400}
 PROBE_PROMPT = "hi"
 
 
+def _windows(info):
+    """Every window the event describes, as (name, {utilization, resetsAt}).
+
+    The harness only lifts a window to the top level of rate_limit_info once it
+    is worth warning about; an account with room reports `status: allowed` and
+    keeps its numbers in `unifiedWindows` alone. Reading only the top level
+    therefore measured accounts near their limit and left every quiet account
+    looking unmeasured — which is exactly backwards.
+    """
+    windows = []
+    unified = info.get("unifiedWindows")
+    if isinstance(unified, dict):
+        windows = [(name, w) for name, w in unified.items() if isinstance(w, dict)]
+    if info.get("utilization") is not None:
+        windows.append((info.get("rateLimitType"), info))
+    return windows
+
+
 def _probe_cache(account):
     return os.path.join(
         os.path.expanduser("~/.config/hltm-broker/cache"), "claude-%s-usage.json" % account
@@ -185,6 +203,21 @@ def probe_row(account, auth, cheap_only=False):
     except OSError:
         lock = None
 
+    try:
+        return _measure(account, auth, lock)
+    finally:
+        # Every exit releases the claim: a probe that timed out or was
+        # interrupted used to leave its lock behind, and every later probe of
+        # that account then reported nothing for the three minutes it took the
+        # stale-lock sweep to notice.
+        if lock:
+            try:
+                os.remove(lock)
+            except OSError:
+                pass
+
+
+def _measure(account, auth, lock):
     row = {"email": "?", "plan": "max", "blocked": False,
            "used": None, "window": None, "resets_in": None}
 
@@ -219,16 +252,18 @@ def probe_row(account, auth, cheap_only=False):
             continue
         if event.get("type") == "rate_limit_event":
             info = event.get("rate_limit_info") or {}
-            used = info.get("utilization")
-            if isinstance(used, (int, float)):
+            for name, window in _windows(info):
+                used = window.get("utilization")
+                if not isinstance(used, (int, float)):
+                    continue
                 used = used * (100 if used <= 1 else 1)
                 # The tighter window wins, exactly as it does for codex.
                 if row["used"] is None or used > row["used"]:
                     row["used"] = int(round(used))
                     # The table renders this as a duration, so give it the
                     # window's length rather than its name.
-                    row["window"] = WINDOW_SECONDS.get(info.get("rateLimitType"))
-                    row["resets_in"] = _seconds_until(info.get("resetsAt"))
+                    row["window"] = WINDOW_SECONDS.get(name)
+                    row["resets_in"] = _seconds_until(window.get("resetsAt"))
             if info.get("status") == "rejected":
                 # A rejection carries no utilization — it is past that — but it
                 # does carry when the window reopens, which is the thing you
@@ -242,11 +277,6 @@ def probe_row(account, auth, cheap_only=False):
             row["used"] = 100
 
     _write_probe_cache(account, row)
-    if lock:
-        try:
-            os.remove(lock)
-        except OSError:
-            pass
     return row
 
 

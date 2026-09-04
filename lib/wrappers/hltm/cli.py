@@ -17,7 +17,7 @@ import importlib
 import os
 import sys
 
-from . import config, out, run, select
+from . import api, config, out, run, select
 
 COMMANDS = {
     "list": ("commands", "cmd_list"),
@@ -76,7 +76,13 @@ def main(provider_name, argv=None):
         module_name, func_name = COMMANDS[argv[0]]
         module = importlib.import_module("." + module_name, __package__)
         cfg = config.load(out.die)
-        return getattr(module, func_name)(cfg, provider, argv[1:])
+        try:
+            return getattr(module, func_name)(cfg, provider, argv[1:])
+        except api.Unreachable as exc:
+            # A dropped VPN is not a bug report. The run path has always
+            # degraded to one line (select.py catches this); the subcommands
+            # printed a hundred lines of traceback for the same blip.
+            out.die("%s — check the network (VPN?) and try again" % exc)
 
     cfg = config.load(out.die)
 

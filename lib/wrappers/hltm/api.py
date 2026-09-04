@@ -1,11 +1,21 @@
 """Talking to the broker. Every action is a path under its base URL."""
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 TIMEOUT = 15
+# A split-tunnel VPN rewrites routes while it runs, and a connection started in
+# that window dies instantly with "network is unreachable" while its neighbours
+# go through. Measured on one such machine: three of five parallel connections
+# to the same host failed, and a retry a second later succeeded. So one dropped
+# connection is not an outage, and `list` (which opens one call per account at
+# once) must not fail on it. Only connection-level failures are retried — an
+# HTTP answer, including a rejection, is the broker speaking and stands.
+ATTEMPTS = 3
+BACKOFF = 0.7
 
 
 class Unreachable(RuntimeError):
@@ -17,8 +27,16 @@ def call(cfg, endpoint, method="GET", **params):
     url = "%s/%s?%s" % (cfg["url"], endpoint, urllib.parse.urlencode(params))
     data = b"" if method == "POST" else None
     req = urllib.request.Request(url, data=data, method=method, headers={"x-broker-key": cfg["key"]})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        return json.load(resp)
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError:
+            raise  # the broker answered; callers decide what the code means
+        except urllib.error.URLError:
+            if attempt == ATTEMPTS:
+                raise
+            time.sleep(BACKOFF * attempt)
 
 
 def list_accounts(cfg, provider, die):

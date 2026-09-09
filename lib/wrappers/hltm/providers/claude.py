@@ -14,6 +14,11 @@ NAME = "claude"
 BIN = "claude"
 CMD = "broker-cl"
 
+# This harness resolves its own binary by path, never by name, so it needs no
+# PATH shield — and shielding it would take the bare command off the broker
+# inside a session started by the wrapper itself.
+PATH_SHIELD = False
+
 # The one provider that needs no profile. codex and agy read a credentials FILE,
 # so each account has to own a directory — and everything else in that directory
 # then has to be linked back to keep history and settings shared. claude reads a
@@ -49,12 +54,33 @@ NPM_GLOBS = (
 )
 
 
+def _chosen_version():
+    """The version the launcher pointed at before the shim took its place.
+
+    `claude install stable` and `claude install latest` differ only in which
+    version they link from ~/.local/bin/claude — the older ones stay on disk. So
+    picking the highest number on disk quietly ignores that choice: after asking
+    for stable you would still run whatever `latest` left behind.
+    """
+    try:
+        with open(os.path.expanduser("~/.config/hltm-broker/config.json")) as fh:
+            remembered = (json.load(fh).get("shim_previous") or {}).get("claude")
+    except (OSError, ValueError):
+        return None
+    if remembered and os.access(remembered, os.X_OK):
+        return remembered
+    return None
+
+
 def vendored_bins():
-    """Installed claude programs, newest first: native versions, then npm."""
+    """Installed claude programs: the chosen one first, then newest to oldest."""
     import glob
 
     found = glob.glob(os.path.expanduser("~/.local/share/claude/versions/*"))
     native = sorted((f for f in found if os.access(f, os.X_OK)), reverse=True)
+    chosen = _chosen_version()
+    if chosen:
+        native = [chosen] + [f for f in native if f != chosen]
     packaged = []
     for pattern in NPM_GLOBS:
         packaged += [f for f in sorted(glob.glob(pattern)) if os.access(f, os.X_OK)]
@@ -129,6 +155,8 @@ def _seconds_until(when):
 # a tiny run of claude, and its answer is cached — a run costs a few tokens and a
 # couple of seconds, which is fine every few minutes and absurd every invocation.
 PROBE_TTL = 600
+# A probe takes seconds; a lock older than this belongs to a run that died.
+LOCK_STALE = 90
 WINDOW_SECONDS = {"five_hour": 5 * 3600, "seven_day": 7 * 86400}
 PROBE_PROMPT = "hi"
 
@@ -194,7 +222,7 @@ def probe_row(account, auth, cheap_only=False):
     lock = _probe_cache(account) + ".lock"
     try:
         os.makedirs(os.path.dirname(lock), mode=0o700, exist_ok=True)
-        if os.path.exists(lock) and datetime.datetime.now().timestamp() - os.path.getmtime(lock) > 180:
+        if os.path.exists(lock) and datetime.datetime.now().timestamp() - os.path.getmtime(lock) > LOCK_STALE:
             os.remove(lock)  # a probe that died mid-flight must not block forever
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(fd)

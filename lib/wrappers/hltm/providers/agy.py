@@ -14,6 +14,9 @@ NAME = "agy"
 BIN = "agy"
 CMD = "broker-agy"
 
+# Resolves its binary by path (the stash), so the shield is unnecessary here too.
+PATH_SHIELD = False
+
 CREDENTIALS = "file"
 
 # agy has no config-dir variable of its own — it goes to $HOME/.gemini and that

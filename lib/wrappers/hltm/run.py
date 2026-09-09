@@ -128,7 +128,14 @@ def exec_harness(cfg, provider, account, auth, argv, extra_env=None):
     target = real_bin(provider)
     if not target:
         die("cannot find the real %s — is it installed?" % provider.BIN)
-    os.environ["PATH"] = _path_without_shim(provider, target)
+    # Only for a harness that re-invokes itself BY NAME. codex's npm launcher does
+    # exactly that, and under a shim it never terminates — hence the shield. claude
+    # does not, and shielding it did active harm: inside a brokered session the
+    # bare name then resolved straight to the binary, bypassing the broker, and
+    # the harness does not pass its token to child processes — so a plain `claude`
+    # in an agent's own terminal answered "Not logged in".
+    if getattr(provider, "PATH_SHIELD", True):
+        os.environ["PATH"] = _path_without_shim(provider, target)
     try:
         os.execv(target, [provider.BIN] + argv)
     except OSError as exc:
@@ -145,6 +152,7 @@ def exec_passthrough(provider, argv):
     target = real_bin(provider)
     if not target:
         die("cannot find the real %s — is it installed?" % provider.BIN)
-    os.environ["PATH"] = _path_without_shim(provider, target)
+    if getattr(provider, "PATH_SHIELD", True):
+        os.environ["PATH"] = _path_without_shim(provider, target)
     os.execv(target, [provider.BIN] + argv)
     sys.exit(0)

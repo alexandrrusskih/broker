@@ -221,6 +221,16 @@ def _swap_for_broker_copy(cfg, provider, home, account):
     return False
 
 
+def _remote_of(path):
+    """Which repository this checkout came from, or None if it cannot say."""
+    try:
+        out = subprocess.check_output(["git", "-C", path, "remote", "get-url", "origin"],
+                                      stderr=subprocess.DEVNULL, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.strip()
+
+
 def sync_source(cfg):
     """Clone or refresh the broker source; returns the package dir, or None.
 
@@ -231,6 +241,14 @@ def sync_source(cfg):
         warn("git not in PATH")
         return None
     repo = cfg.get("src_repo") or SRC_REPO
+    # The cache remembers whichever repository it was first cloned from. When the
+    # source moves — as it did when the broker left hltm-services for its own
+    # repository — fetching into the old checkout pulls the WRONG project, and the
+    # upgrade then fails on a missing package.json while reporting the new address
+    # as unreachable. Re-clone whenever the remote no longer matches.
+    if os.path.isdir(os.path.join(SRC_CACHE, ".git")) and _remote_of(SRC_CACHE) != repo:
+        warn("source moved to %s — re-cloning the cache" % repo)
+        shutil.rmtree(SRC_CACHE, ignore_errors=True)
     if os.path.isdir(os.path.join(SRC_CACHE, ".git")):
         ok = run(["git", "-C", SRC_CACHE, "fetch", "--depth", "1", "origin", "HEAD"]) == 0
         ok = ok and run(["git", "-C", SRC_CACHE, "reset", "--hard", "FETCH_HEAD"]) == 0

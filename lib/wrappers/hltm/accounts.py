@@ -25,7 +25,7 @@ def stub(account):
     }
 
 
-def probe(cfg, provider, account, cheap_only=False):
+def probe(cfg, provider, account, cheap_only=False, fresh=False):
     """What the pick needs to judge one account. Never raises.
 
     `cheap_only` refuses to pay for the answer: claude has no usage endpoint its
@@ -47,7 +47,7 @@ def probe(cfg, provider, account, cheap_only=False):
     # the harness, since the token it runs on cannot read the usage API.
     own = getattr(provider, "probe_row", None)
     if own:
-        measured = own(account, row["auth"], cheap_only=cheap_only)
+        measured = own(account, row["auth"], cheap_only=cheap_only, fresh=fresh)
         if measured is not None:
             row.update(measured)
         return row
@@ -88,11 +88,14 @@ def probe(cfg, provider, account, cheap_only=False):
     return row
 
 
-def probe_all(cfg, provider, names):
+def probe_all(cfg, provider, names, fresh=False):
     """Probe every account, every time — limits are only worth acting on while
     they are current, and a stale pick sends work to an exhausted account."""
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(names)))) as pool:
-        rows = list(pool.map(lambda n: probe(cfg, provider, n), names))
+    # A provider whose probe runs the harness cannot take eight at once: they
+    # contend over one state directory and some come back empty.
+    limit = getattr(provider, "PROBE_CONCURRENCY", 8)
+    with ThreadPoolExecutor(max_workers=min(limit, max(1, len(names)))) as pool:
+        rows = list(pool.map(lambda n: probe(cfg, provider, n, fresh=fresh), names))
     rows.sort(key=rank)
     return rows
 

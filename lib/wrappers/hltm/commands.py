@@ -18,7 +18,9 @@ def cmd_list(cfg, provider, _args):
     names = api.list_accounts(cfg, provider.NAME, die)
     if not names:
         die("no %s accounts seeded — run '%s auth <name>'" % (provider.NAME, provider.CMD))
-    table.render(cfg, provider, accounts.probe_all(cfg, provider, names))
+    # Always measured, never remembered: this command exists to answer "what is
+    # left right now", and a cached number is not an answer to that.
+    table.render(cfg, provider, accounts.probe_all(cfg, provider, names, fresh=True))
     return 0
 
 

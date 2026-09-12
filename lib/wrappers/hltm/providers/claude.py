@@ -155,8 +155,17 @@ def _seconds_until(when):
 # a tiny run of claude, and its answer is cached — a run costs a few tokens and a
 # couple of seconds, which is fine every few minutes and absurd every invocation.
 PROBE_TTL = 600
+# A measurement that came back empty is worth remembering only briefly. Writing
+# it for the full TTL is how a single failed probe made an account show dashes
+# for ten minutes while it was perfectly healthy — and four probes racing each
+# other over one ~/.claude is exactly when that happens.
+EMPTY_TTL = 60
 # A probe takes seconds; a lock older than this belongs to a run that died.
 LOCK_STALE = 90
+# Probing claude means RUNNING claude, and parallel runs contend over the same
+# state directory. Two at a time measures four accounts quickly enough without
+# them tripping over each other.
+PROBE_CONCURRENCY = 2
 WINDOW_SECONDS = {"five_hour": 5 * 3600, "seven_day": 7 * 86400}
 PROBE_PROMPT = "hi"
 
@@ -191,9 +200,11 @@ def _read_probe_cache(account):
             cached = json.load(fh)
     except (OSError, ValueError):
         return None
-    if datetime.datetime.now().timestamp() - cached.get("at", 0) > PROBE_TTL:
+    row = cached.get("row") or {}
+    ttl = PROBE_TTL if row.get("used") is not None else EMPTY_TTL
+    if datetime.datetime.now().timestamp() - cached.get("at", 0) > ttl:
         return None
-    return cached.get("row")
+    return row
 
 
 def _write_probe_cache(account, row):
@@ -207,9 +218,15 @@ def _write_probe_cache(account, row):
         pass  # a cache that cannot be written only costs speed
 
 
-def probe_row(account, auth, cheap_only=False):
-    """What the engine ranks on, measured by running the harness once, briefly."""
-    cached = _read_probe_cache(account)
+def probe_row(account, auth, cheap_only=False, fresh=False):
+    """What the engine ranks on, measured by running the harness once, briefly.
+
+    `fresh` ignores the cache. Asking "what is left right now" must never answer
+    from something measured ten minutes ago — that is the whole point of asking.
+    The run path still uses the cache: there a stale number costs nothing, while
+    measuring would add a harness start to every single invocation.
+    """
+    cached = None if fresh else _read_probe_cache(account)
     if cached is not None:
         return cached
     if cheap_only:

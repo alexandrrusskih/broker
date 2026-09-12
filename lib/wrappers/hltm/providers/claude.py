@@ -194,20 +194,36 @@ def _probe_cache(account):
     )
 
 
+# Cache disabled by request: every answer is measured when it is asked for.
+# The cost is real and deliberate — probing claude means starting claude, so a
+# bare `claude` now waits for that before it begins. In exchange no number is
+# ever older than the question, which is what the cache kept getting wrong:
+# empty measurements stuck around, and a stale figure looked fresh.
+CACHE_ENABLED = False
+
+
 def _read_probe_cache(account):
+    if not CACHE_ENABLED:
+        return None
     try:
         with open(_probe_cache(account)) as fh:
             cached = json.load(fh)
     except (OSError, ValueError):
         return None
-    row = cached.get("row") or {}
+    row = dict(cached.get("row") or {})
+    age = datetime.datetime.now().timestamp() - cached.get("at", 0)
     ttl = PROBE_TTL if row.get("used") is not None else EMPTY_TTL
-    if datetime.datetime.now().timestamp() - cached.get("at", 0) > ttl:
+    if age > ttl:
         return None
+    # How old the answer is, so a caller can say so instead of presenting a
+    # nine-minute-old number as if it were just measured.
+    row["age"] = int(age)
     return row
 
 
 def _write_probe_cache(account, row):
+    if not CACHE_ENABLED:
+        return
     path = _probe_cache(account)
     try:
         os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
@@ -232,12 +248,17 @@ def probe_row(account, auth, cheap_only=False, fresh=False):
     if cheap_only:
         return None  # nothing cached, and measuring costs a run — say nothing
 
-    # A panel starts several agents at once, and every one of them would find the
-    # cache empty and launch its own probe — five extra runs of the harness to
-    # learn one number. The first to claim the lock measures; the rest start
-    # immediately without it.
-    lock = _probe_cache(account) + ".lock"
+    # The lock only made sense alongside the cache: one process measured, the
+    # others read its answer. With no cache there is nothing to read, so a lock
+    # would just hand them an empty row — which is exactly how a freshly started
+    # run reported "this token cannot read usage" while the account was fine.
+    # Everyone measures for themselves now; slower, but never blank.
+    lock = None
+    if CACHE_ENABLED:
+        lock = _probe_cache(account) + ".lock"
     try:
+        if lock is None:
+            raise OSError  # no lock in use — go straight to measuring
         os.makedirs(os.path.dirname(lock), mode=0o700, exist_ok=True)
         if os.path.exists(lock) and datetime.datetime.now().timestamp() - os.path.getmtime(lock) > LOCK_STALE:
             os.remove(lock)  # a probe that died mid-flight must not block forever

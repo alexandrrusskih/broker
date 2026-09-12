@@ -84,13 +84,18 @@ def resolve(cfg, provider, explicit):
             profile.ensure(provider, [row])
             # A provider with no readable usage would otherwise announce a
             # confident "0% used, 100% left" it knows nothing about.
+            # Say when the number was taken if it did not come from just now:
+            # measuring costs a harness start, so the run path reads a cached
+            # answer, and a nine-minute-old number should not look fresh.
+            age = row.get("age") or 0
+            seen = "" if age < 60 else "  (измерено %d мин назад)" % (age // 60)
             if row["used"] is None:
-                warn("%s (%s) — usable; this token cannot read usage" % (home, row["plan"]))
+                warn("%s (%s) — usable; this token cannot read usage%s" % (home, row["plan"], seen))
             else:
                 warn(
-                    "%s (%s) — %d%% used, %d%% left, resets in %s"
+                    "%s (%s) — %d%% used, %d%% left, resets in %s%s"
                     % (home, row["plan"], row["used"], accounts.headroom(row),
-                       table.human(row["resets_in"]))
+                       table.human(row["resets_in"]), seen)
                 )
             return home, row["auth"]
         why = row["error"] or (

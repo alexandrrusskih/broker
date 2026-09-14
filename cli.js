@@ -63,7 +63,8 @@ Usage:
                          Set the default account every command and wrapper uses.
   broker config [--url <url>] [--key <key>] [--account <name>]
                          Show or set local config (~/.config/hltm-broker/config.json).
-  broker upgrade         Update the broker CLI from the source repo (git only).
+  broker upgrade [--all] Update the broker CLI from the source repo (git only),
+                         and with --all the harnesses too (codex, claude, agy).
   broker version         Print the installed version.
   broker help
 
@@ -382,6 +383,28 @@ async function main() {
       }
       if (!installedProviders.length) {
         console.log(`  next: 'broker codex install' (wrapper + shim, so plain 'codex' goes through the broker)`);
+      }
+
+      // --all also updates the harnesses themselves. Without it this command
+      // touches only the broker, and updating everything meant remembering one
+      // `broker-XX upgrade` per provider — each of which re-did the broker part.
+      if (flags.all || flags.harnesses) {
+        for (const name of installedProviders) {
+          const w = wrapTable[name];
+          console.log(`\n→ updating ${w.bin}...`);
+          try {
+            // Through the wrapper, so `update` reaches the real binary; then the
+            // shim goes back, because the updater writes its own launcher over it.
+            execFileSync(w.cmd, ["update"], { stdio: "inherit" });
+          } catch (_e) {
+            console.log(`  ${w.bin} update failed — run '${w.cmd} upgrade' to see why`);
+          }
+          try {
+            execFileSync("broker", [name, "install", "--no-ask"], { stdio: "inherit" });
+          } catch (_e) {
+            console.log(`  could not restore the ${name} shim — run 'broker ${name} install'`);
+          }
+        }
       }
       break;
     }

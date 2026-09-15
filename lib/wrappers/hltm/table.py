@@ -14,6 +14,18 @@ def human(seconds):
     return "%dm" % max(1, seconds // 60)
 
 
+def used_label(row):
+    """What to print in the USED column.
+
+    A provider that only reports limits past a warning threshold says nothing at
+    all while an account is healthy. Printing a dash there reads as "no data";
+    it actually means "under the line".
+    """
+    if row.get("used") is not None:
+        return "%d%%" % row["used"]
+    return "<75%" if row.get("below_threshold") else "—"
+
+
 def window_label(seconds):
     # A provider may hand back something that is not a duration; a status table
     # must never be the thing that crashes.
@@ -45,7 +57,7 @@ def render(cfg, provider, rows):
                 row["account"] + (" (yours)" if row["account"] == home else ""),
                 row["email"],
                 row["plan"],
-                "—" if row["used"] is None else "%d%%" % row["used"],
+                used_label(row),
                 window_label(row["window"]),
                 human(row["resets_in"]),
                 status_of(row),

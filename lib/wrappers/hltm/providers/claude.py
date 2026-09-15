@@ -308,6 +308,11 @@ def _measure(account, auth, lock):
         # Ctrl-C during a probe should end the probe, not be swallowed by it.
         raise
 
+    # claude reports a limit only once it crosses a warning threshold — 75% for
+    # the weekly window, 90% for the five-hour one. Below that it says nothing,
+    # and an empty row then reads as "no data / broken" when it actually means
+    # "comfortably under the line". Remember that the run itself succeeded.
+    answered = False
     for line in done.stdout.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -338,10 +343,16 @@ def _measure(account, auth, lock):
                 row["used"] = 100
                 row["window"] = WINDOW_SECONDS.get(info.get("rateLimitType"))
                 row["resets_in"] = _seconds_until(info.get("resetsAt"))
+        if event.get("type") == "result" and not event.get("is_error"):
+            answered = True
         if event.get("type") == "result" and event.get("api_error_status") == 429:
             row["blocked"] = True
             row["used"] = 100
 
+    # Nothing reported, but the harness answered: that is "below the warning
+    # threshold", not "unknown".
+    if row["used"] is None and answered:
+        row["below_threshold"] = True
     _write_probe_cache(account, row)
     return row
 

@@ -6,7 +6,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-TIMEOUT = 15
+# The broker can wait 62s for an in-flight rotation. Do not time out first.
+TIMEOUT = 90
 # A split-tunnel VPN rewrites routes while it runs, and a connection started in
 # that window dies instantly with "network is unreachable" while its neighbours
 # go through. Measured on one such machine: three of five parallel connections

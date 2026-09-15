@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 
-PATH = os.path.expanduser("~/.config/hltm-broker/config.json")
+PATH = os.path.abspath(os.path.expanduser(os.environ.get("BROKER_CONFIG") or "~/.config/hltm-broker/config.json"))
 DEFAULT_URL = os.environ.get("BROKER_URL")
 
 # Stay on your own account while it has at least this much of its window left.
@@ -18,9 +18,11 @@ def load(die):
         with open(PATH) as fh:
             cfg = json.load(fh)
     except FileNotFoundError:
-        die("broker not configured — run 'broker config --key <broker_key>'")
+        cfg = {}
     except (OSError, ValueError) as exc:
         die("unreadable config %s: %s" % (PATH, exc))
+    if not cfg.get("key") and os.environ.get("BROKER_KEY"):
+        cfg["key"] = os.environ["BROKER_KEY"]
     if not cfg.get("key"):
         die("broker key missing — run 'broker config --url <broker-url> --key <broker_key>'")
     if not (cfg.get("url") or DEFAULT_URL):
@@ -35,7 +37,7 @@ def url_of(cfg):
     A url saved before the broker collapsed into one function points at a base
     where every action now 404s; every action lives under /broker instead.
     """
-    url = (cfg.get("url") or DEFAULT_URL).rstrip("/")
+    url = (cfg.get("url") or os.environ.get("BROKER_URL") or DEFAULT_URL).rstrip("/")
     if url.endswith("cloudfunctions.net"):
         url += "/broker"
     return url

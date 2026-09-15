@@ -14,6 +14,8 @@
     "!lib/**/__pycache__/**",
     "!lib/**/*.pyc",
     "functions/",
+    "launchd/",
+    "docs/self-hosted.md",
     "firebase.json",
     "firestore.rules",
     "firestore.indexes.json"

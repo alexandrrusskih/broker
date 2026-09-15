@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.hltm.broker</string>
+  <key>UserName</key><string>REPLACE_USER</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/REPLACE/ABSOLUTE/PATH/TO/node</string>
+    <string>/REPLACE/ABSOLUTE/PATH/TO/broker/cli.js</string>
+    <string>serve</string>
+    <string>--data-dir</string><string>/REPLACE/ABSOLUTE/DATA/DIR</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>8787</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ExitTimeOut</key><integer>120</integer>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>/REPLACE/ABSOLUTE/DATA/DIR/logs/broker.log</string>
+  <key>StandardErrorPath</key><string>/REPLACE/ABSOLUTE/DATA/DIR/logs/broker.error.log</string>
+</dict>
+</plist>

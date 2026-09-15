@@ -6,7 +6,12 @@ rotating refresh token, refreshes it centrally under a lock, and hands out fresh
 access tokens — so no two clients ever race and burn each other's refresh token
 (`refresh_token_reused`).
 
-The broker runs as Cloud Functions in a **dedicated Firebase project**. Refresh
+The broker can run **self-hosted** (one HTTP server + private JSON files) or as
+Cloud Functions in a **dedicated Firebase project**. The API and refresh logic
+are shared; clients only need a URL and a key. For a private Tailscale endpoint,
+system LaunchDaemon and remote Docker clients, see [self-hosted setup](docs/self-hosted.md).
+
+In the Firebase deployment, refresh
 tokens live in Firestore (Google-managed encryption at rest, no customer-managed
 KMS). Deny-all client rules isolate the database; only the function's Admin SDK
 accesses it. A Secret Manager value protects the atomic one-time bootstrap.
@@ -17,7 +22,8 @@ git is the only source. The npm registry copy trails this repo, so installing
 from it would put an older CLI — and an older `broker-cx` — over a working setup.
 
 ```sh
-bash install.sh          # clones the repo and installs the CLI globally
+bash install.sh          # installs CLI; optionally prompts for a client connection
+bash install.sh --server # opt-in macOS system daemon, suitable for SSH/headless use
 ```
 
 Or by hand, from a checkout:
@@ -26,8 +32,20 @@ Or by hand, from a checkout:
 bun install -g .  # or: npm install -g .
 ```
 
-Updating later is `broker-cx upgrade` (CLI + wrapper + codex) or `broker upgrade`
-(CLI only); both pull from the repo.
+An existing client connection is left untouched. A new client can enter its URL
+and key interactively (the key is hidden), or use
+`bash install.sh --client-config /path/to/client.json --no-ask`. A client install
+does not create a daemon or replace the native Codex command; installing its shim
+is the explicit `broker codex install` step.
+
+`broker upgrade` updates the CLI and already-installed wrappers; `--all` also
+updates the native harnesses. **Only `broker upgrade --server`** additionally
+updates/restarts an installed self-hosted daemon. Firebase deployment is unchanged.
+
+For an unpublished branch use `bash install.sh --from /path/to/checkout`
+(add `--server` for the server), and `broker upgrade --from /path/to/checkout`
+(also add `--server` to update that daemon). Without `--from`, both commands use
+the upstream default branch, not the branch of the current directory.
 
 ## Use (zero-manual)
 
@@ -72,6 +90,10 @@ fi
 
 | Command | What |
 |---|---|
+| `broker setup [--url <url> \| --client-config <file>] [--no-ask]` | Connect a new client without overwriting an existing connection. |
+| `broker server install [--url <url>]` | Install/update a macOS system LaunchDaemon. |
+| `broker server status\|restart\|stop` | Manage the system daemon. |
+| `broker upgrade [--all] [--server] [--from <checkout>]` | Update CLI/wrappers, optionally harnesses and/or the managed server. |
 | `broker deploy --project <id> --dedicated-project [--alert-webhook <url>]` | Secure deploy + bootstrap + save config. |
 | `broker seed <codex\|claude\|agy>` | Give the broker a freshly-logged-in refresh token. |
 | `broker get <provider> [--format authjson\|raw]` | Fetch a fresh token (scripts/CI). |

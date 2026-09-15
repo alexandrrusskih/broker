@@ -1,6 +1,5 @@
 const crypto = require("crypto");
 
-const store = require("./store");
 const { secretMatches } = require("./constant-time");
 
 // Rotating tokens live in Firestore. The one-time bootstrap credential lives in
@@ -45,10 +44,6 @@ function handleMatches(presented, expected) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-async function authorized(req) {
-  const cfg = await store.readConfig();
-  return secretMatches(req.get("x-broker-key"), cfg.broker_key);
-}
 
 // A dead grant needs a manual local re-login + re-seed; a blip does not. Specific
 // terms only — a bare `refresh`/`expired` catch-all misfires on transient
@@ -78,11 +73,18 @@ async function alertReauth(cfg, message) {
 }
 
 // Alert at most once per account per hour, then report the outcome to the caller.
-async function alertOnce(provider, account, message) {
-  const cfg = await store.readConfig();
-  if (await store.shouldAlert(provider, account)) {
-    await alertReauth(cfg, message);
-  }
+function createShared(store) {
+  return {
+    async authorized(req, adminOnly = false) {
+      const cfg = await store.readConfig();
+      const key = req.get("x-broker-key");
+      return secretMatches(key, cfg.broker_key) || (!adminOnly && secretMatches(key, cfg.client_key));
+    },
+    async alertOnce(provider, account, message) {
+      const cfg = await store.readConfig();
+      if (await store.shouldAlert(provider, account)) await alertReauth(cfg, message);
+    }
+  };
 }
 
 module.exports = {
@@ -91,8 +93,7 @@ module.exports = {
   handleSecret,
   codexHandle,
   handleMatches,
-  authorized,
   isDeadGrant,
   alertReauth,
-  alertOnce
+  createShared
 };

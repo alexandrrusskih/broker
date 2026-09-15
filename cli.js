@@ -38,6 +38,15 @@ then the default). cx ignores all of that: you either name the account for that
 run, or it picks the one with the most rate-limit headroom.
 
 Usage:
+  broker setup [--url <url> | --client-config <file>] [--no-ask]
+                         Configure a new client; existing saved connections are left untouched.
+  broker server install [--url <url>] [--data-dir <dir>] [--port 8787] [--no-ask]
+  broker server status|restart|stop
+                         Install/manage a macOS SYSTEM LaunchDaemon; no GUI session required.
+  broker init [--data-dir <dir>] [--url <private-https-url>]
+                         Provision a self-hosted broker (JSON files, separate admin/client keys).
+  broker serve [--data-dir <dir>] [--host 127.0.0.1] [--port 8787]
+                         Run the self-hosted HTTP server. Put Tailscale Serve in front for HTTPS.
   broker deploy --project <firebase-id> --dedicated-project [--alert-webhook <url>]
                          Deploy to a DEDICATED Firebase project, install deny-all
                          client rules, mint the key securely, and save config.
@@ -49,12 +58,13 @@ Usage:
                          Install a wrapper (cx/cl/gm) that pulls auth from the broker.
                          Without --account the wrapper follows the default account.
   broker status          What is installed, wired and seeded — start here.
-  broker install <provider> [--default-account <name>]
+  broker install <provider> [--default-account <name>] [--container]
   broker <provider> install|remove|status
                          Install the wrapper + shim (so plain 'codex' goes
                          through the broker), undo it, or show its state.
                          --default-account sets the account this machine sticks
                          to and skips the prompt — the form for image builds.
+                         --container opts into creating a new Medulla host overlay.
   broker accounts <provider>
                          List the accounts seeded for a provider.
   broker forget <provider> --account <name> --yes
@@ -63,8 +73,9 @@ Usage:
                          Set the default account every command and wrapper uses.
   broker config [--url <url>] [--key <key>] [--account <name>]
                          Show or set local config (~/.config/hltm-broker/config.json).
-  broker upgrade [--all] Update the broker CLI from the source repo (git only),
-                         and with --all the harnesses too (codex, claude, agy).
+  broker upgrade [--all] [--server] [--from <checkout>]
+                         Update CLI/wrappers; --all also updates harnesses.
+                         --server additionally updates/restarts an installed server.
   broker version         Print the installed version.
   broker help
 
@@ -101,6 +112,62 @@ async function main() {
   const { flags, positional } = parseFlags(rest);
 
   switch (cmd) {
+    case "setup": {
+      const out = await require("./lib/setup").setup({
+        url: flags.url, clientConfig: flags["client-config"], noAsk: flags["no-ask"] === true
+      });
+      console.log(out.changed ? `Client connection saved: ${out.file}`
+        : out.configured ? "Existing client connection preserved."
+        : "Client setup skipped; use broker setup or provide a runtime config when ready.");
+      break;
+    }
+    case "server": {
+      const manager = require("./lib/service").createServiceManager();
+      const action = positional[0] || "status";
+      if (action === "install") {
+        const out = await manager.install({
+          url: flags.url, dataDir: flags["data-dir"], port: flags.port,
+          from: flags.from, noAsk: flags["no-ask"] === true
+        });
+        console.log(`System broker ${out.updated ? "updated" : "installed"} and ready on 127.0.0.1:${out.port}`);
+        console.log(`Runtime: ${out.runtime}\nData: ${out.dataDir}`);
+        console.log(`Client config: ${out.clientFile}\nAdmin config: ${out.adminFile} (keep on the server)`);
+        console.log(`Client URL: ${out.url}`);
+        console.log(`Private HTTPS is separate: tailscale serve --bg http://127.0.0.1:${out.port}`);
+        console.log("No client shim, Tailscale setting, old refresh daemon or existing Codex auth was changed.");
+      } else if (action === "status") {
+        const out = await manager.status();
+        console.log(`system/com.hltm.broker: ${out.healthy ? "ready" : out.pid ? "running, API not ready" : "stopped"}`);
+        console.log(`User: ${out.user}\nRuntime: ${out.runtime}\nData: ${out.dataDir}\nClient URL: ${out.url}`);
+        if (!out.healthy) process.exitCode = 1;
+      } else if (action === "restart") {
+        await manager.restart();
+        console.log("System broker restarted and ready.");
+      } else if (action === "stop") {
+        await manager.stop();
+        console.log("System broker stopped. Use broker server restart to start it again; its boot-time registration is retained.");
+      } else throw new Error("usage: broker server install|status|restart|stop");
+      break;
+    }
+    case "init": {
+      const out = await require("./lib/server").init({ dataDir: flags["data-dir"], url: flags.url });
+      console.log(`Self-hosted broker initialized: ${out.dataDir}`);
+      console.log(`Client config: ${out.clientFile}`);
+      console.log(`Admin config:  ${out.adminFile} (keep on the server)`);
+      console.log("Use BROKER_CONFIG=<file> with CLI/wrappers. No services or existing auth were changed.");
+      break;
+    }
+    case "serve": {
+      const port = flags.port === undefined ? 8787 : Number(flags.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("invalid port");
+      const server = await require("./lib/server").serve({ dataDir: flags["data-dir"], host: flags.host, port });
+      console.log(`Broker listening on ${server.address().address}:${server.address().port}`);
+      // Drain in-flight rotations before launchd restarts the process.
+      const stop = () => server.close((err) => { if (err) { console.error(err.message); process.exitCode = 1; } });
+      process.once("SIGTERM", stop);
+      process.once("SIGINT", stop);
+      break;
+    }
     case "deploy": {
       const { deploy } = require("./lib/deploy");
       const out = await deploy({
@@ -152,7 +219,7 @@ async function main() {
             `('${wrapTable[provider].cmd} account <name>') or let it pick`
         );
       }
-      const r = install(provider, pinned);
+      const r = install(provider, pinned, undefined, { container: flags.container === true });
       const shown = r.pinned || (picksPerRun ? "named per run, or picked" : `${config.read().account || "default"}, follows the default`);
       console.log(`✓ installed wrapper '${r.cmd}' → ${r.path} (account: ${shown})`);
       if (picksPerRun) {
@@ -289,7 +356,7 @@ async function main() {
       if (!key) throw new Error("usage: broker config-set codex_handle_rollout <true|false>\n       broker config-set codex_handle_secret <hex|generate>");
       if (key === "codex_handle_secret" && (value === "generate" || flags.generate)) {
         value = require("crypto").randomBytes(32).toString("hex");
-        console.log("  (generated a random 32-byte secret; provision it BEFORE flipping the flag, then wait out the 60s config cache — see §6.8)");
+        console.log("  (generated a random 32-byte secret; provision it BEFORE flipping the flag — see §6.8)");
       }
       const r = await fetch(`${cfg.url}/configSet`, {
         method: "POST",
@@ -321,23 +388,11 @@ async function main() {
       // git is the only source: the npm registry copy trails this repo, and
       // installing from it downgrades a working setup.
       const cfg = config.read();
-      const repo = cfg.src_repo || "git@github.com:alexandrrusskih/broker.git";
-      const subdir = cfg.src_subdir === undefined ? "" : cfg.src_subdir;
-      const src = pathMod.join(os.homedir(), ".cache", "hltm-broker", "src");
-      const git = (...args) => execFileSync("git", args, { stdio: "inherit" });
-
+      if (flags.server) await require("./lib/service").createServiceManager().requireInstalled();
       console.log(`current: ${require("./package.json").version}`);
-      if (fs.existsSync(pathMod.join(src, ".git"))) {
-        git("-C", src, "fetch", "--depth", "1", "origin", "HEAD");
-        git("-C", src, "reset", "--hard", "FETCH_HEAD");
-      } else {
-        fs.mkdirSync(pathMod.dirname(src), { recursive: true });
-        git("clone", "--depth", "1", repo, src);
-      }
-
-      const pkg = subdir ? pathMod.join(src, subdir) : src;
-      if (!fs.existsSync(pathMod.join(pkg, "package.json"))) {
-        throw new Error(`no package.json in ${pkg}`);
+      const pkg = require("./lib/source").sourcePackage(cfg, flags.from);
+      if (flags.server && !fs.existsSync(pathMod.join(pkg, "lib", "service.js"))) {
+        throw new Error("selected source does not support managed self-hosted servers; server and CLI were not changed");
       }
       let installed = false;
       for (const tool of ["bun", "npm"]) {
@@ -405,6 +460,10 @@ async function main() {
             console.log(`  could not restore the ${name} shim — run 'broker ${name} install'`);
           }
         }
+      }
+      if (flags.server) {
+        // Use the new source, not modules already loaded by this old CLI.
+        execFileSync(process.execPath, [pathMod.join(pkg, "cli.js"), "server", "install", "--no-ask", "--from", pkg], { stdio: "inherit" });
       }
       break;
     }

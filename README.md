@@ -42,6 +42,23 @@ is the explicit `broker codex install` step.
 updates the native harnesses. **Only `broker upgrade --server`** additionally
 updates/restarts an installed self-hosted daemon. Firebase deployment is unchanged.
 
+For **Medulla in Docker**, run this once on each Docker host (Docker Desktop or
+Colima):
+
+```sh
+broker setup --container
+# Or import a securely delivered CLIENT config directly:
+broker setup --container --client-config /path/to/client.json
+```
+
+This installs the container Codex shim and a private client config in Medulla's
+host overlay. It does not change the host's Codex setup or restart Docker.
+An existing overlay keeps its connection; otherwise the saved host client is
+used. On a managed broker server, a loopback connection is replaced by that
+same server's external URL from `client.json`. Use `--url` to explicitly choose
+a container-reachable endpoint. Container DNS/routing must reach it; ordinary
+`docker run` does not mount Medulla's overlay automatically.
+
 For an unpublished branch use `bash install.sh --from /path/to/checkout`
 (add `--server` for the server), and `broker upgrade --from /path/to/checkout`
 (also add `--server` to update that daemon). Without `--from`, both commands use
@@ -91,6 +108,7 @@ fi
 | Command | What |
 |---|---|
 | `broker setup [--url <url> \| --client-config <file>] [--no-ask]` | Connect a new client without overwriting an existing connection. |
+| `broker setup --container [--client-config <file>] [--url <url>]` | Install the Medulla Docker Codex shim and client config; no host/service changes. |
 | `broker server install [--url <url>]` | Install/update a macOS system LaunchDaemon. |
 | `broker server status\|restart\|stop` | Manage the system daemon. |
 | `broker upgrade [--all] [--server] [--from <checkout>]` | Update CLI/wrappers, optionally harnesses and/or the managed server. |

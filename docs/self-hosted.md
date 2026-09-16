@@ -157,23 +157,35 @@ mechanism. Do not bake credentials into image layers or mount the server's
 account files. The runtime user's home still needs to be writable for Codex
 profiles, which contain access tokens and handles.
 
-For a new Medulla host overlay, opt in explicitly:
+For Medulla, configure the overlay once on the **Docker host**. This is the same
+command for Docker Desktop and Colima:
 
 ```sh
-broker codex install --container
+broker setup --container
+# Or use a securely delivered client config without configuring the host CLI:
+broker setup --container --client-config /path/to/client.json
 ```
 
 This populates:
 
 - `~/.medulla/container/bin/broker-cx`: self-contained Python zipapp.
 - `~/.medulla/container/home/.local/bin/codex`: shim ahead of native Codex on PATH.
+- `~/.medulla/container/home/.config/hltm-broker/config.json`: client connection,
+  written atomically with mode `0600`.
 
-The overlay deliberately does **not** copy a possibly privileged host config.
-Provision `client.json` separately as
-`~/.medulla/container/home/.config/hltm-broker/config.json` (mode `0600`). This
-default location also tells Medulla's initialization not to copy native host
-auth. Apply the overlay on the actual Docker host. Once the overlay exists,
+The command uses an explicit `--client-config` first, then an existing overlay,
+then the host client. It copies only connection/account fields, rejects a config
+marked `admin`, and never copies native Codex auth or reads server settings.
+On a managed server whose host client uses loopback, it discovers that same
+server's external client URL from its service metadata and `client.json`.
+Otherwise pass `--url <reachable-url>`; `localhost`/`127.0.0.1` would point at the
+container, not its host, and are rejected. The host client/shim are left alone.
+
+This default config location tells Medulla's initialization not to copy native
+host auth. Apply the overlay on the actual Docker host. Once the overlay exists,
 ordinary wrapper upgrades continue updating it without requiring `--container`.
+The older `broker codex install --container` still installs/updates wrappers
+without provisioning a client config; its behavior is unchanged.
 The real `/usr/local/bin/codex` and its npm target must not be overwritten by a
 bind mount. Recreate an already running container to pick up new mounts.
 
@@ -184,6 +196,9 @@ appropriate. An unauthenticated request to
 `https://<broker>/listAccounts?provider=codex` should reach the broker and return
 401; it must not time out or fail DNS. Do not print a token response to test
 connectivity. See [Tailscale in Docker](https://tailscale.com/docs/features/containers/docker).
+Setup does not edit DNS or restart Docker, Colima or Tailscale. If a DNS fix
+needs a runtime restart, schedule it separately so unrelated containers are not
+interrupted.
 
 ## 5. Manage and upgrade the system daemon
 

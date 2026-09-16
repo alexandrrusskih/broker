@@ -40,6 +40,9 @@ run, or it picks the one with the most rate-limit headroom.
 Usage:
   broker setup [--url <url> | --client-config <file>] [--no-ask]
                          Configure a new client; existing saved connections are left untouched.
+  broker setup --container [--client-config <file>] [--url <reachable-url>]
+                         Configure Medulla Docker's Codex shim + client connection.
+                         Reuses the container/host client; no host shim or daemon changes.
   broker server install [--url <url>] [--data-dir <dir>] [--port 8787] [--no-ask]
   broker server status|restart|stop
                          Install/manage a macOS SYSTEM LaunchDaemon; no GUI session required.
@@ -113,6 +116,16 @@ async function main() {
 
   switch (cmd) {
     case "setup": {
+      if (flags.container === true) {
+        const out = await require("./lib/container-setup").setupContainer({
+          url: flags.url, clientConfig: flags["client-config"]
+        });
+        console.log(`Medulla container Codex overlay ready: ${out.wrapper}`);
+        console.log(`Client config: ${out.file}\nBroker URL: ${out.url}`);
+        console.log("New Medulla containers use this setup. Recreate already-running containers to pick it up.");
+        console.log("Host Codex, server accounts, Docker/Tailscale DNS and services were not changed.");
+        break;
+      }
       const out = await require("./lib/setup").setup({
         url: flags.url, clientConfig: flags["client-config"], noAsk: flags["no-ask"] === true
       });

@@ -189,16 +189,39 @@ without provisioning a client config; its behavior is unchanged.
 The real `/usr/local/bin/codex` and its npm target must not be overwritten by a
 bind mount. Recreate an already running container to pick up new mounts.
 
-**Check networking from inside the container.** The Docker host being on
-Tailscale does not by itself guarantee container DNS/routing access. Use the
-host's working tailnet routing or a Tailscale sidecar/network namespace as
-appropriate. An unauthenticated request to
-`https://<broker>/listAccounts?provider=codex` should reach the broker and return
-401; it must not time out or fail DNS. Do not print a token response to test
-connectivity. See [Tailscale in Docker](https://tailscale.com/docs/features/containers/docker).
-Setup does not edit DNS or restart Docker, Colima or Tailscale. If a DNS fix
-needs a runtime restart, schedule it separately so unrelated containers are not
-interrupted.
+**Setup verifies real container access.** A temporary read-only container mounts
+only the client config and requests `/listAccounts?provider=codex` on the default
+Docker network: no `--dns`, `--add-host`, token refresh or model call. The key is
+never an argument or environment variable, TLS verification stays enabled and
+redirects are refused. A 401 is a failed key check, not success. Zero seeded Codex
+accounts also leaves setup incomplete. Failure exits nonzero; the prepared
+overlay stays on disk so setup can be rerun after fixing the connection.
+
+The check uses the official `python:3.12-slim` image, pulled if missing. To use a
+trusted local workflow image with Python 3, pass `--image <image>`. This checks
+its broker connection, not native Codex installation or every workflow/image.
+An actual Medulla smoke run is still the rollout check for shim/mount behavior.
+Remote Docker endpoints are rejected: run setup on the Docker host, where the
+overlay files live. Docker must already be running.
+
+Older `broker upgrade` versions may only link the source checkout. On first
+container setup, missing runtime dependencies are installed automatically using
+npm or Bun in that checkout, with package lifecycle scripts disabled. Existing
+dependencies are reused; no second upgrade or manual npm command is needed.
+
+If DNS fails on a local Colima profile, setup matches the exact broker hostname
+against `tailscale status --json` and offers its Tailscale IPv4 as one `dnsHosts`
+entry. Other config and mappings are preserved; custom DNS resolver lists are
+not overwritten (they disable `dnsHosts`). Setup shows running containers and
+asks before changing config or restarting Colima. A backup is saved beside
+`colima.yaml`. After the restart, the ordinary container check must pass before
+setup reports ready. Repeat runs with working access do not restart anything.
+
+`--no-ask` or a declined prompt never changes DNS or restarts a service. Docker
+Desktop/other runtimes, unknown hosts and other network failures get a specific
+error; setup does not reconfigure them or change Tailscale itself. Broker server
+processes and host Codex sessions are untouched by a Colima restart. See
+[Tailscale in Docker](https://tailscale.com/docs/features/containers/docker).
 
 ## 5. Manage and upgrade the system daemon
 

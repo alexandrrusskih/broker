@@ -52,12 +52,18 @@ broker setup --container --client-config /path/to/client.json
 ```
 
 This installs the container Codex shim and a private client config in Medulla's
-host overlay. It does not change the host's Codex setup or restart Docker.
+host overlay, then verifies authenticated access from a temporary container on
+the default Docker network. It does not change the host's Codex setup.
 An existing overlay keeps its connection; otherwise the saved host client is
 used. On a managed broker server, a loopback connection is replaced by that
 same server's external URL from `client.json`. Use `--url` to explicitly choose
 a container-reachable endpoint. Container DNS/routing must reach it; ordinary
-`docker run` does not mount Medulla's overlay automatically.
+`docker run` does not mount Medulla's overlay automatically. For a known
+Tailscale hostname that fails DNS on Colima, setup offers a single-host DNS
+mapping and asks before restarting that profile. `--no-ask` never restarts
+anything: an unresolved connection exits nonzero, not "ready". Docker Desktop
+network settings are never edited. The probe uses `python:3.12-slim` (pulled if
+missing); `--image <trusted-image-with-python3>` checks another image instead.
 
 For an unpublished branch use `bash install.sh --from /path/to/checkout`
 (add `--server` for the server), and `broker upgrade --from /path/to/checkout`
@@ -108,7 +114,7 @@ fi
 | Command | What |
 |---|---|
 | `broker setup [--url <url> \| --client-config <file>] [--no-ask]` | Connect a new client without overwriting an existing connection. |
-| `broker setup --container [--client-config <file>] [--url <url>]` | Install the Medulla Docker Codex shim and client config; no host/service changes. |
+| `broker setup --container [--client-config <file>] [--url <url>] [--image <image>] [--no-ask]` | Prepare Medulla's overlay and verify container access; Colima DNS repair/restart requires confirmation. |
 | `broker server install [--url <url>]` | Install/update a macOS system LaunchDaemon. |
 | `broker server status\|restart\|stop` | Manage the system daemon. |
 | `broker upgrade [--all] [--server] [--from <checkout>]` | Update CLI/wrappers, optionally harnesses and/or the managed server. |

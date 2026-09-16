@@ -16,6 +16,7 @@ async function fixture(t, saved = {}) {
   const root = path.join(home, ".medulla", "container");
   return {
     home, calls, root,
+    verifyConnection: async () => ({ accounts: 2, repaired: false }),
     file: path.join(root, "home", ".config", "hltm-broker", "config.json"),
     config: {
       FILE: path.join(home, ".config", "hltm-broker", "config.json"),
@@ -144,7 +145,7 @@ test("setup --container is opt-in and forwards the connection options without ch
       require(name) {
         if (name === "./lib/config") return {};
         if (name === "./lib/container-setup") return {
-          setupContainer: async (options) => { calls.push(["container", options]); return { file: "/test/config", wrapper: "/test/wrapper", url: options.url }; }
+          setupContainer: async (options) => { calls.push(["container", options]); return { file: "/test/config", wrapper: "/test/wrapper", url: options.url, network: { accounts: 2 } }; }
         };
         if (name === "./lib/setup") return {
           setup: async (options) => { calls.push(["client", options]); return { configured: true }; }
@@ -158,5 +159,6 @@ test("setup --container is opt-in and forwards the connection options without ch
     assert.equal(calls[0][0], container ? "container" : "client");
     assert.equal(calls[0][1].clientConfig, "/test/client.json");
     assert.equal(calls[0][1].url, "https://broker.test");
+    assert.equal(calls[0][1].noAsk, true);
   }
 });

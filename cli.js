@@ -40,9 +40,9 @@ run, or it picks the one with the most rate-limit headroom.
 Usage:
   broker setup [--url <url> | --client-config <file>] [--no-ask]
                          Configure a new client; existing saved connections are left untouched.
-  broker setup --container [--client-config <file>] [--url <reachable-url>]
+  broker setup --container [--client-config <file>] [--url <reachable-url>] [--image <image>] [--no-ask]
                          Configure Medulla Docker's Codex shim + client connection.
-                         Reuses the container/host client; no host shim or daemon changes.
+                         Checks real container access; offers Colima DNS repair with restart approval.
   broker server install [--url <url>] [--data-dir <dir>] [--port 8787] [--no-ask]
   broker server status|restart|stop
                          Install/manage a macOS SYSTEM LaunchDaemon; no GUI session required.
@@ -118,12 +118,13 @@ async function main() {
     case "setup": {
       if (flags.container === true) {
         const out = await require("./lib/container-setup").setupContainer({
-          url: flags.url, clientConfig: flags["client-config"]
+          url: flags.url, clientConfig: flags["client-config"], image: flags.image, noAsk: flags["no-ask"] === true
         });
         console.log(`Medulla container Codex overlay ready: ${out.wrapper}`);
         console.log(`Client config: ${out.file}\nBroker URL: ${out.url}`);
+        console.log(`Container connection verified: ${out.network.accounts} Codex account(s); authenticated broker response on the default network.`);
         console.log("New Medulla containers use this setup. Recreate already-running containers to pick it up.");
-        console.log("Host Codex, server accounts, Docker/Tailscale DNS and services were not changed.");
+        console.log("Host Codex and broker server/accounts were not changed.");
         break;
       }
       const out = await require("./lib/setup").setup({

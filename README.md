@@ -195,11 +195,26 @@ what a server should see:
   "work": {
     "rw": ["~/Projects/example"],
     "mcp": {
-      "codebase-memory": { "env": { "CBM_ALLOWED_ROOT": "~/Projects/example" } }
+      "codebase-memory": {
+        "env": {
+          "CBM_ALLOWED_ROOT": "~/Projects/example",
+          "CBM_CACHE_DIR": "~/.cache/skk-cbm/example"
+        }
+      }
     }
   }
 }
 ```
+
+Any variable the server reads can go in there, `~` included. A value that is an
+existing path is resolved through symlinks first — writing `~/Projects/foo` where
+that is a link would otherwise key a code-memory database under a second name and
+reindex the project from scratch. Values that are not paths are left alone.
+
+The cache usually needs no box of its own: the server keys a database per
+project already, so one store holds them all, and it lives on the host — the box
+never touches those files. Split it only if you want the projects' databases in
+separate directories.
 
 `CBM_ALLOWED_ROOT` defaults to the box's first `rw` path even without that — as
 the **physical** path, because that server keys its per-project database off the

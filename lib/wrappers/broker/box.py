@@ -161,7 +161,14 @@ def _bridge_env(name, server, profile, projects):
     env.update(server.get("env") or {})
     override = ((profile.get("mcp") or {}).get(name) or {}).get("env") or {}
     for key, value in override.items():
-        env[key] = os.path.expanduser(str(value))
+        value = os.path.expanduser(str(value))
+        # A value that IS a path becomes the physical one. Writing
+        # ~/Projects/foo where that is a symlink would otherwise key a
+        # code-memory database under a second name and reindex from scratch —
+        # a trap you would have to remember every time you edited the file.
+        if value.startswith("/") and os.path.exists(value):
+            value = os.path.realpath(value)
+        env[key] = value
     # The physical path, not the one you typed: this server keys its per-project
     # database off the path it is given, so the symlinked spelling would start a
     # second database and reindex the whole project from scratch.

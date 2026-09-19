@@ -137,6 +137,37 @@ print(json.dumps([
   assert.deepEqual(JSON.parse(env), [project, "/explicit"]);
 });
 
+test("an explicit path in a box resolves symlinks too, so it cannot key a second database", async (t) => {
+  const dir = await temp(t);
+  const physical = path.join(dir, "elsewhere", "project");
+  const link = path.join(dir, "Projects", "project");
+  await fs.mkdir(physical, { recursive: true });
+  await fs.mkdir(path.dirname(link), { recursive: true });
+  await fs.symlink(physical, link);
+  await fs.writeFile(path.join(dir, ".claude.json"), JSON.stringify({
+    mcpServers: { probe: { command: "/opt/tool/mcp", env: { CBM_ALLOWED_ROOT: "/everything" } } }
+  }));
+
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
+servers = box.mcp_servers(claude)
+profile = {"mcp": {"probe": {"env": {
+    "CBM_ALLOWED_ROOT": "${link}",
+    "CBM_CACHE_DIR": "${dir}/cache/not-created-yet",
+    "CBM_LABEL": "just a string"}}}}
+env = box._bridge_env("probe", servers["probe"], profile, [])
+print(json.dumps([env["CBM_ALLOWED_ROOT"], env["CBM_CACHE_DIR"], env["CBM_LABEL"]]))
+`, { HOME: dir });
+
+  const [root, cache, label] = JSON.parse(out);
+  assert.equal(root, physical, "writing the symlinked spelling by hand must not start a second database");
+  assert.equal(cache, path.join(dir, "cache", "not-created-yet"), "a path that does not exist yet is left as written");
+  assert.equal(label, "just a string", "values that are not paths are untouched");
+});
+
 test("a symlinked project comes in under both names, and keeps its existing index", async (t) => {
   const dir = await temp(t);
   const physical = path.join(dir, "elsewhere", "project");

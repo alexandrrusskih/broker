@@ -32,6 +32,7 @@ AUTH_NAME = "auth.json"
 # credentials this run uses live.
 BOX_HOME = ("~/.codex",)
 BOX_SECRETS = ("~/.codex/auth.json",)
+MCP_CONFIG = ("~/.codex/config.toml", "toml", "mcp_servers")
 
 REAL_BINS = (
     os.path.expanduser("~/.codex/packages/standalone/current/bin/codex"),

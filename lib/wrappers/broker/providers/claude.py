@@ -39,6 +39,9 @@ BOX_HOME = ("~/.claude", "~/.claude.json")
 # ...except the credentials file: the token arrives in the environment from the
 # broker, and a copy on disk inside the box is a copy that can leave it.
 BOX_SECRETS = ("~/.claude/.credentials.json",)
+# Where this harness declares its MCP servers, so a box can reach the ones that
+# only exist on this machine (see mcpbridge.py).
+MCP_CONFIG = ("~/.claude.json", "json", "mcpServers")
 
 # An API key in the environment outranks the OAuth token, so a stray one would
 # quietly bill the wrong thing while looking like it worked.

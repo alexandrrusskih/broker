@@ -169,6 +169,41 @@ that can leave it.
 Everything after a bare `--` reaches the harness untouched, so a prompt that
 mentions `--box` is a prompt.
 
+### MCP inside a box
+
+MCP servers keep working, including the ones that could never run in a container:
+`ntk` and `codebase-memory` are macOS binaries, and the image has nothing to run
+them with. So the server stays on the host and only its stdio crosses the
+boundary — a listener on loopback here, a stand-in mounted **at the server's own
+command path** there. The harness's config is not rewritten: it already points
+at that path.
+
+Servers reached over http need none of this and are left alone.
+
+A loopback port is reachable by every process on the machine, so the first line
+a client sends is a secret generated per listener and readable only by you
+(`~/.config/broker/box/`). A connection that does not match is closed before any
+server is spawned.
+
+Since the server runs on the host, it answers with the host's view of the world —
+which is usually right (agentbus keeps your identity on the bus) and sometimes
+not (a code-memory server would answer about the whole machine). So a box can say
+what a server should see:
+
+```jsonc
+{
+  "work": {
+    "rw": ["~/Projects/example"],
+    "mcp": {
+      "codebase-memory": { "env": { "CBM_ALLOWED_ROOT": "~/Projects/example" } }
+    }
+  }
+}
+```
+
+`CBM_ALLOWED_ROOT` defaults to the box's first `rw` path even without that. Set
+`"mcp": false` to bridge nothing.
+
 ## Accounts
 
 Tokens are isolated per account in the broker, and every command takes

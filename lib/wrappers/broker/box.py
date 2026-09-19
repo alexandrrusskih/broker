@@ -21,12 +21,16 @@ Two things make the difference between "it runs" and "it is usable":
 
 import json
 import os
-import re
 import shutil
+import subprocess
 import sys
+import time
 
 from . import config
 from .out import die, warn
+
+# Inside a container "localhost" is the container. This is the host.
+HOST_GATEWAY = "host.docker.internal"
 
 FLAG = "--box"
 PATH = os.path.join(config.CONFIG_DIR, "boxes.json")
@@ -106,6 +110,147 @@ def take_flag(argv):
         rest.append(arg)
         i += 1
     return name, rest
+
+
+def mcp_servers(provider):
+    """The MCP servers this harness declares that a box would otherwise lose.
+
+    Only the ones started as a COMMAND: a server reached over http needs nothing
+    from us, it is already reachable from inside the box.
+    """
+    spec = getattr(provider, "MCP_CONFIG", None)
+    if not spec:
+        return {}
+    path, kind, key = spec
+    path = os.path.expanduser(path)
+    try:
+        if kind == "toml":
+            import tomllib
+
+            with open(path, "rb") as fh:
+                data = tomllib.load(fh)
+        else:
+            with open(path) as fh:
+                data = json.load(fh)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        warn("could not read %s for MCP servers: %s" % (path, exc))
+        return {}
+    found = {}
+    for name, server in (data.get(key) or {}).items():
+        command = server.get("command")
+        if not command:
+            continue  # http/sse: the box reaches it over the network
+        found[name] = {
+            "command": [command] + list(server.get("args") or []),
+            "env": dict(server.get("env") or {}),
+        }
+    return found
+
+
+def _bridge_env(name, server, profile, projects):
+    """The environment the host-side server runs with, for THIS box.
+
+    A server that answers questions about code must answer about the code this
+    box is for. So what the box says wins, and where it says nothing the box's
+    own project is the default — a root still pointing at the whole machine
+    would let one box ask about code it cannot even see.
+    """
+    env = dict(os.environ)
+    env.update(server.get("env") or {})
+    override = ((profile.get("mcp") or {}).get(name) or {}).get("env") or {}
+    for key, value in override.items():
+        env[key] = os.path.expanduser(str(value))
+    if projects and "CBM_ALLOWED_ROOT" in env and "CBM_ALLOWED_ROOT" not in override:
+        env["CBM_ALLOWED_ROOT"] = projects[0]
+    return env
+
+
+def _start_bridge(name, server, profile, projects):
+    """Make sure a listener for this server is up, and say how to reach it."""
+    from . import mcpbridge
+
+    live = mcpbridge.running(name)
+    if live and live.get("command") == server["command"]:
+        return live
+    try:
+        subprocess.Popen(
+            [sys.executable, "-m", "broker.mcpbridge", "serve", name, "--"] + server["command"],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env=_bridge_env(name, server, profile, projects),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,  # it outlives this process: the box is its client
+        )
+    except OSError as exc:
+        warn("could not bridge the %s MCP server: %s" % (name, exc))
+        return None
+    for _ in range(50):
+        live = mcpbridge.running(name)
+        if live:
+            return live
+        time.sleep(0.1)
+    warn("the %s MCP bridge did not come up — it will be missing inside the box" % name)
+    return None
+
+
+# The shim carries its own client, so the image has to know nothing about any of
+# this — it only needs python3, which a harness image has anyway.
+SHIM_TEMPLATE = "\n".join([
+    "#!/usr/bin/env python3",
+    "# Written by the broker: %(name)s runs on the host; this is the wire to it.",
+    "import socket, sys, threading",
+    "HOST, PORT, TOKEN = %(host)r, %(port)d, %(token)r",
+    "",
+    "",
+    "def pump(src, dst, done=None):",
+    "    try:",
+    "        while True:",
+    "            if hasattr(src, 'recv'):",
+    "                chunk = src.recv(65536)",
+    "            else:",
+    "                # read1: read() would block for a full buffer and deadlock",
+    "                chunk = src.read1(65536) if hasattr(src, 'read1') else src.read(65536)",
+    "            if not chunk:",
+    "                break",
+    "            if hasattr(dst, 'sendall'):",
+    "                dst.sendall(chunk)",
+    "            else:",
+    "                dst.write(chunk)",
+    "                dst.flush()",
+    "    except (OSError, ValueError):",
+    "        pass",
+    "    finally:",
+    "        if done:",
+    "            try:",
+    "                done()",
+    "            except OSError:",
+    "                pass",
+    "",
+    "",
+    "with socket.create_connection((HOST, PORT)) as conn:",
+    "    conn.sendall(TOKEN.encode() + b'\\n')",
+    "    out = threading.Thread(target=pump, args=(conn, sys.stdout.buffer), daemon=True)",
+    "    out.start()",
+    "    pump(sys.stdin.buffer, conn, lambda: conn.shutdown(socket.SHUT_WR))",
+    "    out.join(timeout=5)",
+    "",
+])
+
+
+def _write_shim(provider, name, live):
+    """A stand-in for the server's command, to be mounted at its own path."""
+    directory = os.path.join(config.CONFIG_DIR, "box", "shims", provider.NAME)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    path = os.path.join(directory, name.replace("/", "_"))
+    body = SHIM_TEMPLATE % {"name": name, "host": HOST_GATEWAY,
+                            "port": live["port"], "token": live["token"]}
+    tmp = path + ".new"
+    with open(tmp, "w") as fh:
+        fh.write(body)
+    os.chmod(tmp, 0o700)  # it carries the connection secret
+    os.replace(tmp, path)
+    return path
 
 
 def _paths(profile, key):
@@ -203,6 +348,31 @@ def command(provider, name, profile, argv, env):
     for key in carried:
         if env.get(key):
             cmd += ["-e", "%s=%s" % (key, env[key])]
+
+    # MCP servers that exist only on this machine. Half of them cannot come
+    # along at all — ntk and codebase-memory are macOS binaries — so the server
+    # stays on the host and only its stdio is carried across. The shim is
+    # mounted AT THE COMMAND'S OWN PATH, which means the harness's own config
+    # needs no rewriting: it already points there. Servers reached over http are
+    # left alone; the box can dial them itself.
+    if profile.get("mcp") is not False:
+        claimed = {}
+        for name, server in sorted(mcp_servers(provider).items()):
+            target = server["command"][0]
+            if target in claimed:
+                warn("%s and %s start from the same command (%s) — only the first is bridged"
+                     % (claimed[target], name, target))
+                continue
+            live = _start_bridge(name, server, profile, projects)
+            if not live:
+                continue
+            claimed[target] = name
+            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly"
+                    % (_write_shim(provider, name, live), target)]
+        if claimed:
+            # Docker Desktop resolves this name already; Colima and plain Linux
+            # need to be told, and saying it twice costs nothing.
+            cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
 
     cmd.append(image)
     cmd.append(provider.BIN)

@@ -9,7 +9,9 @@ const root = path.join(__dirname, "..");
 async function temp(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "broker-box-test-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  return dir;
+  // realpath: on macOS the temp directory sits under /var, which is itself a
+  // symlink to /private/var — and the code under test resolves symlinks.
+  return fs.realpath(dir);
 }
 
 // The engine builds the command line; running python is how we see it.

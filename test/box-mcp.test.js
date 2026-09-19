@@ -10,7 +10,9 @@ const root = path.join(__dirname, "..");
 async function temp(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "broker-mcp-test-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  return dir;
+  // realpath: on macOS the temp directory sits under /var, which is itself a
+  // symlink to /private/var — and the code under test resolves symlinks.
+  return fs.realpath(dir);
 }
 
 function engine(code, env = {}) {
@@ -133,4 +135,40 @@ print(json.dumps([
 ]))
 `, { HOME: dir });
   assert.deepEqual(JSON.parse(env), [project, "/explicit"]);
+});
+
+test("a symlinked project comes in under both names, and keeps its existing index", async (t) => {
+  const dir = await temp(t);
+  const physical = path.join(dir, "elsewhere", "project");
+  const link = path.join(dir, "Projects", "project");
+  await fs.mkdir(physical, { recursive: true });
+  await fs.mkdir(path.dirname(link), { recursive: true });
+  await fs.symlink(physical, link);
+  await fs.writeFile(path.join(dir, ".claude.json"), JSON.stringify({
+    mcpServers: { probe: { command: "/opt/tool/mcp", env: { CBM_ALLOWED_ROOT: "/everything" } } }
+  }));
+
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
+box._start_bridge = lambda *a: None
+cmd = box.command(claude, "demo", {"rw": ["${link}"]}, [], {})
+servers = box.mcp_servers(claude)
+print(json.dumps({
+  "cmd": cmd,
+  "root": box._bridge_env("probe", servers["probe"], {}, ["${link}"])["CBM_ALLOWED_ROOT"],
+}))
+`, { HOME: dir });
+  const { cmd, root } = JSON.parse(out);
+  const line = cmd.join(" ");
+
+  // A host-side server resolves symlinks and answers with the physical path.
+  // Without the second mount the harness inside cannot open a single file it names.
+  assert.ok(line.includes(`source=${link},target=${link}`), "the name you typed");
+  assert.ok(line.includes(`source=${physical},target=${physical}`), "and the path it really is");
+  // The database is keyed by the path given, so the symlinked spelling would
+  // start a second one and reindex the project from scratch.
+  assert.equal(root, physical);
 });

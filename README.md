@@ -201,8 +201,15 @@ what a server should see:
 }
 ```
 
-`CBM_ALLOWED_ROOT` defaults to the box's first `rw` path even without that. Set
-`"mcp": false` to bridge nothing.
+`CBM_ALLOWED_ROOT` defaults to the box's first `rw` path even without that — as
+the **physical** path, because that server keys its per-project database off the
+path it is given, and the symlinked spelling would start a second database and
+reindex the project from scratch. Set `"mcp": false` to bridge nothing.
+
+For the same reason a project that is a symlink (`~/Projects/foo` →
+`/Volumes/.../foo`) is mounted under **both** names. A server running on the host
+resolves symlinks and answers with the physical path; without the second mount
+the harness inside the box could not open a single file it named.
 
 ## Accounts
 

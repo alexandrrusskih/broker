@@ -162,8 +162,11 @@ def _bridge_env(name, server, profile, projects):
     override = ((profile.get("mcp") or {}).get(name) or {}).get("env") or {}
     for key, value in override.items():
         env[key] = os.path.expanduser(str(value))
+    # The physical path, not the one you typed: this server keys its per-project
+    # database off the path it is given, so the symlinked spelling would start a
+    # second database and reindex the whole project from scratch.
     if projects and "CBM_ALLOWED_ROOT" in env and "CBM_ALLOWED_ROOT" not in override:
-        env["CBM_ALLOWED_ROOT"] = projects[0]
+        env["CBM_ALLOWED_ROOT"] = os.path.realpath(projects[0])
     return env
 
 
@@ -259,7 +262,20 @@ def _paths(profile, key):
 
 
 def _mount(host, mode="rw"):
-    return ["--mount", "type=bind,source=%s,target=%s%s" % (host, host, ",readonly" if mode == "ro" else "")]
+    """Mount a path at its own path — and at its physical one too, if they differ.
+
+    ~/Projects/foo is often a symlink to /Volumes/.../foo. Inside the box only
+    the name you gave would exist, and that breaks things that resolve symlinks
+    on the host: a bridged MCP server answers with /Volumes/... paths, and the
+    harness inside cannot open a single one of them. Mounting both costs one
+    more bind of the same source.
+    """
+    flag = ",readonly" if mode == "ro" else ""
+    args = ["--mount", "type=bind,source=%s,target=%s%s" % (host, host, flag)]
+    physical = os.path.realpath(host)
+    if physical != host:
+        args += ["--mount", "type=bind,source=%s,target=%s%s" % (physical, physical, flag)]
+    return args
 
 
 def _empty_file():

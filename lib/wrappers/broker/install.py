@@ -289,6 +289,27 @@ def install_global(pkg):
     return False
 
 
+def _drop_update_leftovers(target):
+    """Remove the copy a harness's own updater leaves behind.
+
+    agy replaces itself by renaming the running program to `<name>.<stamp>.old`
+    and writing the new one in its place. It never comes back for it, and since
+    the shim moved that program into the broker's own directory, the leftovers
+    pile up there — 175 MB each. Only files the updater itself could have named
+    are touched: same directory, same base name, a numeric stamp, `.old`.
+    """
+    directory, name = os.path.split(target)
+    pattern = re.compile(r"^%s\.\d+\.old$" % re.escape(name))
+    for entry in os.listdir(directory) if os.path.isdir(directory) else []:
+        if not pattern.match(entry):
+            continue
+        try:
+            os.remove(os.path.join(directory, entry))
+            warn("removed %s left by the updater" % entry)
+        except OSError:
+            pass  # not ours to remove, or already gone
+
+
 def cmd_upgrade(cfg, provider, args):
     """Update the chain: broker CLI (from git) -> this wrapper -> the harness.
 
@@ -332,6 +353,7 @@ def cmd_upgrade(cfg, provider, args):
     target = real_bin(provider)
     if target:
         failed += 1 if run([target, "update"]) else 0
+        _drop_update_leftovers(target)
     else:
         warn("cannot find the real %s — skipping its update" % provider.BIN)
 

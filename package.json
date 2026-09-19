@@ -15,6 +15,7 @@
     "!lib/**/*.pyc",
     "functions/",
     "launchd/",
+    "box/",
     "docs/self-hosted.md",
     "firebase.json",
     "firestore.rules",

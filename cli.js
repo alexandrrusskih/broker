@@ -76,6 +76,10 @@ Usage:
                          Set the default account every command and wrapper uses.
   broker config [--url <url>] [--key <key>] [--account <name>]
                          Show or set local config (~/.config/broker/config.json).
+  broker box build [--claude <v>] [--codex <v>] [--no-cache]
+  broker box list        Build the container image a --box runs in, or show what exists.
+                         Then: claude --box <name> — the harness runs in a container
+                         with only the directories that box names, at the same paths.
   broker upgrade [--all] [--server] [--from <checkout>]
                          Update CLI/wrappers; --all also updates harnesses.
                          --server additionally updates/restarts an installed server.
@@ -479,6 +483,36 @@ async function main() {
       if (flags.server) {
         // Use the new source, not modules already loaded by this old CLI.
         execFileSync(process.execPath, [pathMod.join(pkg, "cli.js"), "server", "install", "--no-ask", "--from", pkg], { stdio: "inherit" });
+      }
+      break;
+    }
+    case "box": {
+      const boxes = require("./lib/box");
+      const action = positional[0] || "list";
+      if (action === "build") {
+        const out = boxes.build({
+          image: flags.image, claude: flags.claude, codex: flags.codex,
+          noCache: flags["no-cache"] === true, runtime: flags.runtime
+        });
+        console.log(`Image ready: ${out.image}`);
+        if (boxes.seedProfiles()) console.log(`Wrote an example box file: ${boxes.PROFILES}`);
+        console.log(`Define boxes in ${boxes.PROFILES}, then: claude --box <name>`);
+      } else if (action === "list" || action === "ls") {
+        const out = boxes.list();
+        console.log(`file    ${out.file}`);
+        console.log(`image   ${out.image ? `${boxes.IMAGE} (built)` : `${boxes.IMAGE} — not built, run 'broker box build'`}`);
+        if (!out.runtime) console.log("docker  not reachable — start Docker Desktop");
+        if (!out.boxes) {
+          console.log("\nNo boxes defined yet. 'broker box build' writes an example file.");
+          break;
+        }
+        for (const [name, box] of Object.entries(out.boxes)) {
+          const rw = (box.rw || []).join(", ") || "—";
+          const ro = (box.ro || []).length ? `  ro: ${box.ro.join(", ")}` : "";
+          console.log(`\n${name}\n  rw: ${rw}${ro ? "\n" + ro : ""}`);
+        }
+      } else {
+        throw new Error(`unknown box command '${action}' — use 'build' or 'list'`);
       }
       break;
     }

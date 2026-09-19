@@ -127,22 +127,63 @@ fi
 | `broker set-default <account>` | Set the default account for commands and wrappers. |
 | `broker config [--url <url>] [--key <key>]` | Show/set local config. |
 
+## `--box`: give the harness everything, inside a container
+
+The point is not sandboxing for its own sake. It is being able to say yes to
+every permission a harness asks for — write files, run commands, install things —
+while the blast radius stays the directories you named.
+
+```sh
+broker box build                 # the image: the harnesses and the tools they use
+claude --box work                # interactive, with only what 'work' lists
+claude --box work --resume abc   # past sessions are still there
+codex --box work exec "..."      # same box, other harness
+```
+
+Boxes live in `~/.config/broker/boxes.json`, which is yours to edit and is never
+rewritten by the broker (comments are fine):
+
+```jsonc
+{
+  "work": {
+    "rw": ["~/Projects/example"],
+    "ro": ["~/Projects/reference"]
+  }
+}
+```
+
+Two decisions are worth knowing about:
+
+**Paths match the host exactly.** `~/Projects/example` is mounted at
+`~/Projects/example`, and `$HOME` is your `$HOME`. Harnesses key session history
+off the absolute path of the working directory, so a project remapped to
+`/workspace` would lose every past session and every `--resume`.
+
+**The harness's own directory comes along, whole.** `~/.claude` for claude,
+`~/.codex` for codex: settings, MCP servers, agents, commands, history. Listing
+parts of it would silently drop whatever the next release adds. The one exception
+is the credentials file, which is covered by an empty one — the token arrives
+from the broker in the environment, and a copy on disk inside the box is a copy
+that can leave it.
+
+Everything after a bare `--` reaches the harness untouched, so a prompt that
+mentions `--box` is a prompt.
+
 ## Accounts
 
 Tokens are isolated per account in the broker, and every command takes
 `--account <name>`.
 
-`broker-cl` (claude) resolves its account at run time: `$CLAUDE_ACCOUNT`, then
-`$BROKER_ACCOUNT`, then an account pinned at install time, then the default from
-`broker set-default`. It is a plain shell wrapper — two accounts share one auth
-file — so give each its own profile through claude's own config-dir variable:
+The account is resolved per run: `$CODEX_ACCOUNT` / `$CLAUDE_ACCOUNT` /
+`$AGY_ACCOUNT`, then `$BROKER_ACCOUNT`, then the default from
+`broker set-default` — and with none of those set, the wrapper picks whichever
+account has the most headroom left.
 
-```sh
-alias clcorp='CLAUDE_CONFIG_DIR=$HOME/.claude-corp CLAUDE_ACCOUNT=corp broker-cl'
-```
-
-`broker-cx` (codex) and `broker-agy` (agy) do none of that — they pick an account
-per run and give each one its own profile. See below.
+claude needs no profile: it takes its token from the environment, so `~/.claude`
+stays one directory for every account — MCP servers, projects and history are
+shared without a single symlink. codex and agy read a credentials *file*, so each
+of their accounts gets its own profile directory (`~/.codex-<account>`,
+`~/.agy-<account>`) and parallel runs never share one auth file.
 
 ## broker-cx: pick the account with room left
 

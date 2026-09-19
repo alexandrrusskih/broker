@@ -30,6 +30,16 @@ PATH_SHIELD = False
 CREDENTIALS = "env"
 ENV_NAME = "CLAUDE_CODE_OAUTH_TOKEN"
 
+# What comes into a --box with this harness. The directory travels WHOLE:
+# settings, MCP servers, agents, commands, plugins, projects and history. Picking
+# parts of it would silently drop whatever the next release adds — and the
+# session history is keyed by the project's absolute path, which the box
+# preserves, so `--resume` inside the box finds the same sessions.
+BOX_HOME = ("~/.claude", "~/.claude.json")
+# ...except the credentials file: the token arrives in the environment from the
+# broker, and a copy on disk inside the box is a copy that can leave it.
+BOX_SECRETS = ("~/.claude/.credentials.json",)
+
 # An API key in the environment outranks the OAuth token, so a stray one would
 # quietly bill the wrong thing while looking like it worked.
 CLEAR_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")

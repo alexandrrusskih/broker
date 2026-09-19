@@ -100,7 +100,7 @@ def _path_without_shim(provider, target):
     return shim_free + os.pathsep + (os.environ.get("PATH") or "")
 
 
-def exec_harness(cfg, provider, account, auth, argv, extra_env=None):
+def exec_harness(cfg, provider, account, auth, argv, extra_env=None, in_box=None):
     """Install the credentials for this account and become the harness."""
     # Two ways a harness takes credentials. codex and agy read a file, so the
     # account gets a profile directory. claude reads an environment variable, so
@@ -132,6 +132,14 @@ def exec_harness(cfg, provider, account, auth, argv, extra_env=None):
     for key, value in (extra_env or {}).items():
         os.environ[key] = value
     os.environ[ACTIVE_ENV] = "%s:%s" % (provider.NAME, account)
+
+    # In a box the harness is the one inside the image, not the one on this
+    # machine — a macOS binary would not run there anyway. Everything above
+    # still had to happen: the account is picked and its credentials resolved
+    # here, on the host, and handed in.
+    if in_box:
+        from . import box
+        box.exec_box(provider, in_box, argv, os.environ)
 
     target = real_bin(provider)
     if not target:

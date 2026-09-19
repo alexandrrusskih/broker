@@ -27,6 +27,12 @@ AUTH_NAME = "auth.json"
 # under a shim that loops forever. So the vendored platform binary is preferred
 # over the launcher: it is the actual program, and starting it directly skips
 # both the Node process and the loop.
+# What comes into a --box with this harness: its settings and history. The
+# per-account profile is mounted separately (see box.py) — that is where the
+# credentials this run uses live.
+BOX_HOME = ("~/.codex",)
+BOX_SECRETS = ("~/.codex/auth.json",)
+
 REAL_BINS = (
     os.path.expanduser("~/.codex/packages/standalone/current/bin/codex"),
     "/usr/local/lib/node_modules/@openai/codex/bin/codex.js",

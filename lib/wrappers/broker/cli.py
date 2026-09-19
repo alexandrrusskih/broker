@@ -17,7 +17,7 @@ import importlib
 import os
 import sys
 
-from . import api, config, out, run, select
+from . import api, box, config, out, run, select
 
 COMMANDS = {
     "list": ("commands", "cmd_list"),
@@ -62,6 +62,10 @@ def main(provider_name, argv=None):
     provider = load_provider(provider_name)
     out.set_prefix(provider.CMD)
     argv = list(sys.argv[1:] if argv is None else argv)
+
+    # `--box <name>` is ours, and it is taken out before the harness sees
+    # anything. Everything after a bare `--` is left alone.
+    in_box, argv = box.take_flag(argv)
 
     # `login`/`logout`/`update` are about the installation, not about running
     # work: they must reach the harness untouched, without picking an account.
@@ -126,5 +130,5 @@ def main(provider_name, argv=None):
     if any(a == "--model" or a.startswith("--model=") for a in argv):
         startup_env.pop("ANTHROPIC_MODEL", None)
         startup_argv = [a for a in startup_argv if not a.startswith("--model")]
-    run.exec_harness(cfg, provider, account, auth, startup_argv + argv, startup_env)
+    run.exec_harness(cfg, provider, account, auth, startup_argv + argv, startup_env, in_box)
     return 0

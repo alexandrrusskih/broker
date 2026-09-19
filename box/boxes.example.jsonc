@@ -1,0 +1,39 @@
+// Boxes: what `claude --box <name>` may touch. Copy to ~/.config/broker/boxes.json
+// and edit — the broker only ever reads this file, it never rewrites it.
+{
+  // Each path is mounted at the SAME path inside the container, so session
+  // history and --resume keep working. A symlinked path comes in under both
+  // its own name and the physical one.
+  "app": {
+    "rw": ["~/Projects/app"],
+    "ro": ["~/Projects/shared-lib"]
+  },
+
+  // The harness's own directory (~/.claude, ~/.codex) comes along by itself:
+  // settings, MCP servers, agents, commands, history. Do not list it here.
+  //
+  // MCP servers that only exist on this machine are bridged to the host, so
+  // they keep working inside. Since they run on the host, they answer with the
+  // host's view of the world — which a box can correct:
+  "service": {
+    "rw": ["~/Projects/service"],
+    "env": { "NODE_ENV": "development" },
+    "mcp": {
+      // A code-memory server would otherwise answer about whatever root its
+      // global config names. Paths are resolved through symlinks, so this keys
+      // the database that already exists rather than starting a second one.
+      "codebase-memory": {
+        "env": {
+          "CBM_ALLOWED_ROOT": "~/Projects/service",
+          "CBM_CACHE_DIR": "~/.cache/codebase-memory/service"
+        }
+      }
+    }
+  },
+
+  // "mcp": false bridges nothing at all.
+  "scratch": {
+    "rw": ["~/Scratch"],
+    "mcp": false
+  }
+}

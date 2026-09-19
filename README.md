@@ -185,6 +185,15 @@ a client sends is a secret generated per listener and readable only by you
 (`~/.config/broker/box/`). A connection that does not match is closed before any
 server is spawned.
 
+A bridged server also inherits the environment of whatever raised it, and then
+outlives that shell. agentbus is the clear case: it takes its bus identity and
+workspace from the Herdr pane it was started in (`ws_slug` comes from the Herdr
+workspace, nothing else), so a listener raised in one pane and reused from
+another would post to the bus as the wrong agent. A listener therefore belongs
+to the identity that raised it; a different pane or workspace gets its own. Add
+`"identity_env": ["SOME_VAR"]` under a server in a box if it keys on something
+else.
+
 Since the server runs on the host, it answers with the host's view of the world —
 which is usually right (agentbus keeps your identity on the bus) and sometimes
 not (a code-memory server would answer about the whole machine). So a box can say

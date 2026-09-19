@@ -32,6 +32,12 @@ from .out import die, warn
 # Inside a container "localhost" is the container. This is the host.
 HOST_GATEWAY = "host.docker.internal"
 
+# What every box gets regardless of harness, read-only. Without a gitconfig the
+# tools inside behave subtly differently from the same tools outside: git reads
+# history fine, then refuses to commit for want of a user.email — and the
+# harness discovers that halfway through a task.
+COMMON_RO = ("~/.gitconfig",)
+
 FLAG = "--box"
 PATH = os.path.join(config.CONFIG_DIR, "boxes.json")
 
@@ -181,7 +187,10 @@ def _start_bridge(name, server, profile, projects):
     """Make sure a listener for this server is up, and say how to reach it."""
     from . import mcpbridge
 
-    live = mcpbridge.running(name)
+    # Same server, same caller identity — anything else gets its own listener.
+    key = mcpbridge.identity_key(
+        extra=((profile.get("mcp") or {}).get(name) or {}).get("identity_env") or ())
+    live = mcpbridge.running(name, key)
     if live and live.get("command") == server["command"]:
         return live
     try:
@@ -196,7 +205,7 @@ def _start_bridge(name, server, profile, projects):
         warn("could not bridge the %s MCP server: %s" % (name, exc))
         return None
     for _ in range(50):
-        live = mcpbridge.running(name)
+        live = mcpbridge.running(name, key)
         if live:
             return live
         time.sleep(0.1)
@@ -321,6 +330,11 @@ def command(provider, name, profile, argv, env):
     cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700" % (home, os.getuid(), os.getgid())]
 
     mounted = []
+    for entry in COMMON_RO:
+        host = os.path.expanduser(entry)
+        if os.path.exists(host):
+            cmd += _mount(host, "ro")
+
     # The harness's own directory: settings, MCP servers, agents, history.
     for entry in getattr(provider, "BOX_HOME", ()):
         host = os.path.expanduser(entry)

@@ -43,10 +43,13 @@ print(json.dumps(box.mcp_servers(claude)))
 
 test("the bridge carries stdio both ways and refuses a connection without the secret", async (t) => {
   const dir = await temp(t);
-  const env = { HOME: dir, PYTHONDONTWRITEBYTECODE: "1" };
+  // No Herdr variables: the listener is then keyed by nothing and lands on the
+  // plain name. Identity keying has a test of its own.
+  const env = { ...process.env, HOME: dir, PYTHONDONTWRITEBYTECODE: "1" };
+  for (const name of Object.keys(env)) if (name.startsWith("HERDR_")) delete env[name];
   // `cat` stands in for an MCP server: whatever goes in comes back out.
   const bridge = spawn("python3", ["-m", "broker.mcpbridge", "serve", "probe", "--", "cat"],
-    { cwd: path.join(root, "lib", "wrappers"), env: { ...process.env, ...env }, stdio: "ignore" });
+    { cwd: path.join(root, "lib", "wrappers"), env, stdio: "ignore" });
   t.after(() => bridge.kill());
 
   const statePath = path.join(dir, ".config", "broker", "box", "mcp", "probe.json");
@@ -73,6 +76,29 @@ test("the bridge carries stdio both ways and refuses a connection without the se
   // what stands between them and a spawned server.
   assert.equal(await talk("wrong-secret", "hello"), "", "no secret, no server, no answer");
   assert.equal(await talk(state.token, "still alive"), "still alive", "a refused client does not take the bridge down");
+});
+
+test("a bridge belongs to the identity that raised it", async (t) => {
+  const dir = await temp(t);
+  await fs.writeFile(path.join(dir, ".claude.json"), JSON.stringify({
+    mcpServers: { probe: { command: "/opt/tool/mcp" } }
+  }));
+  // agentbus takes its bus identity from the Herdr pane it was started in, and
+  // a listener outlives the shell that raised it. Reusing one across panes would
+  // post to the bus as the wrong agent, in the wrong workspace.
+  const key = (env) => engine(`
+from broker import mcpbridge
+print(mcpbridge.identity_key(${JSON.stringify(env)}))
+`, { HOME: dir }).trim();
+
+  const here = key({ HERDR_PANE_ID: "pane-1", HERDR_WORKSPACE_ID: "misc" });
+  const otherPane = key({ HERDR_PANE_ID: "pane-2", HERDR_WORKSPACE_ID: "misc" });
+  const otherWs = key({ HERDR_PANE_ID: "pane-1", HERDR_WORKSPACE_ID: "finik" });
+  assert.notEqual(here, otherPane, "another pane is another agent");
+  assert.notEqual(here, otherWs, "another workspace is another group on the bus");
+  assert.equal(here, key({ HERDR_PANE_ID: "pane-1", HERDR_WORKSPACE_ID: "misc" }), "the same pane reuses its bridge");
+  // A machine with no panes at all keeps one bridge per server, as before.
+  assert.equal(key({}), "");
 });
 
 test("the shim stands in for the server's own command, at its own path", async (t) => {

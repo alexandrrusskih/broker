@@ -19,6 +19,7 @@ environment, and a connection that does not match is closed before a server is
 spawned.
 """
 
+import hashlib
 import json
 import os
 import secrets
@@ -35,8 +36,29 @@ STATE_DIR = os.path.join(config.CONFIG_DIR, "box", "mcp")
 IDLE_TIMEOUT = 4 * 3600
 
 
-def _state_file(name):
-    return os.path.join(STATE_DIR, "%s.json" % name.replace("/", "_"))
+# A bridged server inherits the environment of whatever raised it, and then
+# outlives that shell. agentbus is the clear case: it takes its bus identity
+# from the Herdr pane it was started in, so a listener raised from one pane and
+# reused from another would post to the bus as the wrong agent, in the wrong
+# workspace. So a listener belongs to the identity that raised it, and a
+# different identity gets its own.
+IDENTITY_ENV = ("HERDR_PANE_ID", "HERDR_WORKSPACE_ID", "AGENTBUS_HOME")
+
+
+def identity_key(env=None, extra=()):
+    env = os.environ if env is None else env
+    seen = [(name, env.get(name) or "") for name in tuple(IDENTITY_ENV) + tuple(extra)]
+    if not any(value for _, value in seen):
+        return ""
+    digest = hashlib.sha1(repr(sorted(seen)).encode()).hexdigest()[:8]
+    return digest
+
+
+def _state_file(name, key=""):
+    stem = name.replace("/", "_")
+    if key:
+        stem += "-" + key
+    return os.path.join(STATE_DIR, "%s.json" % stem)
 
 
 def _pump(src, dst, close_on_done=None):
@@ -103,8 +125,8 @@ def _session(conn, command, token):
                 child.kill()
 
 
-def serve(name, command):
-    """Run the listener for one server. Prints its port, then blocks."""
+def serve(name, command, key=""):
+    """Run the listener for one server, for one caller identity, then block."""
     token = secrets.token_hex(16)
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -113,8 +135,9 @@ def serve(name, command):
     port = listener.getsockname()[1]
 
     os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
-    state = {"port": port, "token": token, "command": command, "pid": os.getpid()}
-    path = _state_file(name)
+    state = {"port": port, "token": token, "command": command,
+             "pid": os.getpid(), "identity": key}
+    path = _state_file(name, key)
     tmp = path + ".new"
     with open(tmp, "w") as fh:
         json.dump(state, fh)
@@ -136,10 +159,10 @@ def serve(name, command):
             pass
 
 
-def running(name):
-    """The live listener for this server, or None."""
+def running(name, key=""):
+    """The live listener for this server AND this caller identity, or None."""
     try:
-        with open(_state_file(name)) as fh:
+        with open(_state_file(name, key)) as fh:
             state = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -167,7 +190,7 @@ def main(argv=None):
     if argv and argv[0] == "serve":
         name = argv[1]
         command = argv[argv.index("--") + 1:]
-        return serve(name, command)
+        return serve(name, command, identity_key())
     if argv and argv[0] == "connect":
         # Inside the box everything comes from the environment the shim sets.
         return connect(os.environ["BROKER_MCP_HOST"],

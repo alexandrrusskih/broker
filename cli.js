@@ -402,6 +402,7 @@ async function main() {
       // git is the only source: the npm registry copy trails this repo, and
       // installing from it downgrades a working setup.
       const cfg = config.read();
+      require("./lib/legacy").dropCaches(); // DROP AFTER 2026-12
       if (flags.server) await require("./lib/service").createServiceManager().requireInstalled();
       console.log(`current: ${require("./package.json").version}`);
       const pkg = require("./lib/source").sourcePackage(cfg, flags.from);

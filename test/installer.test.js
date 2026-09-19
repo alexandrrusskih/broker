@@ -46,6 +46,8 @@ test("upgrade changes the server only with --server; --all keeps its harness-upd
       console: { log() {} },
       require(name) {
         if (name === "./lib/config") return { read: () => cfg };
+        // DROP AFTER 2026-12 along with the module itself.
+        if (name === "./lib/legacy") return { dropCaches: () => calls.push(["legacy.dropCaches"]) };
         if (name === "./package.json") return { version: "test" };
         if (name === "child_process") return {
           execSync: (cmd) => calls.push([cmd]),

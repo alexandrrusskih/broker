@@ -46,9 +46,8 @@ test("a config left under the old name is still read, by both the CLI and the en
   // still running an older wrapper keeps working.
   assert.equal((await readJson(path.join(home, ".config", "broker", "config.json"))).key, "fake-legacy-key");
   assert.equal((await readJson(legacy)).key, "fake-legacy-key");
-  // The credential cache beside it is not kept: it holds access tokens and is
-  // rebuilt on demand.
-  await assert.rejects(fs.stat(cache), { code: "ENOENT" });
+  // Reading a config must not delete anything — that is upgrade's job, below.
+  assert.ok(await fs.stat(cache));
 });
 
 test("stashed binaries move with the engine directory, and what points at them moves too", async (t) => {
@@ -118,4 +117,42 @@ test("an already-registered service is adopted under the new label, never left r
   const carried = await readJson(path.join(newRoot, "service.json"));
   assert.equal(carried.dataDir, dataDir);
   assert.equal(carried.runtime, path.join(newRoot, "runtime"));
+});
+
+test("upgrade drops the old caches, but only once the current config exists", async (t) => {
+  const home = await temp(t);
+  const cache = path.join(home, ".config", "hltm-broker", "cache");
+  await writeJson(path.join(cache, "codex-main.json"), { access_token: "fake-cached-token" });
+  await fs.mkdir(path.join(home, ".cache", "hltm-broker", "src"), { recursive: true });
+
+  const env = { ...process.env, HOME: home };
+  delete env.BROKER_CONFIG;
+  const drop = ["-e", "process.stdout.write(String(require('./lib/legacy').dropCaches()))"];
+
+  // Nothing has moved yet: an installation still running on the old paths keeps
+  // its cache, credentials and all.
+  assert.equal(execFileSync(process.execPath, drop, { cwd: root, env, encoding: "utf8" }), "false");
+  assert.ok(await fs.stat(cache));
+
+  await writeJson(path.join(home, ".config", "broker", "config.json"), { url: "https://saved.example.test", key: "fake-key" });
+  assert.equal(execFileSync(process.execPath, drop, { cwd: root, env, encoding: "utf8" }), "true");
+  // Access tokens nothing reads are tokens sitting on disk for no reason.
+  await assert.rejects(fs.stat(cache), { code: "ENOENT" });
+  await assert.rejects(fs.stat(path.join(home, ".cache", "hltm-broker")), { code: "ENOENT" });
+});
+
+test("the copy a harness's own updater leaves behind is removed, and nothing else is", async (t) => {
+  const home = await temp(t);
+  const stash = path.join(home, ".local", "lib", "broker", "real");
+  await fs.mkdir(stash, { recursive: true });
+  const names = ["agy", "agy.1789850750190494000.old", "agy.old", "agy.notes.old", "codex.123.old"];
+  for (const name of names) await fs.writeFile(path.join(stash, name), "x");
+
+  const env = { ...process.env, HOME: home };
+  delete env.BROKER_CONFIG;
+  execFileSync(process.execPath, ["-e", "require('./lib/shim').dropUpdateLeftovers('agy', undefined)"], { cwd: root, env });
+
+  assert.deepEqual((await fs.readdir(stash)).sort(),
+    ["agy", "agy.notes.old", "agy.old", "codex.123.old"],
+    "only <bin>.<stamp>.old for this provider is the updater's own leftover");
 });

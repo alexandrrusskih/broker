@@ -39,11 +39,6 @@ def path():
         import shutil
 
         shutil.copy2(LEGACY_PATH, PATH)
-        # The config itself stays where it is — an older wrapper still on this
-        # machine reads it. The credential cache beside it does NOT: it holds
-        # access tokens, it is rebuilt on demand, and tokens nothing reads are
-        # tokens sitting on disk for no reason.
-        shutil.rmtree(os.path.join(os.path.dirname(LEGACY_PATH), "cache"), ignore_errors=True)
         return PATH
     except OSError:
         return LEGACY_PATH

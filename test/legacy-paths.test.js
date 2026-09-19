@@ -24,6 +24,8 @@ test("a config left under the old name is still read, by both the CLI and the en
   const home = await temp(t);
   const legacy = path.join(home, ".config", "hltm-broker", "config.json");
   await writeJson(legacy, { url: "https://saved.example.test", key: "fake-legacy-key", account: "main" });
+  const cache = path.join(home, ".config", "hltm-broker", "cache");
+  await writeJson(path.join(cache, "codex-main.json"), { access_token: "fake-cached-token" });
 
   const env = { ...process.env, HOME: home, PYTHONDONTWRITEBYTECODE: "1" };
   delete env.BROKER_CONFIG;
@@ -44,6 +46,9 @@ test("a config left under the old name is still read, by both the CLI and the en
   // still running an older wrapper keeps working.
   assert.equal((await readJson(path.join(home, ".config", "broker", "config.json"))).key, "fake-legacy-key");
   assert.equal((await readJson(legacy)).key, "fake-legacy-key");
+  // The credential cache beside it is not kept: it holds access tokens and is
+  // rebuilt on demand.
+  await assert.rejects(fs.stat(cache), { code: "ENOENT" });
 });
 
 test("stashed binaries move with the engine directory, and what points at them moves too", async (t) => {

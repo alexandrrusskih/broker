@@ -33,9 +33,9 @@ const HELP = `@pbl/broker — centralized OAuth token broker (sole refresh autho
 Providers: codex, claude, agy (OAuth) · glm (static z.ai key)
 Each person uses their OWN account — pass --account <name> (or set it once via
 'broker set-default <name>'); tokens are isolated per account in the broker.
-cl/gm resolve the account at run time ($CL_ACCOUNT / $GM_ACCOUNT / $BROKER_ACCOUNT,
-then the default). cx ignores all of that: you either name the account for that
-run, or it picks the one with the most rate-limit headroom.
+The account is resolved per run: $CODEX_ACCOUNT / $CLAUDE_ACCOUNT / $AGY_ACCOUNT,
+then $BROKER_ACCOUNT, then this machine's default — and with none of those set,
+the wrapper picks the account with the most rate-limit headroom left.
 
 Usage:
   broker setup [--url <url> | --client-config <file>] [--no-ask]
@@ -58,7 +58,7 @@ Usage:
   broker get <provider> [--format authjson|raw] [--account <name>]
                          Fetch a fresh token from the broker (for scripts/CI).
   broker wrap <provider> [--account <name>]
-                         Install a wrapper (cx/cl/gm) that pulls auth from the broker.
+                         Install a wrapper (broker-cx/-cl/-agy) that pulls auth from the broker.
                          Without --account the wrapper follows the default account.
   broker status          What is installed, wired and seeded — start here.
   broker install <provider> [--default-account <name>] [--container]
@@ -75,7 +75,7 @@ Usage:
   broker set-default <name>
                          Set the default account every command and wrapper uses.
   broker config [--url <url>] [--key <key>] [--account <name>]
-                         Show or set local config (~/.config/hltm-broker/config.json).
+                         Show or set local config (~/.config/broker/config.json).
   broker upgrade [--all] [--server] [--from <checkout>]
                          Update CLI/wrappers; --all also updates harnesses.
                          --server additionally updates/restarts an installed server.
@@ -151,7 +151,7 @@ async function main() {
         console.log("No client shim, Tailscale setting, old refresh daemon or existing Codex auth was changed.");
       } else if (action === "status") {
         const out = await manager.status();
-        console.log(`system/com.hltm.broker: ${out.healthy ? "ready" : out.pid ? "running, API not ready" : "stopped"}`);
+        console.log(`system/${require("./lib/service").LABEL}: ${out.healthy ? "ready" : out.pid ? "running, API not ready" : "stopped"}`);
         console.log(`User: ${out.user}\nRuntime: ${out.runtime}\nData: ${out.dataDir}\nClient URL: ${out.url}`);
         if (!out.healthy) process.exitCode = 1;
       } else if (action === "restart") {
@@ -510,7 +510,7 @@ function dropCredentials(provider, account) {
   const { WRAP } = require("./lib/wrap");
   const w = WRAP[provider];
   const paths = [
-    pathMod.join(osMod.homedir(), ".config", "hltm-broker", "cache", `${provider}-${account}.json`)
+    pathMod.join(config.CACHE_DIR, `${provider}-${account}.json`)
   ];
   if (w && w.profileBase && w.authRel) {
     paths.push(pathMod.join(osMod.homedir(), `${w.profileBase}-${account}`, w.authRel));

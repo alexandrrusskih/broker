@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 
-from . import accounts, api, profile, table
+from . import accounts, api, config, profile, table
 from .out import die, warn
 
 # `upgrade` installs the CLI straight from the source repo — the only source
@@ -16,7 +16,7 @@ from .out import die, warn
 # or install from a checkout with --from <dir>.
 SRC_REPO = "git@github.com:alexandrrusskih/broker.git"
 SRC_SUBDIR = ""
-SRC_CACHE = os.path.expanduser("~/.cache/hltm-broker/src")
+SRC_CACHE = config.SRC_CACHE
 
 
 def run(cmd):
@@ -242,7 +242,7 @@ def sync_source(cfg):
         return None
     repo = cfg.get("src_repo") or SRC_REPO
     # The cache remembers whichever repository it was first cloned from. When the
-    # source moves — as it did when the broker left hltm-services for its own
+    # source moves — as it did when the broker moved out into its own
     # repository — fetching into the old checkout pulls the WRONG project, and the
     # upgrade then fails on a missing package.json while reporting the new address
     # as unreachable. Re-clone whenever the remote no longer matches.

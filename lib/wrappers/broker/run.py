@@ -6,14 +6,20 @@ import sys
 from . import profile
 from .out import die, warn
 
-SHIM_MARK = "hltm-broker shim"
+# Mistaking a shim for the real binary is how a wrapper ends up calling itself —
+# a loop no in-process guard survives, because every turn of it is a fresh
+# process doing something legitimate. Shims written before the September 2026
+# rename say "hltm-broker shim", which CONTAINS this string, so they are still
+# recognised with no second marker to carry. Never shorten this to "broker"
+# alone: it would then match any file that merely mentions the word.
+SHIM_MARK = "broker shim"
 
 # Set once the credentials for this run are in place. The harness spawns itself
 # for sandboxed commands and helper processes, and under a shim every one of
 # those re-entered the wrapper: a fresh broker call and usage probe per
 # subprocess (280 of them in one observed panel run). Nested calls skip straight
 # to the binary — the profile and the environment they inherit are already set.
-ACTIVE_ENV = "HLTM_BROKER_ACTIVE"
+ACTIVE_ENV = "BROKER_ACTIVE"
 
 
 def real_bin(provider):
@@ -35,7 +41,8 @@ def real_bin(provider):
             continue
         try:
             with open(candidate, "rb") as fh:
-                if SHIM_MARK.encode() in fh.read(512):
+                head = fh.read(512)
+                if SHIM_MARK.encode() in head:
                     continue
         except OSError:
             continue
@@ -60,7 +67,8 @@ def _is_shim(path):
     """
     try:
         with open(path, "rb") as fh:
-            return SHIM_MARK.encode() in fh.read(512)
+            head = fh.read(512)
+            return SHIM_MARK.encode() in head
     except OSError:
         return False
 
@@ -75,7 +83,7 @@ def _path_without_shim(provider, target):
     directory first on PATH where `codex` IS the real binary.
     """
     shim_free = os.path.join(
-        os.environ.get("TMPDIR", "/tmp"), "hltm-real-%s-%d" % (provider.NAME, os.getuid())
+        os.environ.get("TMPDIR", "/tmp"), "broker-real-%s-%d" % (provider.NAME, os.getuid())
     )
     try:
         os.makedirs(shim_free, mode=0o700, exist_ok=True)

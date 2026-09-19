@@ -1,5 +1,5 @@
 {
-  "name": "hltm-broker-functions",
+  "name": "broker-functions",
   "description": "Token broker Cloud Functions (deployed by @pbl/broker)",
   "main": "index.js",
   "engines": {

@@ -6,7 +6,7 @@ import sys
 # Replaced by set_prefix() with the wrapper's own name on every real run. The
 # default only shows on a path that forgot to set it — so it names the package,
 # not `cx`, which was renamed to broker-cx and no longer exists anywhere.
-PREFIX = "hltm-broker"
+PREFIX = "broker"
 
 
 def set_prefix(name):

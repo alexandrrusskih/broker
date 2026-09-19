@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "hltm-broker-functions",
+      "name": "broker-functions",
       "dependencies": {
         "@google-cloud/functions-framework": "^5.0.2",
         "firebase-admin": "^13.0.0",

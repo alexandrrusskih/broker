@@ -10,7 +10,7 @@ set -euo pipefail
 
 REPO="${BROKER_REPO:-git@github.com:alexandrrusskih/broker.git}"
 SUBDIR="${BROKER_SUBDIR:-}"
-SRC="$HOME/.cache/hltm-broker/src"
+SRC="$HOME/.cache/broker/src"
 
 SERVER=false
 FROM=""

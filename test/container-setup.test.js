@@ -17,9 +17,9 @@ async function fixture(t, saved = {}) {
   return {
     home, calls, root,
     verifyConnection: async () => ({ accounts: 2, repaired: false }),
-    file: path.join(root, "home", ".config", "hltm-broker", "config.json"),
+    file: path.join(root, "home", ".config", "broker", "config.json"),
     config: {
-      FILE: path.join(home, ".config", "hltm-broker", "config.json"),
+      FILE: path.join(home, ".config", "broker", "config.json"),
       read: () => ({ ...saved }),
       write: () => assert.fail("container setup must not change the host config")
     },
@@ -66,7 +66,7 @@ test("existing overlays keep their connection; an explicit file or URL replaces 
 test("managed server loopback resolves to its own external CLIENT config, including a custom data dir", async (t) => {
   const f = await fixture(t, { url: "http://127.0.0.1:8787", key: "same-key", role: "client" });
   const dataDir = path.join(f.home, "custom data");
-  await writeJson(path.join(f.home, ".local/share/hltm-broker-service/service.json"), { dataDir });
+  await writeJson(path.join(f.home, ".local/share/broker-service/service.json"), { dataDir });
   await writeJson(path.join(dataDir, "client.json"), {
     url: "https://server.example.test", key: "same-key", role: "client"
   });
@@ -81,7 +81,7 @@ test("managed server loopback resolves to its own external CLIENT config, includ
 test("loopback never silently switches to an unrelated local server", async (t) => {
   const f = await fixture(t, { url: "http://127.0.0.1:9000", key: "another-key", role: "client" });
   const dataDir = path.join(f.home, "data");
-  await writeJson(path.join(f.home, ".local/share/hltm-broker-service/service.json"), { dataDir });
+  await writeJson(path.join(f.home, ".local/share/broker-service/service.json"), { dataDir });
   await writeJson(path.join(dataDir, "client.json"), { url: "https://wrong.test", key: "wrong-key", role: "client" });
   await assert.rejects(setupContainer({}, f), /loopback/);
   assert.deepEqual(f.calls, []);
@@ -119,11 +119,11 @@ test("real overlay builder produces a standalone bundle and home shim without a 
   assert.equal(bundle, path.join(f.root, "bin", "broker-cx"));
   assert.equal((await fs.stat(bundle)).mode & 0o777, 0o755);
   const shim = await fs.readFile(path.join(f.root, "home/.local/bin/codex"), "utf8");
-  assert.match(shim, /hltm-broker shim/);
+  assert.match(shim, /broker shim/);
   assert.match(shim, /exec \/usr\/local\/bin\/broker-cx/);
   execFileSync("python3", ["-m", "zipfile", "-t", bundle], { stdio: "pipe" });
   const result = execFileSync("python3", ["-c",
-    "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert 'hltm/version.py' in z.namelist(); assert '__main__.py' in z.namelist(); print('ok')",
+    "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert 'broker/version.py' in z.namelist(); assert '__main__.py' in z.namelist(); print('ok')",
     bundle], { encoding: "utf8" });
   assert.equal(result.trim(), "ok");
   assert.deepEqual(await fs.readdir(f.home), [".medulla"]);

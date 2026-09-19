@@ -41,9 +41,9 @@ async function fixture(t, overrides = {}) {
         return;
       }
       if (bin === "/bin/launchctl") {
-        assert.deepEqual(args, ["print", "system/com.hltm.broker"]);
+        assert.deepEqual(args, ["print", "system/com.broker.server"]);
         if (!state.loaded) throw Object.assign(new Error("not loaded"), { status: 113 });
-        return `system/com.hltm.broker = {\n  pid = ${1000 + state.starts}\n}`;
+        return `system/com.broker.server = {\n  pid = ${1000 + state.starts}\n}`;
       }
       assert.equal(bin, "/usr/bin/sudo");
       if (args[0] === "/usr/bin/install") {
@@ -52,7 +52,7 @@ async function fixture(t, overrides = {}) {
       }
       assert.equal(args[0], "/bin/launchctl");
       if (args[1] === "bootout") {
-        assert.equal(args[2], "system/com.hltm.broker");
+        assert.equal(args[2], "system/com.broker.server");
         state.loaded = false;
         state.draining = 2;
       } else if (args[1] === "bootstrap") {
@@ -60,7 +60,7 @@ async function fixture(t, overrides = {}) {
         assert.equal(state.draining, 0, "the old process must finish before the next starts");
         state.loaded = true;
         state.starts++;
-      } else assert.deepEqual(args.slice(1), ["enable", "system/com.hltm.broker"]);
+      } else assert.deepEqual(args.slice(1), ["enable", "system/com.broker.server"]);
     },
     ...overrides
   };
@@ -94,7 +94,7 @@ test("install snapshots server code, exports separate connections and preserves 
   assert.equal((await readJson(first.adminFile)).url, "http://127.0.0.1:8787");
   assert.notEqual(settings.client_key, settings.broker_key);
   await assert.rejects(fs.stat(path.join(f.runtime, ".git")), { code: "ENOENT" });
-  await assert.rejects(fs.stat(path.join(f.runtime, "lib", "wrappers", "hltm", "config.py")), { code: "ENOENT" });
+  await assert.rejects(fs.stat(path.join(f.runtime, "lib", "wrappers", "broker", "config.py")), { code: "ENOENT" });
   const account = path.join(f.dataDir, "accounts", "_codex", "_main.json");
   await writeJson(account, { refresh_token: "fake-current-token" });
   const marker = path.join(f.runtime, "old-code.txt");

@@ -10,6 +10,8 @@ import json
 import os
 import urllib.request
 
+from .. import config
+
 NAME = "agy"
 BIN = "agy"
 CMD = "broker-agy"
@@ -25,7 +27,7 @@ CREDENTIALS = "file"
 # one file: the token. PROFILE_ENV is ours, not agy's: HOME is always set, so it
 # cannot double as the "profile override" variable the way CODEX_HOME does.
 HOME_ENV = "HOME"
-PROFILE_ENV = "HLTM_AGY_HOME"
+PROFILE_ENV = "BROKER_AGY_HOME"
 CANONICAL_HOME = os.path.expanduser("~")
 PROFILE_BASE = os.path.expanduser("~/.agy")
 AUTH_NAME = os.path.join(".gemini", "antigravity-cli", "antigravity-oauth-token")
@@ -37,8 +39,8 @@ MIRROR_HOME = True
 # 178 MB program that lives at ~/.local/bin/agy — so `broker agy install` moves it
 # here before the shim takes the name (see lib/shim.js).
 REAL_BINS = (
-    os.path.expanduser("~/.local/lib/hltm-broker/real/agy"),
-    "/usr/local/lib/hltm-broker/real/agy",
+    os.path.join(config.REAL_DIR, "agy"),
+    "/usr/local/lib/broker/real/agy",
     os.path.expanduser("~/.local/bin/agy"),
     "/usr/local/bin/agy",
     "/usr/bin/agy",

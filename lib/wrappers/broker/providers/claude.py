@@ -10,6 +10,8 @@ import os
 import subprocess
 import sys
 
+from .. import config
+
 NAME = "claude"
 BIN = "claude"
 CMD = "broker-cl"
@@ -63,7 +65,7 @@ def _chosen_version():
     for stable you would still run whatever `latest` left behind.
     """
     try:
-        with open(os.path.expanduser("~/.config/hltm-broker/config.json")) as fh:
+        with open(config.path()) as fh:
             remembered = (json.load(fh).get("shim_previous") or {}).get("claude")
     except (OSError, ValueError):
         return None
@@ -190,7 +192,7 @@ def _windows(info):
 
 def _probe_cache(account):
     return os.path.join(
-        os.path.expanduser("~/.config/hltm-broker/cache"), "claude-%s-usage.json" % account
+        config.CACHE_DIR, "claude-%s-usage.json" % account
     )
 
 

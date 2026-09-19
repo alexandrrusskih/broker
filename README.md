@@ -103,7 +103,7 @@ install -d -m 700 ~/.codex
 # overrides unconditionally.
 RT=$(jq -r '.tokens.refresh_token // ""' ~/.codex/auth.json)
 if printf '%s' "$RT" | grep -qE '^[0-9a-f]{64}$'; then
-  BROKER_URL=$(jq -er '.url' ~/.config/hltm-broker/config.json)
+  BROKER_URL=$(jq -er '.url' ~/.config/broker/config.json)
   export CODEX_REFRESH_TOKEN_URL_OVERRIDE="$BROKER_URL/oauthRefresh?provider=codex&account=$ACCOUNT"
   export CODEX_REVOKE_TOKEN_URL_OVERRIDE="$BROKER_URL/oauthRevoke?provider=codex&account=$ACCOUNT"
 fi
@@ -230,7 +230,7 @@ The repository does not ship a Google OAuth client credential. Set
 agy also updates itself in place, over the very path the shim occupies — so the
 wrapper sets `AGY_CLI_DISABLE_AUTO_UPDATE=1` on every run, and `broker-agy
 upgrade` is how you move versions. For the same reason `broker agy install`
-moves the real 178 MB binary into `lib/hltm-broker/real/` first; `broker agy
+moves the real 178 MB binary into `lib/broker/real/` first; `broker agy
 remove` puts it back.
 
 `broker-cx upgrade` installs the CLI straight from the source repo, so a fix to the

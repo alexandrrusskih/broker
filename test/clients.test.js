@@ -18,7 +18,7 @@ test("Node CLI and Python wrapper accept env-only config but preserve saved conn
   const file = path.join(dir, "client.json");
   const env = { ...process.env, BROKER_CONFIG: file, BROKER_URL: "https://runtime.example.test", BROKER_KEY: "fake-runtime-key", PYTHONDONTWRITEBYTECODE: "1" };
   const readNode = () => JSON.parse(execFileSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(require('./lib/config').require()))"], { cwd: root, env }));
-  const pythonCode = "import sys,json; sys.path.insert(0, 'lib/wrappers'); from hltm import config; print(json.dumps(config.load(sys.exit)))";
+  const pythonCode = "import sys,json; sys.path.insert(0, 'lib/wrappers'); from broker import config; print(json.dumps(config.load(sys.exit)))";
   const readPython = () => JSON.parse(execFileSync("python3", ["-c", pythonCode], { cwd: root, env }));
   for (const value of [readNode(), readPython()]) {
     assert.equal(value.url, env.BROKER_URL);
@@ -45,7 +45,7 @@ test("config updates are private and do not persist runtime credentials", async 
   const env = { ...process.env, BROKER_CONFIG: file, BROKER_KEY: "do-not-persist", BROKER_URL: "https://runtime.example.test", PYTHONDONTWRITEBYTECODE: "1" };
   execFileSync(process.execPath, ["-e", "require('./lib/config').write({account:'main'})"], { cwd: root, env });
   assert.deepEqual(await readJson(file), { key: "saved", url: "https://saved.example.test", account: "main" });
-  execFileSync("python3", ["-c", "import sys; sys.path.insert(0, 'lib/wrappers'); from hltm import config; config.save({'account':'second'})"], { cwd: root, env });
+  execFileSync("python3", ["-c", "import sys; sys.path.insert(0, 'lib/wrappers'); from broker import config; config.save({'account':'second'})"], { cwd: root, env });
   assert.deepEqual(await readJson(file), { key: "saved", url: "https://saved.example.test", account: "second" });
   assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
 });
@@ -55,8 +55,8 @@ test("shim routes handles to private broker, leaves native login/legacy tokens a
 import sys
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
-from hltm.providers import codex
-from hltm import run, api
+from broker.providers import codex
+from broker import run, api
 cfg = {'url': 'https://broker.example.test', 'key': 'fake'}
 auth = {'tokens': {'refresh_token': 'a' * 64, 'access_token': 'fake'}}
 env = {}
@@ -76,7 +76,7 @@ with patch.object(codex, 'HOME_ENV', 'BROKER_TEST_PROFILE'), patch.object(run.pr
     write_auth.assert_called_once_with(codex, '/test/profile', auth)
     native.assert_called_once_with('/test/native-codex', ['codex', 'exec', 'test'])
     assert run.os.environ['CODEX_REFRESH_TOKEN_URL_OVERRIDE'].startswith(cfg['url'])
-    assert run.os.environ['HLTM_BROKER_ACTIVE'] == 'codex:main'
+    assert run.os.environ['BROKER_ACTIVE'] == 'codex:main'
 `;
   execFileSync("python3", ["-c", program], { cwd: root, env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
 });
@@ -98,8 +98,8 @@ test("Medulla overlay creation is explicit; an existing overlay still updates wi
   const shim = await fs.readFile(path.join(overlay, "home", ".local", "bin", "codex"), "utf8");
   assert.match(shim, /exec \/usr\/local\/bin\/broker-cx/);
   assert.equal((await fs.stat(bundle)).mode & 0o777, 0o755);
-  assert.equal(await readJson(path.join(overlay, "home", ".config", "hltm-broker", "config.json")), null);
-  const program = "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert '__main__.py' in z.namelist(); assert 'BROKER_CONFIG' in z.read('hltm/config.py').decode(); assert 'fake-admin-key' not in str([z.read(n) for n in z.namelist() if not n.endswith('/')])";
+  assert.equal(await readJson(path.join(overlay, "home", ".config", "broker", "config.json")), null);
+  const program = "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert '__main__.py' in z.namelist(); assert 'BROKER_CONFIG' in z.read('broker/config.py').decode(); assert 'fake-admin-key' not in str([z.read(n) for n in z.namelist() if not n.endswith('/')])";
   execFileSync("python3", ["-c", program, bundle], { env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
   await fs.unlink(bundle);
   install("codex");
@@ -111,8 +111,8 @@ test("a fresh auto-picked retry skips a broken account, while an explicit accoun
 import sys
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
-from hltm import select, accounts, api, profile
-from hltm.providers import codex
+from broker import select, accounts, api, profile
+from broker.providers import codex
 cfg = {'accounts': {'codex': 'main'}}
 good = dict(accounts.stub('main'), auth={'tokens': {'access_token': 'fake-main'}}, used=10)
 bad = dict(accounts.stub('main'), error='needs re-auth')

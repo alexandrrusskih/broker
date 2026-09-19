@@ -7,7 +7,7 @@ per module, and every new module would silently go missing until someone noticed
 
 import sys
 
-from hltm.cli import main
+from broker.cli import main
 
 if __name__ == "__main__":
     try:

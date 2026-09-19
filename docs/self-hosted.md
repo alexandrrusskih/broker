@@ -41,9 +41,9 @@ On other operating systems, automatic service setup is not provided. Run the
 same server with your own supervisor, or use it in the foreground on macOS:
 
 ```sh
-broker init --data-dir /Users/operator/.local/share/hltm-broker \
+broker init --data-dir /Users/operator/.local/share/broker \
   --url https://broker-machine.example-tailnet.ts.net
-broker serve --data-dir /Users/operator/.local/share/hltm-broker
+broker serve --data-dir /Users/operator/.local/share/broker
 ```
 
 Replace the sample URL with the server's actual Tailscale HTTPS name. `serve`
@@ -91,7 +91,7 @@ using that grant. **Two brokers holding the same rotating token are not safe.**
 Use a fresh native Codex login, then seed through the admin config:
 
 ```sh
-BROKER_CONFIG=/Users/operator/.local/share/hltm-broker/admin.json \
+BROKER_CONFIG=/Users/operator/.local/share/broker/admin.json \
 broker seed codex --account main
 ```
 
@@ -107,7 +107,7 @@ bash install.sh --client-config /path/to/client.json --no-ask
 ```
 
 Or run `broker setup` to enter the URL and hidden client key interactively.
-Setup saves `~/.config/hltm-broker/config.json` with mode `0600`, but leaves an
+Setup saves `~/.config/broker/config.json` with mode `0600`, but leaves an
 already configured client untouched. Use `BROKER_CONFIG` to select another
 config file explicitly. Install the same wrapper on each host:
 
@@ -118,7 +118,7 @@ codex exec "..."
 
 Configuration works identically for Node CLI and Python wrappers:
 
-- `BROKER_CONFIG`: alternate config file (default `~/.config/hltm-broker/config.json`).
+- `BROKER_CONFIG`: alternate config file (default `~/.config/broker/config.json`).
 - `BROKER_URL` and `BROKER_KEY`: fill missing config fields, usable without a file;
   saved URL/key take precedence, preserving existing installations.
 - `CODEX_ACCOUNT` / `BROKER_ACCOUNT`: pin an account for a run, disabling automatic selection.
@@ -170,7 +170,7 @@ This populates:
 
 - `~/.medulla/container/bin/broker-cx`: self-contained Python zipapp.
 - `~/.medulla/container/home/.local/bin/codex`: shim ahead of native Codex on PATH.
-- `~/.medulla/container/home/.config/hltm-broker/config.json`: client connection,
+- `~/.medulla/container/home/.config/broker/config.json`: client connection,
   written atomically with mode `0600`.
 
 The command uses an explicit `--client-config` first, then an existing overlay,
@@ -227,10 +227,10 @@ processes and host Codex sessions are untouched by a Colima restart. See
 
 The managed macOS installation uses:
 
-- `/Library/LaunchDaemons/com.hltm.broker.plist`: system registration.
-- `~/.local/share/hltm-broker-service/runtime`: private snapshot of server code.
-- `~/.local/share/hltm-broker-service/service.json`: service paths/settings, no tokens.
-- `~/.local/share/hltm-broker`: data and keys, unless `--data-dir` was specified.
+- `/Library/LaunchDaemons/com.broker.server.plist`: system registration.
+- `~/.local/share/broker-service/runtime`: private snapshot of server code.
+- `~/.local/share/broker-service/service.json`: service paths/settings, no tokens.
+- `~/.local/share/broker`: data and keys, unless `--data-dir` was specified.
 
 The runtime is separate from the CLI's git cache/global package, so an ordinary
 client upgrade does not change files underneath the running server. Management:

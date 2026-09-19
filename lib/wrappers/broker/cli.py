@@ -90,7 +90,8 @@ def main(provider_name, argv=None):
     # profile are already in the environment we inherited, so re-resolving would
     # only cost a broker round-trip per subprocess — and for a provider whose
     # credentials ride in the environment, the child already holds the token.
-    if os.environ.get(run.ACTIVE_ENV, "").startswith(provider.NAME + ":") and _still_holds_credentials(
+    active = os.environ.get(run.ACTIVE_ENV) or ""
+    if active.startswith(provider.NAME + ":") and _still_holds_credentials(
         provider
     ):
         return run.exec_passthrough(provider, argv)

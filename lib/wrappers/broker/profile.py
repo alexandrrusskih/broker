@@ -5,6 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from . import config
 from .out import warn
 
 
@@ -230,19 +231,19 @@ def _cache_dir():
     medulla's container, and a cache that cannot be written must not look like a
     failure. Fall back to the temp dir, which every container has.
     """
-    preferred = os.path.expanduser("~/.config/hltm-broker/cache")
+    preferred = config.CACHE_DIR
     try:
         os.makedirs(preferred, mode=0o700, exist_ok=True)
         if os.access(preferred, os.W_OK):
             return preferred
     except OSError:
         pass
-    fallback = os.path.join(os.environ.get("TMPDIR", "/tmp"), "hltm-broker-cache-%d" % os.getuid())
+    fallback = os.path.join(os.environ.get("TMPDIR", "/tmp"), "broker-cache-%d" % os.getuid())
     os.makedirs(fallback, mode=0o700, exist_ok=True)
     return fallback
 
 
-CACHE_DIR = os.path.expanduser("~/.config/hltm-broker/cache")
+CACHE_DIR = config.CACHE_DIR
 
 
 def cache_path(provider, account):

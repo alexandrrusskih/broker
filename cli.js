@@ -78,6 +78,7 @@ Usage:
                          Show or set local config (~/.config/broker/config.json).
   broker box build [--claude <v>] [--codex <v>] [--bun <v>] [--no-cache]
   broker box list        Build the container image a --box runs in, or show what exists.
+  broker box repair      Put a terminal back in order after a box was killed outright.
                          Then: claude --box <name> — the harness runs in a container
                          with only the directories that box names, at the same paths.
   broker upgrade [--all] [--server] [--from <checkout>]
@@ -537,8 +538,15 @@ async function main() {
           const image = box.image || (box.dockerfile ? boxes.imageFor(name) : boxes.IMAGE);
           console.log(`\n${name}\n  image: ${image}${box.dockerfile ? `  ← ${box.dockerfile}` : ""}\n  rw: ${rw}${ro ? "\n" + ro : ""}`);
         }
+      } else if (action === "repair") {
+        // For a pane whose harness was killed outright: everything else is
+        // handled where the box runs, this is the manual way back.
+        const tty = boxes.repairTerminal();
+        console.log(tty
+          ? "Terminal restored — the keyboard answers normally again."
+          : "Not a terminal, nothing to restore.");
       } else {
-        throw new Error(`unknown box command '${action}' — use 'build' or 'list'`);
+        throw new Error(`unknown box command '${action}' — use 'build', 'list' or 'repair'`);
       }
       break;
     }

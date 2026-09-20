@@ -3,8 +3,10 @@
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import termios
 import time
 
 from .. import config, mcpbridge
@@ -468,6 +470,96 @@ def _sync_back(provider, session, env=None):
              % " ".join([provider.BIN] + [p % {"session": session} for p in template]))
 
 
+def container_name(name):
+    """The one container a box keeps, shared by everything running in it."""
+    stem = re.sub(r"[^a-zA-Z0-9_.-]", "-", name).lower()
+    key = mcpbridge.identity_key()
+    return "broker-box-%s%s" % (stem, ("-" + key) if key else "")
+
+
+def _running(runtime, container):
+    try:
+        out = subprocess.run([runtime, "inspect", "-f", "{{.State.Running}}", container],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0 and out.stdout.strip() == "true"
+
+
+# Putting the terminal back the way the harness found it.
+#
+# A harness in a box owns the terminal completely: it switches to the alternate
+# screen, asks for mouse reports, and turns on the kitty keyboard protocol, in
+# which Enter arrives as "27;3u" and an arrow as "1:1A" rather than as ordinary
+# characters. On the way out it undoes every one of those — but only if it gets
+# to run. Stop the container from outside, or let it crash, and the process dies
+# where it stands: the pane is left speaking a language the shell underneath
+# does not understand, and typing into it produces "zsh: command not found: 1:1A".
+#
+# So the undoing belongs out here, in the thing that outlives the container.
+# Sending these when they are already off costs nothing — each is a no-op on a
+# terminal that is already in that state.
+TERMINAL_RESET = (
+    "\033[?1049l"                  # leave the alternate screen
+    "\033[<u"                      # pop the kitty keyboard flags
+    "\033[=0;1u"                   # ...and clear any that were set outright
+    "\033[?1l\033>"                # cursor keys and keypad back to normal
+    "\033[?2004l"                  # bracketed paste off
+    "\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l"  # mouse reporting off
+    "\033[?25h"                    # cursor visible again
+    "\033[0m"                      # attributes back to default
+)
+
+
+def _terminal_state():
+    """This terminal's driver settings, to be restored after the run."""
+    try:
+        if not sys.stdin.isatty():
+            return None
+        return termios.tcgetattr(sys.stdin.fileno())
+    except (termios.error, OSError, ValueError):
+        return None
+
+
+def _restore_terminal(saved):
+    """Undo both halves of what a harness does to a terminal: the driver's
+    settings (raw mode, no echo) and the modes held by the emulator itself."""
+    if saved is not None:
+        try:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)
+        except (termios.error, OSError, ValueError):
+            pass
+    try:
+        if sys.stdout.isatty():
+            sys.stdout.write(TERMINAL_RESET)
+            sys.stdout.flush()
+    except (OSError, ValueError):
+        pass
+
+
+def _guard_terminal(saved):
+    """Restore the terminal on the signals that would otherwise skip `finally`.
+
+    A `finally` covers the ordinary endings — the harness exits, the container
+    crashes, docker fails to start one. It does not cover this process being
+    told to end: the default action for SIGTERM and SIGHUP is to die on the
+    spot, leaving the pane in the harness's modes. SIGKILL still cannot be
+    caught, and that is the one case left for `broker box repair`.
+    """
+    def handler(number, _frame):
+        _restore_terminal(saved)
+        # Exit the way the signal would have, so anything waiting on this
+        # process still sees a signal death rather than a plain status.
+        signal.signal(number, signal.SIG_DFL)
+        os.kill(os.getpid(), number)
+
+    for number in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(number, handler)
+        except (ValueError, OSError):  # not the main thread, or no such signal
+            pass
+
+
 def exec_box(provider, name, argv, env, account=None):
     """Run the container, then say how to come back to it."""
     defined = boxes.profiles()
@@ -491,12 +583,18 @@ def exec_box(provider, name, argv, env, account=None):
     # run is unchanged: stdio is inherited, so the terminal, the mouse and the
     # clipboard behave as if nothing sat in between, and `docker run -it`
     # forwards the signals itself.
+    saved = _terminal_state()
+    _guard_terminal(saved)
     try:
         finished = subprocess.run(cmd)
     except KeyboardInterrupt:
         sys.exit(130)
     except OSError as exc:
         die("cannot start the '%s' box: %s" % (name, exc))
+    finally:
+        # Whatever happened in there — a clean exit, a crash, `docker stop` from
+        # another window — the pane is usable again from this line on.
+        _restore_terminal(saved)
 
     session = _last_session(provider, workdir, env, started)
     if session:

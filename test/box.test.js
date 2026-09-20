@@ -533,3 +533,72 @@ print(json.dumps(box.command(codex, "demo", {"rw": ["${project}"]}, [], {"CODEX_
   // Only that directory: another account's credentials stay out.
   assert.ok(!line.includes(`${dir}/.tool-two/auth`), "nothing else of another account");
 });
+
+test("a box puts the terminal back, whatever killed it", () => {
+  // A harness in a box switches the terminal to the alternate screen, asks for
+  // mouse reports and turns on the kitty keyboard protocol. Killed outright it
+  // undoes none of it, and the shell underneath then reads Enter as "27;3u".
+  const out = engine(`
+import ast, io, json, sys
+from broker.box import run
+
+wrote = io.StringIO()
+
+
+class Tty(io.StringIO):
+    def isatty(self):
+        return True
+
+
+# What the sequence actually turns off.
+reset = run.TERMINAL_RESET
+modes = {
+    "alternate screen": "\\033[?1049l" in reset,
+    "kitty keyboard": "\\033[<u" in reset,
+    "cursor keys": "\\033[?1l" in reset,
+    "bracketed paste": "\\033[?2004l" in reset,
+    "mouse": "\\033[?1000l" in reset and "\\033[?1006l" in reset,
+    "cursor shown": "\\033[?25h" in reset,
+}
+
+# On a terminal it is written; on a pipe it is not, or a redirected run would
+# collect escape bytes in its output file.
+tty, sys.stdout = sys.stdout, Tty()
+run._restore_terminal(None)
+on_tty = sys.stdout.getvalue()
+sys.stdout = io.StringIO()
+run._restore_terminal(None)
+on_pipe = sys.stdout.getvalue()
+sys.stdout = tty
+
+# The restore has to sit in a finally, or an exception on the way out skips it.
+tree = ast.parse(io.open("lib/wrappers/broker/box/run.py", encoding="utf-8").read())
+fn = next(n for n in ast.walk(tree)
+          if isinstance(n, ast.FunctionDef) and n.name == "exec_box")
+guarded = any(
+    any("_restore_terminal" == getattr(getattr(c, "func", None), "id", None)
+        for c in ast.walk(ast.Module(body=node.finalbody, type_ignores=[])))
+    for node in ast.walk(fn) if isinstance(node, ast.Try) and node.finalbody
+)
+
+print(json.dumps({
+    "modes": modes,
+    "on_tty": on_tty == reset,
+    "on_pipe": on_pipe,
+    "guarded": guarded,
+    "signals": sorted(
+        n.attr for n in ast.walk(tree)
+        if isinstance(n, ast.Attribute) and n.attr in ("SIGTERM", "SIGHUP")
+    ),
+}))
+`);
+  const got = JSON.parse(out);
+  for (const [mode, present] of Object.entries(got.modes)) {
+    assert.equal(present, true, `the reset must turn off ${mode}`);
+  }
+  assert.equal(got.on_tty, true, "a terminal gets the full sequence");
+  assert.equal(got.on_pipe, "", "a pipe gets nothing — no escapes in a log file");
+  assert.equal(got.guarded, true, "exec_box must restore the terminal in a finally");
+  // SIGKILL cannot be caught; 'broker box repair' is the way back from that one.
+  assert.deepEqual(got.signals, ["SIGHUP", "SIGTERM"]);
+});

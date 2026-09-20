@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from .. import config
+from .. import config, mcpbridge
 from ..out import die, warn
 # Imported as modules, not as names: a test that replaces one of these replaces
 # it where it lives, and a bound name here would keep pointing at the original.
@@ -56,16 +56,17 @@ def command(provider, name, profile, argv, env):
                 "-e", "BROKER_BOX_GID=%d" % os.getgid(),
                 # Its own layer store, kept between runs: no two boxes share
                 # images, and a test suite does not re-pull Postgres every time.
-                "--mount", "type=volume,source=broker-box-docker-%s,target=/var/lib/docker" % name]
+                #
+                # Per WINDOW, not just per box: a docker daemon owns
+                # /var/lib/docker exclusively, so a second box of the same name
+                # — another pane, another agent — found the store taken and
+                # started without a daemon at all. Reopening the same window
+                # still reuses its images.
+                "--mount", "type=volume,source=broker-box-docker-%s%s,target=/var/lib/docker"
+                % (name, ("-" + mcpbridge.identity_key()) if mcpbridge.identity_key() else "")]
     else:
         cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
     cmd += ["-e", "HOME=%s" % home, "-e", "USER=%s" % (os.environ.get("USER") or "user")]
-    # A harness told to skip its permission prompts still stops once to ask
-    # whether you really meant it, and warns that the mode belongs in "a
-    # sandboxed container that can easily be restored if damaged". That is a
-    # description of this, so the box says so and the question does not come up:
-    # it cannot be answered by anything that starts a box unattended.
-    cmd += ["-e", "IS_SANDBOX=1"]
     for variable in TERMINAL_ENV:
         if os.environ.get(variable):
             cmd += ["-e", "%s=%s" % (variable, os.environ[variable])]

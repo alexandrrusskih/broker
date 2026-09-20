@@ -39,6 +39,11 @@ CANONICAL_HOME = os.path.expanduser("~")
 PROFILE_BASE = os.path.expanduser("~/.agy")
 AUTH_NAME = os.path.join(".gemini", "antigravity-cli", "antigravity-oauth-token")
 
+# Where this harness declares its MCP servers. Its own file, not beside the
+# settings: without this a box bridged nothing for agy at all, and the agent
+# inside simply reported that agentbus was not there.
+MCP_CONFIG = ("~/.gemini/config/mcp_config.json", "json", "mcpServers")
+
 # Conversations, one database each, in the real home rather than the profile —
 # the profile only differs in the token. Used to print a resume line that keeps
 # the box (see box/run.py).

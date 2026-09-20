@@ -517,8 +517,13 @@ def _sync_back(provider, session, env=None):
     binary = real_bin(provider)
     if not binary:
         return
-    argv = [binary] + [part % {"session": session} for part in template]
-    by_hand = " ".join([provider.BIN] + [p % {"session": session} for p in template])
+    # One command, or several to run in order — a harness may need more than a
+    # single call to take a session into its history.
+    steps = template if isinstance(template[0], (list, tuple)) else (template,)
+    argvs = [[binary] + [part % {"session": session} for part in step] for step in steps]
+    by_hand = " && ".join(
+        " ".join([provider.BIN] + [part % {"session": session} for part in step])
+        for step in steps)
     try:
         os.makedirs(os.path.dirname(SYNC_LOG), mode=0o700, exist_ok=True)
         log = open(SYNC_LOG, "a")
@@ -531,7 +536,13 @@ def _sync_back(provider, session, env=None):
         pass
     try:
         # Its own session, so quitting the terminal does not take it with it.
-        subprocess.Popen(argv, env={**os.environ, **(env or {})},
+        # Chained through a shell rather than started one by one, because
+        # nothing here waits: the steps must still run in order after this
+        # process is gone.
+        import shlex
+
+        script = " && ".join(" ".join(shlex.quote(a) for a in argv) for argv in argvs)
+        subprocess.Popen(["/bin/sh", "-c", script], env={**os.environ, **(env or {})},
                          stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                          start_new_session=True)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -545,22 +556,6 @@ def _sync_back(provider, session, env=None):
                 log.close()
             except OSError:
                 pass
-
-
-def container_name(name):
-    """The one container a box keeps, shared by everything running in it."""
-    stem = re.sub(r"[^a-zA-Z0-9_.-]", "-", name).lower()
-    key = mcpbridge.identity_key()
-    return "broker-box-%s%s" % (stem, ("-" + key) if key else "")
-
-
-def _running(runtime, container):
-    try:
-        out = subprocess.run([runtime, "inspect", "-f", "{{.State.Running}}", container],
-                             capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return out.returncode == 0 and out.stdout.strip() == "true"
 
 
 # Putting the terminal back the way the harness found it.

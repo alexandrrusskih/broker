@@ -62,10 +62,21 @@ BOX_SHARED = ("sessions",)
 # out by the harness's own command — see BOX_SYNC.
 BOX_PRIVATE = ("*.sqlite",)
 
-# How a session written inside a box joins the history out here. The harness
-# reads it back out of the session file, which is exactly what this command is
-# for; merging its tables by hand would be us guessing at someone else's schema.
-BOX_SYNC = ("migrate-rollouts", "--thread", "%(session)s", "--apply")
+# How a session written inside a box joins the history out here.
+#
+# A thread started in a box is recorded in the box's own copy of the database,
+# and that record dies with the copy: out here the session file exists but the
+# thread is in no list, and `migrate-rollouts` refuses it — "missing its SQLite
+# metadata" — because the metadata it wants went with the copy.
+#
+# Archiving a session, then unarchiving it, makes the harness read the file and
+# write the thread into the history here. Two ordinary commands about a session
+# the user owns; no TUI, no model call, nothing guessed about someone else's
+# schema. Run in order, and the second undoes the first.
+BOX_SYNC = (
+    ("archive", "%(session)s"),
+    ("unarchive", "%(session)s"),
+)
 
 
 SESSION_RESUME = "resume %s"

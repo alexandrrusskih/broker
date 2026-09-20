@@ -727,3 +727,39 @@ print(json.dumps({
   assert.equal(got.wal_content, "pages not yet folded in",
     "an existing journal is cloned, not replaced — its pages are the newest ones");
 });
+
+test("a session written in a box joins the history out here, in order", async (t) => {
+  const dir = await temp(t);
+  const log = path.join(dir, "sync.log");
+  const out = engine(`
+import json, os, time
+from broker.box import run
+
+
+class Provider:
+    NAME = "demo"
+    BIN = "demo"
+    # Two steps: a thread started in a box lives in the box's copy of the
+    # database, and one call is not enough to take it into the history here.
+    BOX_SYNC = (("archive", "%(session)s"), ("unarchive", "%(session)s"))
+
+
+run.SYNC_LOG = ${JSON.stringify(log)}
+run.real_bin = lambda p: "/bin/echo"
+import broker.run
+broker.run.real_bin = lambda p: "/bin/echo"
+run._sync_back(Provider, "SID")
+# Started and left to run: nothing here waits for it.
+for _ in range(50):
+    time.sleep(0.1)
+    if os.path.exists(${JSON.stringify(log)}) and "unarchive" in open(${JSON.stringify(log)}).read():
+        break
+print(json.dumps({"log": open(${JSON.stringify(log)}).read()}))
+`);
+  const { log: text } = JSON.parse(out);
+  // Both steps ran, and in the order the provider listed them.
+  assert.ok(text.includes("archive SID"), "the first step runs");
+  assert.ok(text.includes("unarchive SID"), "and so does the second");
+  assert.ok(text.indexOf("archive SID") < text.indexOf("unarchive SID"),
+    "order matters: the second undoes the first");
+});

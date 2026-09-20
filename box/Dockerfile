@@ -3,7 +3,9 @@
 # in the environment on every run.
 #
 # Build it with: broker box build
-FROM node:22-bookworm-slim
+# node 24: what current projects ask for in "engines", and the harnesses run on
+# anything recent. Change it here when a project needs otherwise.
+FROM node:24-bookworm-slim
 
 # What a coding harness actually reaches for. ripgrep is not optional: claude
 # uses it for search and falls back to something much slower without it.
@@ -17,9 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `broker box build --claude <v> --codex <v>` overrides these.
 ARG CLAUDE_VERSION=latest
 ARG CODEX_VERSION=latest
+# bun is a project dependency, not a harness one: repositories pin it in
+# "packageManager", and without it `bun install` and every script that shells out
+# to it fails inside the box while working fine outside.
+ARG BUN_VERSION=latest
 RUN npm install -g --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
+      "bun@${BUN_VERSION}" \
  && npm cache clean --force
 
 # The harnesses' own updaters must not run here: the image is the version, and a

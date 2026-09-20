@@ -76,7 +76,7 @@ Usage:
                          Set the default account every command and wrapper uses.
   broker config [--url <url>] [--key <key>] [--account <name>]
                          Show or set local config (~/.config/broker/config.json).
-  broker box build [--claude <v>] [--codex <v>] [--no-cache]
+  broker box build [--claude <v>] [--codex <v>] [--bun <v>] [--no-cache]
   broker box list        Build the container image a --box runs in, or show what exists.
                          Then: claude --box <name> — the harness runs in a container
                          with only the directories that box names, at the same paths.
@@ -491,7 +491,7 @@ async function main() {
       const action = positional[0] || "list";
       if (action === "build") {
         const out = boxes.build({
-          image: flags.image, claude: flags.claude, codex: flags.codex,
+          image: flags.image, claude: flags.claude, codex: flags.codex, bun: flags.bun,
           noCache: flags["no-cache"] === true, runtime: flags.runtime
         });
         console.log(`Image ready: ${out.image}`);

@@ -375,6 +375,17 @@ def command(provider, name, profile, argv, env):
             cmd += _mount(host)
             cmd += ["-e", "%s=%s" % (home_env, host)]
 
+    # git refuses to touch a repository it thinks belongs to someone else, and
+    # inside a box it always thinks so: Docker Desktop's file sharing does not
+    # present ownership consistently — the mounted directory arrives as root
+    # while the files inside it arrive as you. Every path in here was named by
+    # the box and is mounted from your own machine, so the check has nothing
+    # left to protect. Passed as environment config rather than written into
+    # ~/.gitconfig: the host's own git is not ours to reconfigure.
+    cmd += ["-e", "GIT_CONFIG_COUNT=1",
+            "-e", "GIT_CONFIG_KEY_0=safe.directory",
+            "-e", "GIT_CONFIG_VALUE_0=*"]
+
     for key, value in sorted((profile.get("env") or {}).items()):
         cmd += ["-e", "%s=%s" % (key, value)]
     # The credentials for this run, and the marker that tells a harness spawning

@@ -3,9 +3,11 @@
 # in the environment on every run.
 #
 # Build it with: broker box build
-# node 24: what current projects ask for in "engines", and the harnesses run on
-# anything recent. Change it here when a project needs otherwise.
-FROM node:24-bookworm-slim
+# node 24 deliberately, not the newest: projects pin it in "engines" (finik asks
+# for >=24 <25), and the harnesses run on anything recent. trixie for the rest —
+# it carries python 3.13 rather than 3.11, and the MCP shims run on the image's
+# python.
+FROM node:24-trixie-slim
 
 # What a coding harness actually reaches for. ripgrep is not optional: claude
 # uses it for search and falls back to something much slower without it.
@@ -17,12 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Pinned at build time rather than floating: an image that quietly changes
 # harness version between runs is an image you cannot reproduce a bug in.
 # `broker box build --claude <v> --codex <v>` overrides these.
-ARG CLAUDE_VERSION=latest
-ARG CODEX_VERSION=latest
+# Pinned rather than floating: an image whose harness version changes between
+# builds is an image you cannot reproduce a bug in. Raise them deliberately.
+ARG CLAUDE_VERSION=2.1.278
+ARG CODEX_VERSION=0.155.1
 # bun is a project dependency, not a harness one: repositories pin it in
 # "packageManager", and without it `bun install` and every script that shells out
 # to it fails inside the box while working fine outside.
-ARG BUN_VERSION=latest
+ARG BUN_VERSION=1.4.2
 RUN npm install -g --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
@@ -38,8 +42,10 @@ RUN npm install -g --no-fund --no-audit \
 # directly. Pinned: a test suite that pulls a different compose between runs is
 # a test suite whose failures you cannot reproduce.
 ARG COMPOSE_VERSION=v5.5.1
+# docker.io is the daemon only on Debian 13; the client is its own package now,
+# and without it the box has a daemon nothing can talk to.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      docker.io iptables \
+      docker.io docker-cli iptables \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /usr/libexec/docker/cli-plugins \
  && curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \

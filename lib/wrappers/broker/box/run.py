@@ -60,6 +60,12 @@ def command(provider, name, profile, argv, env):
     else:
         cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
     cmd += ["-e", "HOME=%s" % home, "-e", "USER=%s" % (os.environ.get("USER") or "user")]
+    # A harness told to skip its permission prompts still stops once to ask
+    # whether you really meant it, and warns that the mode belongs in "a
+    # sandboxed container that can easily be restored if damaged". That is a
+    # description of this, so the box says so and the question does not come up:
+    # it cannot be answered by anything that starts a box unattended.
+    cmd += ["-e", "IS_SANDBOX=1"]
     for variable in TERMINAL_ENV:
         if os.environ.get(variable):
             cmd += ["-e", "%s=%s" % (variable, os.environ[variable])]

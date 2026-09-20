@@ -448,3 +448,21 @@ print(box.run._resume_hint(claude, "demo", "${project}", {}, time.time() + 60) o
 `, { HOME: dir });
   assert.match(out, /NONE/);
 });
+
+test("a box says it is a sandbox, so the harness does not stop to ask", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]}, [], {})))
+`, { HOME: dir });
+  // Told to skip its prompts, a harness still stops once to ask whether you
+  // meant it — and warns the mode belongs in "a sandboxed container that can
+  // easily be restored if damaged", which is a description of this. Nothing
+  // starting a box unattended could answer that question.
+  assert.ok(JSON.parse(out).join(" ").includes("IS_SANDBOX=1"));
+});

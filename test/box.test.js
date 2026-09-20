@@ -501,3 +501,35 @@ print(box.run._resume_hint(${provider}, "demo", "${project}", {"CODEX_HOME": "${
   await fs.writeFile(path.join(dir, ".claude", "projects", project.split(path.sep).join("-"), "s.jsonl"), "{}\n");
   assert.doesNotMatch(hint("claude", "sk"), /CLAUDE_ACCOUNT/);
 });
+
+test("a box reaches shared directories through every profile, not just this run's", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+  // Sessions are shared already: each profile's directory is a link into the
+  // canonical home.
+  const canonical = path.join(dir, ".tool");
+  await fs.mkdir(path.join(canonical, "sessions"), { recursive: true });
+  for (const account of ["one", "two"]) {
+    await fs.mkdir(path.join(dir, `.tool-${account}`), { recursive: true });
+    await fs.symlink(path.join(canonical, "sessions"), path.join(dir, `.tool-${account}`, "sessions"));
+  }
+
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import codex
+codex.MCP_CONFIG = None
+codex.CANONICAL_HOME = "${canonical}"
+codex.BOX_SHARED = ("sessions",)
+print(json.dumps(box.command(codex, "demo", {"rw": ["${project}"]}, [], {"CODEX_HOME": "${path.join(dir, ".tool-one")}"})))
+`, { HOME: dir });
+  const line = JSON.parse(out).join(" ");
+
+  // A harness records the path it saw, through whichever profile was current.
+  // Resuming under another account then fails on a file that is right there.
+  assert.ok(line.includes(`target=${dir}/.tool-one/sessions`), "this run's profile");
+  assert.ok(line.includes(`target=${dir}/.tool-two/sessions`), "and the one it used to be");
+  // Only that directory: another account's credentials stay out.
+  assert.ok(!line.includes(`${dir}/.tool-two/auth`), "nothing else of another account");
+});

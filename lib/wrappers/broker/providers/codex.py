@@ -40,6 +40,14 @@ MCP_CONFIG = ("~/.codex/config.toml", "toml", "mcp_servers")
 # that includes the box — the harness prints its own, and that one reopens the
 # session on the host instead.
 SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl"
+
+# Sessions are shared across accounts already — every profile's `sessions` is a
+# symlink into the canonical home — but the harness records the path it saw,
+# through whichever profile was current. Resuming under another account then
+# fails with "no rollout found", though the file is right there. So a box gets
+# that one directory from EVERY profile: the sessions, and nothing else of
+# someone else's account.
+BOX_SHARED = ("sessions",)
 SESSION_RESUME = "resume %s"
 
 REAL_BINS = (

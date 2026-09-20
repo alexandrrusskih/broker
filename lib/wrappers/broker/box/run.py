@@ -191,6 +191,20 @@ def command(provider, name, profile, argv, env):
     inside = any(cwd == p or cwd.startswith(p + os.sep) for p in map(os.path.realpath, projects))
     cmd += ["-w", cwd if inside else (os.path.realpath(projects[0]) if projects else home)]
 
+    # Directories that every profile of this harness should reach, not only the
+    # one this run uses: a harness can record a path through a profile it is no
+    # longer using, and the file it names is shared anyway.
+    shared = getattr(provider, "BOX_SHARED", ())
+    canonical = expand(getattr(provider, "CANONICAL_HOME", "~"))
+    if shared:
+        import glob as globmodule
+
+        for sibling in sorted(globmodule.glob(canonical + "-*")):
+            for entry in shared:
+                host = os.path.join(sibling, entry)
+                if os.path.exists(host):
+                    cmd += ["--mount", "type=bind,source=%s,target=%s" % (os.path.realpath(host), host)]
+
     # The harness's config directory, wherever this run was pointed at: a
     # per-account profile for a file-credentials provider, and for claude
     # whatever CLAUDE_CONFIG_DIR says — a terminal manager gives each agent its

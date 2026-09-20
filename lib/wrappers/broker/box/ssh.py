@@ -12,6 +12,20 @@ from .. import config
 from ..out import die
 from .paths import expand
 
+def _write_in_place(path, text):
+    """Rewrite a file without replacing it.
+
+    The usual write-beside-and-rename would give the file a new inode, and a box
+    already running has the old one bind-mounted: start a second box and the
+    first one finds its own ssh config gone — "No such file or directory" on a
+    path that is right there. Truncating in place keeps the inode, so every
+    container mounting it keeps reading the same file.
+    """
+    with open(path, "w") as fh:
+        fh.write(text)
+    os.chmod(path, 0o600)
+
+
 def _ssh_config(name, profile):
     """A private ~/.ssh for this box: only the keys it was told about.
 
@@ -80,20 +94,12 @@ def _ssh_config(name, profile):
     directory = os.path.join(config.CONFIG_DIR, "box")
     os.makedirs(directory, mode=0o700, exist_ok=True)
     path = os.path.join(directory, "ssh-config-%s" % name.replace("/", "_"))
-    tmp = path + ".new"
-    with open(tmp, "w") as fh:
-        fh.write("\n".join(lines) + "\n")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    _write_in_place(path, "\n".join(lines) + "\n")
 
     hosts_file = None
     if known:
         hosts_file = os.path.join(directory, "ssh-known-hosts-%s" % name.replace("/", "_"))
-        tmp = hosts_file + ".new"
-        with open(tmp, "w") as fh:
-            fh.write("\n".join(known) + "\n")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, hosts_file)
+        _write_in_place(hosts_file, "\n".join(known) + "\n")
     return path, keys, hosts_file
 
 

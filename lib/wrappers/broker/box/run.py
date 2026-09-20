@@ -75,6 +75,12 @@ def command(provider, name, profile, argv, env):
     # The directories below land on top of this, so what is mounted survives and
     # what is not is discarded with the container.
     cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700" % (home, os.getuid(), os.getgid())]
+    # ...and the same for ~/.config, which tools expect to be able to write to.
+    # Mounting anything below it makes the container create the directory
+    # itself, owned by root — and then `glab` cannot make its config directory
+    # and refuses to run at all. Read-only mounts land on top of this.
+    cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700"
+            % (os.path.join(home, ".config"), os.getuid(), os.getgid())]
 
     mounted = []
     passwd = _passwd_file(binary, image)

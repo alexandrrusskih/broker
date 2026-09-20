@@ -6,7 +6,17 @@
   // its own name and the physical one.
   "app": {
     "rw": ["~/Projects/app"],
-    "ro": ["~/Projects/shared-lib"]
+    "ro": ["~/Projects/shared-lib"],
+
+    // What the harness starts with. This is where a box says how much it trusts
+    // what runs inside it — the broker decides nothing about that, and a box
+    // existing implies nothing either. Full permissions in here are the point
+    // of a box: the boundary is what this file mounts, so asking again inside
+    // only stops work that was authorised by writing the box.
+    //
+    // Per harness, because each spells the same idea its own way; a plain list
+    // applies to all of them. Flags you type yourself still win.
+    "args": { "claude": ["--dangerously-skip-permissions"] }
   },
 
   // The harness's own directory (~/.claude, ~/.codex) comes along by itself:

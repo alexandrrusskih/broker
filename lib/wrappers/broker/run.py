@@ -100,6 +100,12 @@ def _path_without_shim(provider, target):
     return shim_free + os.pathsep + (os.environ.get("PATH") or "")
 
 
+def box_home_env():
+    from .box import REAL_HOME_ENV
+
+    return REAL_HOME_ENV
+
+
 def exec_harness(cfg, provider, account, auth, argv, extra_env=None, in_box=None):
     """Install the credentials for this account and become the harness."""
     # Two ways a harness takes credentials. codex and agy read a file, so the
@@ -124,6 +130,10 @@ def exec_harness(cfg, provider, account, auth, argv, extra_env=None, in_box=None
         except OSError as exc:
             die("cannot write %s in %s: %s" % (provider.AUTH_NAME, home, exc))
         if provider.HOME_ENV:
+            # Remember the home being replaced: a box resolves its own paths
+            # against it, and "~" would otherwise mean the profile.
+            if provider.HOME_ENV == "HOME" and os.environ.get("HOME"):
+                os.environ.setdefault(box_home_env(), os.environ["HOME"])
             os.environ[provider.HOME_ENV] = home
     provider.route_refresh(os.environ, cfg, account, auth)
     harness_env = getattr(provider, "harness_env", None)

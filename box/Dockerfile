@@ -46,6 +46,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(dpkg --print-architecture | sed s/amd64/x86_64/ | sed s/arm64/aarch64/)" \
  && chmod 0755 /usr/libexec/docker/cli-plugins/docker-compose
 
+# agy ships platform archives rather than an npm package, so it comes from its
+# own release. gh and glab are here because work that ends in a pull or merge
+# request should not have to leave the box to finish.
+ARG AGY_VERSION=1.2.7
+ARG GH_VERSION=2.101.0
+ARG GLAB_VERSION=1.118.0
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64 ;; \
+                    amd64) agy_arch=x64;   gh_arch=amd64; glab_arch=amd64 ;; \
+                    *) echo "unsupported architecture: $arch" >&2; exit 1 ;; esac; \
+    curl -fsSL -o /tmp/agy.tar.gz \
+      "https://github.com/google-antigravity/antigravity-cli/releases/download/${AGY_VERSION}/agy_cli_linux_${agy_arch}.tar.gz"; \
+    tar -xzf /tmp/agy.tar.gz -C /tmp; \
+    install -m 0755 /tmp/antigravity /usr/local/bin/agy; \
+    rm -f /tmp/antigravity; \
+    curl -fsSL -o /tmp/gh.tar.gz \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${gh_arch}.tar.gz"; \
+    tar -xzf /tmp/gh.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${gh_arch}/bin/gh" /usr/local/bin/gh; \
+    curl -fsSL -o /tmp/glab.tar.gz \
+      "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${glab_arch}.tar.gz"; \
+    tar -xzf /tmp/glab.tar.gz -C /tmp; \
+    install -m 0755 /tmp/bin/glab /usr/local/bin/glab; \
+    rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gh_* /tmp/bin; \
+    agy --version; gh --version | head -1; glab --version | head -1
+
 COPY box-entry.sh /usr/local/bin/broker-box-entry
 RUN chmod 0755 /usr/local/bin/broker-box-entry
 

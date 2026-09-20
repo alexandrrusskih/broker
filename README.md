@@ -134,7 +134,7 @@ every permission a harness asks for — write files, run commands, install thing
 while the blast radius stays the directories you named.
 
 ```sh
-broker box build                 # the image: the harnesses and the tools they use
+broker box build                 # the image: claude, codex, agy, gh, glab, node, bun, docker
 claude --box work                # interactive, with only what 'work' lists
 claude --box work --resume abc   # past sessions are still there
 codex --box work exec "..."      # same box, other harness
@@ -160,7 +160,8 @@ off the absolute path of the working directory, so a project remapped to
 `/workspace` would lose every past session and every `--resume`.
 
 **The harness's own directory comes along, whole.** `~/.claude` for claude,
-`~/.codex` for codex: settings, MCP servers, agents, commands, history. Listing
+`~/.codex` for codex, `~/.gemini` for agy: settings, MCP servers, agents,
+commands, history. Listing
 parts of it would silently drop whatever the next release adds. The one exception
 is the credentials file, which is covered by an empty one — the token arrives
 from the broker in the environment, and a copy on disk inside the box is a copy

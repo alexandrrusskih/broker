@@ -277,3 +277,27 @@ print(json.dumps(box.command(claude, "demo", {"rw": ["${link}"]}, [], {})))
   // and fail the build on a package that was there all along.
   assert.equal(cmd[cmd.indexOf("-w") + 1], path.join(physical, "sub"));
 });
+
+test("paths in a box resolve against your real home, not a profile handed to a harness", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+
+  // A file-credentials harness gets its account profile through $HOME. By the
+  // time the box is built, "~" no longer means what it says — and ~/.gemini
+  // resolved into the profile itself, so the real one was never mounted and
+  // every symlink the profile makes back into it dangled.
+  const out = engine(`
+import json, os
+from broker import box
+from broker.providers import agy
+agy.MCP_CONFIG = None
+os.environ["HOME"] = os.path.expanduser("~/.some-profile")
+print(json.dumps(box.command(agy, "demo", {"rw": ["${project}"]}, [], {})))
+`, { HOME: dir });
+  const line = JSON.parse(out).join(" ");
+
+  assert.ok(line.includes(`source=${dir}/.gemini,target=${dir}/.gemini`) || !line.includes(".gemini"),
+    "the harness directory is looked for in the real home");
+  assert.ok(!line.includes(".some-profile/.gemini"), "never inside the profile");
+});

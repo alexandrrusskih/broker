@@ -21,6 +21,7 @@ Two things make the difference between "it runs" and "it is usable":
 
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,35 @@ import time
 
 from . import config
 from .out import die, warn
+
+# Set by the engine before it hands a harness a profile through $HOME.
+REAL_HOME_ENV = "BROKER_REAL_HOME"
+
+
+def home_dir():
+    """Your home — the one you had before a profile took over $HOME.
+
+    A provider whose credentials live in a FILE gives the harness a profile
+    directory as $HOME, so by the time a box is built "~" no longer means what
+    it says. Expanding it then put ~/.gemini inside the profile itself: the real
+    one was never mounted, every symlink the profile makes back into it dangled,
+    and agy refused to start over a file that was there all along.
+
+    $HOME still wins when nothing has been substituted — a container, a test or
+    anything else that sets it means it.
+    """
+    return os.environ.get(REAL_HOME_ENV) or os.environ.get("HOME") or pwd.getpwuid(os.getuid()).pw_dir
+
+
+def expand(path):
+    """expanduser(), but against the real home rather than the current $HOME."""
+    path = str(path)
+    if path == "~":
+        return home_dir()
+    if path.startswith("~" + os.sep):
+        return os.path.join(home_dir(), path[2:])
+    return os.path.expanduser(path)
+
 
 # Inside a container "localhost" is the container. This is the host.
 HOST_GATEWAY = "host.docker.internal"
@@ -134,14 +164,14 @@ def mcp_servers(provider, env=None):
     if not spec:
         return {}
     path, kind, key = spec
-    path = os.path.expanduser(path)
+    path = expand(path)
 
     home_env = getattr(provider, "HOME_ENV", None)
     canonical = getattr(provider, "CANONICAL_HOME", None)
     in_use = (env or {}).get(home_env) if home_env else None
     if in_use and canonical:
-        in_use = os.path.abspath(os.path.expanduser(in_use))
-        canonical = os.path.abspath(os.path.expanduser(canonical))
+        in_use = os.path.abspath(expand(in_use))
+        canonical = os.path.abspath(expand(canonical))
         if path.startswith(canonical + os.sep):
             path = os.path.join(in_use, os.path.relpath(path, canonical))
     try:
@@ -188,7 +218,7 @@ def _bridge_env(name, server, profile, projects):
     env.update(server.get("env") or {})
     override = ((profile.get("mcp") or {}).get(name) or {}).get("env") or {}
     for key, value in override.items():
-        value = os.path.expanduser(str(value))
+        value = expand(str(value))
         # A value that IS a path becomes the physical one. Writing
         # ~/Projects/foo where that is a symlink would otherwise key a
         # code-memory database under a second name and reindex from scratch —
@@ -304,8 +334,8 @@ def _paths(profile, key):
     """
     for entry in profile.get(key) or []:
         if isinstance(entry, dict):
-            source = os.path.abspath(os.path.expanduser(entry.get("source") or ""))
-            target = os.path.abspath(os.path.expanduser(entry.get("target") or source))
+            source = os.path.abspath(expand(entry.get("source") or ""))
+            target = os.path.abspath(expand(entry.get("target") or source))
             if not entry.get("source"):
                 die("a path in the box lists no source: %r" % (entry,))
             # Its own, so it has to exist before the box can start.
@@ -313,7 +343,7 @@ def _paths(profile, key):
                 os.makedirs(source, mode=0o700, exist_ok=True)
             yield source, target
         else:
-            path = os.path.abspath(os.path.expanduser(entry))
+            path = os.path.abspath(expand(entry))
             yield path, path
 
 
@@ -331,7 +361,7 @@ def _ssh_config(name, profile):
     spec = profile.get("ssh")
     if not isinstance(spec, dict):
         return None, [], None
-    keys = [os.path.expanduser(k) for k in (spec.get("keys") or [])]
+    keys = [expand(k) for k in (spec.get("keys") or [])]
 
     # A host is either just its key, or a small table when the name you use is
     # not the address: your own ~/.ssh/config does not come along, so an alias
@@ -340,9 +370,9 @@ def _ssh_config(name, profile):
     for host, entry in (spec.get("hosts") or {}).items():
         if isinstance(entry, dict):
             settings = {k: v for k, v in entry.items() if k != "key"}
-            hosts[host] = (os.path.expanduser(entry.get("key") or ""), settings)
+            hosts[host] = (expand(entry.get("key") or ""), settings)
         else:
-            hosts[host] = (os.path.expanduser(entry), {})
+            hosts[host] = (expand(entry), {})
     keys += [k for k, _ in hosts.values() if k and k not in keys]
     missing = [k for k in keys if k and not os.path.exists(k)]
     if missing:
@@ -423,7 +453,7 @@ def _passwd_file(runtime, image):
     except (OSError, subprocess.SubprocessError):
         return None
     user = os.environ.get("USER") or "user"
-    line = "%s:x:%d:%d::%s:/bin/bash\n" % (user, os.getuid(), os.getgid(), os.path.expanduser("~"))
+    line = "%s:x:%d:%d::%s:/bin/bash\n" % (user, os.getuid(), os.getgid(), home_dir())
     try:
         os.makedirs(os.path.dirname(cache), mode=0o700, exist_ok=True)
         tmp = cache + ".new"
@@ -475,7 +505,7 @@ def command(provider, name, profile, argv, env):
     if not binary:
         die("%s is not installed — the '%s' box asks for it" % (runtime, name))
 
-    home = os.path.expanduser("~")
+    home = home_dir()
     image = profile.get("image") or "broker-box"
 
     cmd = [binary, "run", "--rm", "--init"]
@@ -510,7 +540,7 @@ def command(provider, name, profile, argv, env):
         cmd += ["--mount", "type=bind,source=%s,target=/etc/passwd,readonly" % passwd]
 
     for entry in COMMON_RO:
-        host = os.path.expanduser(entry)
+        host = expand(entry)
         if os.path.exists(host):
             cmd += _mount(host, "ro")
 
@@ -527,14 +557,14 @@ def command(provider, name, profile, argv, env):
 
     # The harness's own directory: settings, MCP servers, agents, history.
     for entry in getattr(provider, "BOX_HOME", ()):
-        host = os.path.expanduser(entry)
+        host = expand(entry)
         if os.path.exists(host):
             cmd += _mount(host)
             mounted.append(host)
     # ...minus its credentials file. The token comes from the broker below.
     blank = None
     for entry in getattr(provider, "BOX_SECRETS", ()):
-        host = os.path.expanduser(entry)
+        host = expand(entry)
         if any(host.startswith(m + os.sep) for m in mounted):
             blank = blank or _empty_file()
             cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (blank, host)]

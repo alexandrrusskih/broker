@@ -21,6 +21,13 @@ PATH_SHIELD = False
 
 CREDENTIALS = "file"
 
+# What comes into a --box with this harness. The per-account profile is mounted
+# by the engine (it carries the token), but the profile is a MIRROR: most of it
+# is symlinks back into the real ~/.gemini — bin, brain, installation_id. Inside
+# a box those point at nothing unless the original comes too, and agy refuses to
+# start at all: "CLI failed to start - open .../installation_id".
+BOX_HOME = ("~/.gemini",)
+
 # agy has no config-dir variable of its own — it goes to $HOME/.gemini and that
 # is that. So the profile IS a home directory, handed to the child through HOME,
 # and mirrored from the real one (see profile.mirror) so it differs in exactly

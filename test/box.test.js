@@ -253,3 +253,27 @@ print(json.dumps(box.command(claude, "demo", {"rw": [
   // The working directory is the path as the BOX sees it, never the host's.
   assert.equal(cmd[cmd.indexOf("-w") + 1], project);
 });
+
+test("the working directory inside a box is the physical path, not the link you typed", async (t) => {
+  const dir = await temp(t);
+  const physical = path.join(dir, "elsewhere", "project");
+  const link = path.join(dir, "Projects", "project");
+  await fs.mkdir(path.join(physical, "sub"), { recursive: true });
+  await fs.mkdir(path.dirname(link), { recursive: true });
+  await fs.symlink(physical, link);
+
+  const out = engine(`
+import json, os
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+os.chdir("${link}/sub")
+print(json.dumps(box.command(claude, "demo", {"rw": ["${link}"]}, [], {})))
+`, { HOME: dir });
+  const cmd = JSON.parse(out);
+
+  // Tools that key work off the directory resolve symlinks first: starting from
+  // the link made one dispatcher treat the project as a different repository
+  // and fail the build on a package that was there all along.
+  assert.equal(cmd[cmd.indexOf("-w") + 1], path.join(physical, "sub"));
+});

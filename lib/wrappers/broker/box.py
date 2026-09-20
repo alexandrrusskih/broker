@@ -554,9 +554,14 @@ def command(provider, name, profile, argv, env):
 
     # Start where you started, when that is inside the box; otherwise in the
     # first writable project, so a bare `claude --box work` lands somewhere real.
-    cwd = os.getcwd()
-    inside = any(cwd == p or cwd.startswith(p + os.sep) for p in projects)
-    cmd += ["-w", cwd if inside else (projects[0] if projects else home)]
+    # The physical path, not the one you typed. Tools that key work off the
+    # directory resolve symlinks first, and a run started from ~/Projects/foo —
+    # a link to /Volumes/.../foo — is not recognised as the same project: here
+    # that sent a build to the wrong repository identity and failed it on a
+    # missing package, which looks nothing like a path problem.
+    cwd = os.path.realpath(os.getcwd())
+    inside = any(cwd == p or cwd.startswith(p + os.sep) for p in map(os.path.realpath, projects))
+    cmd += ["-w", cwd if inside else (os.path.realpath(projects[0]) if projects else home)]
 
     # A provider that reads its credentials from a FILE has them in a profile
     # directory; that directory comes in at its own path, and the variable

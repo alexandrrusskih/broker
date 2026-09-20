@@ -28,6 +28,24 @@ TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
 # harness discovers that halfway through a task.
 COMMON_RO = ("~/.gitconfig",)
 
+def _clone(source, destination):
+    """Copy that costs nothing until something is written.
+
+    These files are databases, and one of them is nearly four gigabytes; copying
+    that on every start would be absurd. APFS clones instead: the copy shares
+    the same blocks until one side changes them, which is exactly the shape of
+    this — a box reads almost all of it and writes a little. `cp -c` asks for
+    that and falls back on its own when the filesystem cannot.
+    """
+    if os.path.exists(destination):
+        os.remove(destination)
+    try:
+        subprocess.run(["cp", "-c", source, destination], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        shutil.copy2(source, destination)
+
+
 def _write_stub(box, target, message):
     """A stand-in that explains itself and fails, instead of being missing."""
     directory = os.path.join(config.CONFIG_DIR, "box", "stubs", box.replace("/", "_"))
@@ -191,6 +209,36 @@ def command(provider, name, profile, argv, env):
     inside = any(cwd == p or cwd.startswith(p + os.sep) for p in map(os.path.realpath, projects))
     cmd += ["-w", cwd if inside else (os.path.realpath(projects[0]) if projects else home)]
 
+    # Files a box must not share with the host, however they got there: cloned
+    # in, so writing them inside changes nothing outside. One clone per real
+    # file — every profile's copy is a symlink to the same one — mounted at each
+    # name the harness might open it by.
+    private = getattr(provider, "BOX_PRIVATE", ())
+    home_env_now = getattr(provider, "HOME_ENV", None)
+    in_use = (env or {}).get(home_env_now) if home_env_now and home_env_now != "HOME" else None
+    if private:
+        import glob as globmodule
+
+        clones = {}
+        for base in [expand(getattr(provider, "CANONICAL_HOME", "~"))] + ([expand(in_use)] if in_use else []):
+            for pattern in private:
+                for host in sorted(globmodule.glob(os.path.join(base, pattern))):
+                    real = os.path.realpath(host)
+                    copy = clones.get(real)
+                    if copy is None:
+                        copy = os.path.join(config.CONFIG_DIR, "box", "private",
+                                            name.replace("/", "_"), provider.NAME,
+                                            os.path.basename(real))
+                        try:
+                            os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
+                            if not os.path.exists(copy) or os.path.getmtime(real) > os.path.getmtime(copy):
+                                _clone(real, copy)
+                        except OSError as exc:
+                            warn("could not give the box its own %s (%s)" % (os.path.basename(real), exc))
+                            continue
+                        clones[real] = copy
+                    cmd += ["--mount", "type=bind,source=%s,target=%s" % (copy, host)]
+
     # Directories that every profile of this harness should reach, not only the
     # one this run uses: a harness can record a path through a profile it is no
     # longer using, and the file it names is shared anyway.
@@ -352,6 +400,37 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None):
     return "\nResume it in this box with:\n  %s%s --box %s %s\n" % (pin, provider.BIN, name, resume)
 
 
+def _sync_back(provider, session, env=None):
+    """Put what the box wrote back into the history out here.
+
+    A box works on its own clone of the harness's databases, because sharing one
+    SQLite file across the container boundary tears it. The work itself is in
+    the session file, which IS shared — so the harness is asked to read that
+    session back into its history, which is what the command exists for. Merging
+    its tables by hand would be us guessing at someone else's schema.
+    """
+    template = getattr(provider, "BOX_SYNC", None)
+    if not template:
+        return
+    from ..run import real_bin
+
+    binary = real_bin(provider)
+    if not binary:
+        return
+    argv = [binary] + [part % {"session": session} for part in template]
+    try:
+        done = subprocess.run(argv, env={**os.environ, **(env or {})},
+                              capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.SubprocessError) as exc:
+        warn("could not fold this session back into the history (%s)" % exc)
+        return
+    if done.returncode != 0:
+        # Not fatal: the session file is intact, and the command can be run
+        # again by hand. Say which one, so it can be.
+        warn("this session is not in the history yet — run: %s"
+             % " ".join([provider.BIN] + [p % {"session": session} for p in template]))
+
+
 def exec_box(provider, name, argv, env, account=None):
     """Run the container, then say how to come back to it."""
     defined = boxes.profiles()
@@ -382,7 +461,10 @@ def exec_box(provider, name, argv, env, account=None):
     except OSError as exc:
         die("cannot start the '%s' box: %s" % (name, exc))
 
-    hint = _resume_hint(provider, name, workdir, env, started, account)
-    if hint and finished.returncode == 0:
-        sys.stdout.write(hint)
+    session = _last_session(provider, workdir, env, started)
+    if session:
+        _sync_back(provider, session, env)
+        hint = _resume_hint(provider, name, workdir, env, started, account)
+        if hint and finished.returncode == 0:
+            sys.stdout.write(hint)
     sys.exit(finished.returncode)

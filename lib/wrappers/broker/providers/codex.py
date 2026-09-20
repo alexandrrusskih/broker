@@ -48,6 +48,26 @@ SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl"
 # that one directory from EVERY profile: the sessions, and nothing else of
 # someone else's account.
 BOX_SHARED = ("sessions",)
+
+# The databases are the opposite: a box works on its own clone of each.
+#
+# They are SQLite, and file locks do not cross the boundary into the container —
+# a box holding an exclusive lock is invisible to the harness running here, so
+# both write at once and the file tears. Measured, then seen three times in one
+# afternoon: "database disk image is malformed", "file is not a database",
+# "row missing from index".
+#
+# Nothing is lost by working on a clone, because the work itself is in the
+# session files, which stay shared. What the box adds is put back on the way
+# out by the harness's own command — see BOX_SYNC.
+BOX_PRIVATE = ("*.sqlite",)
+
+# How a session written inside a box joins the history out here. The harness
+# reads it back out of the session file, which is exactly what this command is
+# for; merging its tables by hand would be us guessing at someone else's schema.
+BOX_SYNC = ("migrate-rollouts", "--thread", "%(session)s", "--apply")
+
+
 SESSION_RESUME = "resume %s"
 
 REAL_BINS = (

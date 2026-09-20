@@ -292,26 +292,52 @@ def _ssh_config(name, profile):
     if not isinstance(spec, dict):
         return None, [], None
     keys = [os.path.expanduser(k) for k in (spec.get("keys") or [])]
-    hosts = {h: os.path.expanduser(k) for h, k in (spec.get("hosts") or {}).items()}
-    keys += [k for k in hosts.values() if k not in keys]
-    missing = [k for k in keys if not os.path.exists(k)]
+
+    # A host is either just its key, or a small table when the name you use is
+    # not the address: your own ~/.ssh/config does not come along, so an alias
+    # that resolves on the host resolves to nothing in here.
+    hosts = {}
+    for host, entry in (spec.get("hosts") or {}).items():
+        if isinstance(entry, dict):
+            settings = {k: v for k, v in entry.items() if k != "key"}
+            hosts[host] = (os.path.expanduser(entry.get("key") or ""), settings)
+        else:
+            hosts[host] = (os.path.expanduser(entry), {})
+    keys += [k for k, _ in hosts.values() if k and k not in keys]
+    missing = [k for k in keys if k and not os.path.exists(k)]
     if missing:
         die("the '%s' box names ssh keys that do not exist: %s" % (name, ", ".join(missing)))
     if not keys:
         return None, [], None
 
+    # ssh reads these in the order it finds them, and the spelling is its own:
+    # HostName, User, Port, ProxyJump. Anything else the box names is passed
+    # through as written rather than guessed at.
+    ORDER = ("hostname", "user", "port", "proxyjump")
+    SPELLING = {"hostname": "HostName", "user": "User", "port": "Port", "proxyjump": "ProxyJump"}
     lines = ["# Written by the broker for the '%s' box." % name]
-    for host, key in sorted(hosts.items()):
-        lines += ["Host %s" % host, "  IdentityFile %s" % key, "  IdentitiesOnly yes", ""]
+    for host, (key, settings) in sorted(hosts.items()):
+        lines.append("Host %s" % host)
+        for field in ORDER:
+            if settings.get(field) is not None:
+                lines.append("  %s %s" % (SPELLING[field], settings[field]))
+        for field, value in sorted(settings.items()):
+            if field not in ORDER and value is not None:
+                lines.append("  %s %s" % (field, value))
+        if key:
+            lines += ["  IdentityFile %s" % key, "  IdentitiesOnly yes"]
+        lines.append("")
     # The hosts it will talk to, and only those. Without a known_hosts the box
     # cannot verify anything and cannot write what it learns either — the
     # directory it would write into belongs to the container. Copying the whole
     # host file instead would tell the box about every machine you have ever
     # reached, which is not access but is not its business either.
     known = []
-    for host in sorted(hosts):
+    for host, (_, settings) in sorted(hosts.items()):
+        # Look up what ssh will actually connect to, not the name you call it by.
+        lookup = settings.get("hostname") or host
         try:
-            found = subprocess.run(["ssh-keygen", "-F", host], capture_output=True, text=True, timeout=15)
+            found = subprocess.run(["ssh-keygen", "-F", str(lookup)], capture_output=True, text=True, timeout=15)
             known += [l for l in found.stdout.splitlines() if l and not l.startswith("#")]
         except (OSError, subprocess.SubprocessError):
             pass

@@ -190,6 +190,22 @@ config pins the host to its key with `IdentitiesOnly`, because the tools that
 need this call plain `ssh <host>` with no `-i` of their own, and `known_hosts`
 is built from your own, filtered to the hosts the box actually uses.
 
+Your `~/.ssh/config` does not come along either, so a name that is not an
+address needs spelling out — otherwise it resolves on the host and to nothing
+inside the box:
+
+```jsonc
+"ssh": {
+  "hosts": {
+    "10.0.0.5": "~/.ssh/box_work",
+    "gateway": { "key": "~/.ssh/box_gw", "hostname": "100.64.0.7", "user": "ops", "port": 2222 }
+  }
+}
+```
+
+`hostname`, `user`, `port` and `proxyjump` are written in ssh's own spelling;
+anything else is passed through as given.
+
 A box with no `ssh` section gets no ssh material at all.
 
 ### MCP inside a box

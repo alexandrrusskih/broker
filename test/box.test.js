@@ -182,6 +182,36 @@ print(json.dumps(box.command(claude, "demo", {
   assert.match(conf, /IdentitiesOnly yes/);
 });
 
+test("a host can be a name that is not an address, without carrying your ssh config in", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const keys = path.join(dir, "keys");
+  await fs.mkdir(project);
+  await fs.mkdir(keys);
+  await fs.writeFile(path.join(keys, "box_key"), "not a real key\n", { mode: 0o600 });
+
+  engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+box.command(claude, "demo", {
+  "rw": ["${project}"],
+  "ssh": {"hosts": {
+    "plain": "${keys}/box_key",
+    "alias": {"key": "${keys}/box_key", "hostname": "100.64.0.7", "user": "someone", "port": 2222},
+  }},
+}, [], {})
+`, { HOME: dir });
+
+  const conf = await fs.readFile(path.join(dir, ".config", "broker", "box", "ssh-config-demo"), "utf8");
+  // Your own ~/.ssh/config does not come along, so an alias that resolves on the
+  // host would resolve to nothing in here unless the box spells it out.
+  assert.match(conf, /Host alias\n  HostName 100\.64\.0\.7\n  User someone\n  Port 2222\n  IdentityFile/);
+  // The short form still means exactly what it did.
+  assert.match(conf, /Host plain\n  IdentityFile .*box_key\n  IdentitiesOnly yes/);
+});
+
 test("a box without an ssh section gets no ssh material at all", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");

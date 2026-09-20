@@ -675,3 +675,55 @@ with tempfile.TemporaryDirectory() as root:
   assert.equal(got.existing_untouched, "mine");
   assert.equal(got.canonical_untouched, "theirs");
 });
+
+test("a box gets its own sqlite journals, not only its own databases", async (t) => {
+  const dir = await temp(t);
+  const home = path.join(dir, ".codex");
+  const project = path.join(dir, "project");
+  await fs.mkdir(home, { recursive: true });
+  await fs.mkdir(project, { recursive: true });
+  // A database with a journal beside it, and one without — sqlite writes the
+  // journal on first open, so the box needs its own either way.
+  await fs.writeFile(path.join(home, "state_5.sqlite"), "db");
+  await fs.writeFile(path.join(home, "state_5.sqlite-wal"), "pages not yet folded in");
+  await fs.writeFile(path.join(home, "logs_2.sqlite"), "db");
+  await fs.writeFile(path.join(dir, "boxes.json"), JSON.stringify({
+    demo: { rw: [project] },
+  }));
+
+  const out = engine(`
+import json, os
+from broker import box
+from broker.box import boxes
+from broker.providers import codex
+box.boxes.PATH = ${JSON.stringify(path.join(dir, "boxes.json"))}
+codex.CANONICAL_HOME = ${JSON.stringify(home)}
+codex.BOX_HOME = (${JSON.stringify(home)},)
+cmd = box.command(codex, "demo", boxes.profiles()["demo"], [], {"CODEX_HOME": ${JSON.stringify(home)}})
+mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--mount"]
+inside = {}
+for m in mounts:
+    src = m.split("source=")[1].split(",")[0]
+    inside[m.split("target=")[1]] = src
+print(json.dumps({
+    "targets": sorted(t for t in inside if ".sqlite" in t),
+    "all_private": all("/box/private/" in src for t, src in inside.items() if ".sqlite" in t),
+    "wal_content": open(inside[os.path.join(${JSON.stringify(home)}, "state_5.sqlite-wal")]).read(),
+}))
+`, { BROKER_CONFIG_DIR: dir, HOME: dir });
+
+  const got = JSON.parse(out);
+  // sqlite keeps -wal/-shm BESIDE the database. Cloning the database alone
+  // left those coming from the directory mount — shared with the host — so the
+  // box wrote its pages into its own copy and its journal into everyone's.
+  for (const suffix of ["", "-wal", "-shm"]) {
+    assert.ok(got.targets.includes(path.join(home, `state_5.sqlite${suffix}`)),
+      `state_5.sqlite${suffix} must be mounted privately`);
+  }
+  // Even where the host has no journal yet: sqlite would otherwise create one
+  // in the shared directory the moment it opens the database.
+  assert.ok(got.targets.includes(path.join(home, "logs_2.sqlite-wal")));
+  assert.equal(got.all_private, true, "every sqlite path comes from the box's own copy");
+  assert.equal(got.wal_content, "pages not yet folded in",
+    "an existing journal is cloned, not replaced — its pages are the newest ones");
+});

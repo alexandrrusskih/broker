@@ -31,6 +31,7 @@ test("only command-started MCP servers are bridged; http ones are left alone", a
   const out = engine(`
 import json
 from broker import box
+from broker.box import boxes, mcp, run
 from broker.providers import claude
 claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
 print(json.dumps(box.mcp_servers(claude)))
@@ -112,9 +113,10 @@ test("the shim stands in for the server's own command, at its own path", async (
   const out = engine(`
 import json
 from broker import box
+from broker.box import boxes, mcp, run
 from broker.providers import claude
 claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
-box._start_bridge = lambda *a: {"port": 41234, "token": "fake-secret", "command": ["x"]}
+box.mcp._start_bridge = lambda *a: {"port": 41234, "token": "fake-secret", "command": ["x"]}
 print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]}, [], {})))
 `, { HOME: dir });
 
@@ -142,6 +144,7 @@ test("a box can turn bridging off, and can say what a server should see", async 
   const off = engine(`
 import json
 from broker import box
+from broker.box import boxes, mcp, run
 from broker.providers import claude
 claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
 print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"], "mcp": False}, [], {})))
@@ -152,12 +155,13 @@ print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"], "mcp": False
   const env = engine(`
 import json
 from broker import box
+from broker.box import boxes, mcp, run
 from broker.providers import claude
 claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
 servers = box.mcp_servers(claude)
 print(json.dumps([
-  box._bridge_env("probe", servers["probe"], {}, ["${project}"])["CBM_ALLOWED_ROOT"],
-  box._bridge_env("probe", servers["probe"], {"mcp": {"probe": {"env": {"CBM_ALLOWED_ROOT": "/explicit"}}}}, ["${project}"])["CBM_ALLOWED_ROOT"],
+  box.mcp._bridge_env("probe", servers["probe"], {}, ["${project}"])["CBM_ALLOWED_ROOT"],
+  box.mcp._bridge_env("probe", servers["probe"], {"mcp": {"probe": {"env": {"CBM_ALLOWED_ROOT": "/explicit"}}}}, ["${project}"])["CBM_ALLOWED_ROOT"],
 ]))
 `, { HOME: dir });
   assert.deepEqual(JSON.parse(env), [project, "/explicit"]);
@@ -177,6 +181,7 @@ test("an explicit path in a box resolves symlinks too, so it cannot key a second
   const out = engine(`
 import json
 from broker import box
+from broker.box import boxes, mcp, run
 from broker.providers import claude
 claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
 servers = box.mcp_servers(claude)
@@ -184,7 +189,7 @@ profile = {"mcp": {"probe": {"env": {
     "CBM_ALLOWED_ROOT": "${link}",
     "CBM_CACHE_DIR": "${dir}/cache/not-created-yet",
     "CBM_LABEL": "just a string"}}}}
-env = box._bridge_env("probe", servers["probe"], profile, [])
+env = box.mcp._bridge_env("probe", servers["probe"], profile, [])
 print(json.dumps([env["CBM_ALLOWED_ROOT"], env["CBM_CACHE_DIR"], env["CBM_LABEL"]]))
 `, { HOME: dir });
 
@@ -208,14 +213,15 @@ test("a symlinked project comes in under both names, and keeps its existing inde
   const out = engine(`
 import json
 from broker import box
+from broker.box import boxes, mcp, run
 from broker.providers import claude
 claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
-box._start_bridge = lambda *a: None
+box.mcp._start_bridge = lambda *a: None
 cmd = box.command(claude, "demo", {"rw": ["${link}"]}, [], {})
 servers = box.mcp_servers(claude)
 print(json.dumps({
   "cmd": cmd,
-  "root": box._bridge_env("probe", servers["probe"], {}, ["${link}"])["CBM_ALLOWED_ROOT"],
+  "root": box.mcp._bridge_env("probe", servers["probe"], {}, ["${link}"])["CBM_ALLOWED_ROOT"],
 }))
 `, { HOME: dir });
   const { cmd, root } = JSON.parse(out);
@@ -246,6 +252,7 @@ test("MCP is read from the profile the run actually uses, not the canonical home
   const read = (env) => JSON.parse(engine(`
 import json
 from broker import box
+from broker.box import boxes, mcp, run
 from broker.providers import codex
 codex.MCP_CONFIG = ("${canonical}/config.toml", "toml", "mcp_servers")
 codex.CANONICAL_HOME = ${JSON.stringify(canonical)}
@@ -269,9 +276,10 @@ test("variables a server is declared to inherit are carried into the box", async
   const out = engine(`
 import json
 from broker import box
+from broker.box import boxes, mcp, run
 from broker.providers import codex
 codex.MCP_CONFIG = ("${dir}/config.toml", "toml", "mcp_servers")
-box._start_bridge = lambda *a: {"port": 1, "token": "x", "command": ["y"]}
+box.mcp._start_bridge = lambda *a: {"port": 1, "token": "x", "command": ["y"]}
 print(json.dumps(box.command(codex, "demo", {"rw": ["${project}"]}, [], {})))
 `, { HOME: dir, PROBE_ACTOR: "reader" });
 

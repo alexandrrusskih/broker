@@ -43,6 +43,12 @@ BOX_SECRETS = ("~/.claude/.credentials.json",)
 # only exist on this machine (see mcpbridge.py).
 MCP_CONFIG = ("~/.claude.json", "json", "mcpServers")
 
+# Sessions, keyed by the working directory with its separators turned into
+# dashes. A box reads the newest one on the way out, to print a resume line that
+# includes the box — the harness prints its own, and that one reopens the
+# session on the host instead.
+SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
+
 # An API key in the environment outranks the OAuth token, so a stray one would
 # quietly bill the wrong thing while looking like it worked.
 CLEAR_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")

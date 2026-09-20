@@ -475,3 +475,29 @@ print(json.dumps(box.command(claude, "demo", {
   assert.match(stub, /not in a box; use its MCP tools/);
   assert.match(stub, /exit 127/, "it fails like a missing command, but says why");
 });
+
+test("the resume line names the account when sessions live in one", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const sessions = path.join(dir, "cfg", "sessions", "2026", "09", "20");
+  await fs.mkdir(project, { recursive: true });
+  await fs.mkdir(sessions, { recursive: true });
+  await fs.writeFile(path.join(sessions,
+    "rollout-2026-09-20T10-00-00-019efe7b-889a-72d3-8a7c-bfae7be3dacd.jsonl"), "{}\n");
+
+  const hint = (provider, account) => engine(`
+from broker import box
+from broker.providers import ${provider}
+${provider}.SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl" if "${provider}" == "codex" else "%(home)s/.claude/projects/%(key)s/*.jsonl"
+print(box.run._resume_hint(${provider}, "demo", "${project}", {"CODEX_HOME": "${path.join(dir, "cfg")}"}, 0, ${JSON.stringify(account)}) or "NONE")
+`, { HOME: dir });
+
+  // The broker moves to another account when one runs out of room, and a
+  // session recorded under the first is then not found at all.
+  assert.match(hint("codex", "sk"), /CODEX_ACCOUNT=sk codex --box demo resume /);
+  // claude keeps its sessions outside any profile, so naming an account there
+  // would only be noise.
+  await fs.mkdir(path.join(dir, ".claude", "projects", project.split(path.sep).join("-")), { recursive: true });
+  await fs.writeFile(path.join(dir, ".claude", "projects", project.split(path.sep).join("-"), "s.jsonl"), "{}\n");
+  assert.doesNotMatch(hint("claude", "sk"), /CLAUDE_ACCOUNT/);
+});

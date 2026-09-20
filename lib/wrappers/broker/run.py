@@ -149,7 +149,7 @@ def exec_harness(cfg, provider, account, auth, argv, extra_env=None, in_box=None
     # here, on the host, and handed in.
     if in_box:
         from . import box
-        box.exec_box(provider, in_box, argv, os.environ)
+        box.exec_box(provider, in_box, argv, os.environ, account)
 
     target = real_bin(provider)
     if not target:

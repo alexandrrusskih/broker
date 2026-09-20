@@ -314,22 +314,31 @@ def _last_session(provider, workdir, env=None, since=0):
     return match.group(0) if match else stem
 
 
-def _resume_hint(provider, name, workdir, env=None, since=0):
-    """What to type to come back INTO this box.
+def _resume_hint(provider, name, workdir, env=None, since=0, account=None):
+    """What to type to come back INTO this box, on the same account.
 
     The harness prints its own resume line as it exits, and that line is missing
     the box: run it as printed and the session reopens on the host, in a
     different world, which is not obvious until something behaves oddly.
+
+    And for a harness whose sessions live inside a per-account profile, the
+    account matters as much as the box. The broker moves to another account when
+    one runs out of room, and the session recorded under the first is then not
+    found at all: "no rollout found for thread id". Naming the account makes the
+    line reopen what it says it will.
     """
     session = _last_session(provider, workdir, env, since)
     if not session:
         return None
     # Each harness spells resuming its own way.
     resume = getattr(provider, "SESSION_RESUME", "--resume %s") % session
-    return "\nResume it in this box with:\n  %s --box %s %s\n" % (provider.BIN, name, resume)
+    pin = ""
+    if account and getattr(provider, "CREDENTIALS", "file") != "env":
+        pin = "%s_ACCOUNT=%s " % (provider.NAME.upper(), account)
+    return "\nResume it in this box with:\n  %s%s --box %s %s\n" % (pin, provider.BIN, name, resume)
 
 
-def exec_box(provider, name, argv, env):
+def exec_box(provider, name, argv, env, account=None):
     """Run the container, then say how to come back to it."""
     defined = boxes.profiles()
     if name not in defined:
@@ -359,7 +368,7 @@ def exec_box(provider, name, argv, env):
     except OSError as exc:
         die("cannot start the '%s' box: %s" % (name, exc))
 
-    hint = _resume_hint(provider, name, workdir, env, started)
+    hint = _resume_hint(provider, name, workdir, env, started, account)
     if hint and finished.returncode == 0:
         sys.stdout.write(hint)
     sys.exit(finished.returncode)

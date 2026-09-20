@@ -169,6 +169,29 @@ that can leave it.
 Everything after a bare `--` reaches the harness untouched, so a prompt that
 mentions `--box` is a prompt.
 
+### ssh from a box
+
+Mounting `~/.ssh` hands a box every key on the machine — GitHub, the cloud VMs,
+whatever else is in there — when what it usually needs is one host. So keys are
+named, one at a time:
+
+```jsonc
+{
+  "work": {
+    "rw": ["~/Projects/example"],
+    "ssh": { "hosts": { "10.0.0.5": "~/.ssh/box_work" } }
+  }
+}
+```
+
+Only that key is mounted, at its own path. The others are not forbidden — they
+are absent, so nothing inside can use them however it is asked to. The generated
+config pins the host to its key with `IdentitiesOnly`, because the tools that
+need this call plain `ssh <host>` with no `-i` of their own, and `known_hosts`
+is built from your own, filtered to the hosts the box actually uses.
+
+A box with no `ssh` section gets no ssh material at all.
+
 ### MCP inside a box
 
 MCP servers keep working, including the ones that could never run in a container:

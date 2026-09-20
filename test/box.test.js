@@ -148,3 +148,50 @@ print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]${extra}}, [],
   // Its own layer store, so two boxes never share images.
   assert.ok(withDocker.includes("type=volume,source=broker-box-docker-demo,target=/var/lib/docker"));
 });
+
+test("a box gets only the ssh keys it names, and knows only the hosts it uses", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const keys = path.join(dir, "keys");
+  await fs.mkdir(project);
+  await fs.mkdir(keys);
+  await fs.writeFile(path.join(keys, "box_key"), "not a real key\n", { mode: 0o600 });
+  await fs.writeFile(path.join(keys, "personal_key"), "not a real key either\n", { mode: 0o600 });
+
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+print(json.dumps(box.command(claude, "demo", {
+  "rw": ["${project}"],
+  "ssh": {"hosts": {"10.0.0.5": "${keys}/box_key"}},
+}, [], {})))
+`, { HOME: dir });
+  const line = JSON.parse(out).join(" ");
+
+  assert.ok(line.includes(`source=${keys}/box_key`), "the named key comes in");
+  // Not forbidden — absent. Nothing inside can use a key that was never mounted,
+  // however it is asked to.
+  assert.ok(!line.includes("personal_key"), "every other key stays out");
+  assert.ok(line.includes(`target=${dir}/.ssh/config,readonly`));
+
+  const conf = await fs.readFile(path.join(dir, ".config", "broker", "box", "ssh-config-demo"), "utf8");
+  // The tools that need this call plain `ssh <host>` with no -i of their own.
+  assert.match(conf, /Host 10\.0\.0\.5/);
+  assert.match(conf, /IdentitiesOnly yes/);
+});
+
+test("a box without an ssh section gets no ssh material at all", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]}, [], {})))
+`, { HOME: dir });
+  assert.ok(!JSON.parse(out).join(" ").includes(".ssh"), "mounting ~/.ssh is never implicit");
+});

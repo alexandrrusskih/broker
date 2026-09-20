@@ -277,6 +277,100 @@ def _paths(profile, key):
         yield os.path.abspath(os.path.expanduser(entry))
 
 
+def _ssh_config(name, profile):
+    """A private ~/.ssh for this box: only the keys it was told about.
+
+    Mounting the real ~/.ssh hands a box every key on the machine — GitHub, the
+    cloud VMs, whatever else is in there — when what it usually needs is one
+    host. Naming keys in the box keeps the rest out of reach entirely: they are
+    not mounted, so nothing inside can use them however it is asked to.
+
+    The generated config pins each host to its key with IdentitiesOnly, because
+    the tools that need this call plain `ssh <host>` with no -i of their own.
+    """
+    spec = profile.get("ssh")
+    if not isinstance(spec, dict):
+        return None, [], None
+    keys = [os.path.expanduser(k) for k in (spec.get("keys") or [])]
+    hosts = {h: os.path.expanduser(k) for h, k in (spec.get("hosts") or {}).items()}
+    keys += [k for k in hosts.values() if k not in keys]
+    missing = [k for k in keys if not os.path.exists(k)]
+    if missing:
+        die("the '%s' box names ssh keys that do not exist: %s" % (name, ", ".join(missing)))
+    if not keys:
+        return None, [], None
+
+    lines = ["# Written by the broker for the '%s' box." % name]
+    for host, key in sorted(hosts.items()):
+        lines += ["Host %s" % host, "  IdentityFile %s" % key, "  IdentitiesOnly yes", ""]
+    # The hosts it will talk to, and only those. Without a known_hosts the box
+    # cannot verify anything and cannot write what it learns either — the
+    # directory it would write into belongs to the container. Copying the whole
+    # host file instead would tell the box about every machine you have ever
+    # reached, which is not access but is not its business either.
+    known = []
+    for host in sorted(hosts):
+        try:
+            found = subprocess.run(["ssh-keygen", "-F", host], capture_output=True, text=True, timeout=15)
+            known += [l for l in found.stdout.splitlines() if l and not l.startswith("#")]
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    directory = os.path.join(config.CONFIG_DIR, "box")
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    path = os.path.join(directory, "ssh-config-%s" % name.replace("/", "_"))
+    tmp = path + ".new"
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+    hosts_file = None
+    if known:
+        hosts_file = os.path.join(directory, "ssh-known-hosts-%s" % name.replace("/", "_"))
+        tmp = hosts_file + ".new"
+        with open(tmp, "w") as fh:
+            fh.write("\n".join(known) + "\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, hosts_file)
+    return path, keys, hosts_file
+
+
+def _passwd_file(runtime, image):
+    """An /etc/passwd that knows who you are inside the box.
+
+    The box runs as your own uid, which no image has an account for — and some
+    tools refuse to start without one: ssh dies with "No user exists for uid
+    501" before it reads a single option, which takes the Windows test offload
+    with it. So the image's own passwd gets one line appended and is mounted
+    back over itself. Built once and cached; the file it is built from changes
+    about as often as the image is rebuilt.
+    """
+    cache = os.path.join(config.CONFIG_DIR, "box", "passwd-%s" % image.replace("/", "_").replace(":", "_"))
+    if os.path.exists(cache):
+        return cache
+    try:
+        base = subprocess.run([runtime, "run", "--rm", "--entrypoint", "cat", image, "/etc/passwd"],
+                              capture_output=True, text=True, timeout=120)
+        if base.returncode != 0:
+            return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    user = os.environ.get("USER") or "user"
+    line = "%s:x:%d:%d::%s:/bin/bash\n" % (user, os.getuid(), os.getgid(), os.path.expanduser("~"))
+    try:
+        os.makedirs(os.path.dirname(cache), mode=0o700, exist_ok=True)
+        tmp = cache + ".new"
+        with open(tmp, "w") as fh:
+            fh.write(base.stdout if base.stdout.endswith("\n") else base.stdout + "\n")
+            fh.write(line)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, cache)
+    except OSError:
+        return None
+    return cache
+
+
 def _mount(host, mode="rw"):
     """Mount a path at its own path — and at its physical one too, if they differ.
 
@@ -342,10 +436,25 @@ def command(provider, name, profile, argv, env):
     cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700" % (home, os.getuid(), os.getgid())]
 
     mounted = []
+    passwd = _passwd_file(binary, image)
+    if passwd:
+        cmd += ["--mount", "type=bind,source=%s,target=/etc/passwd,readonly" % passwd]
+
     for entry in COMMON_RO:
         host = os.path.expanduser(entry)
         if os.path.exists(host):
             cmd += _mount(host, "ro")
+
+    # Named keys only, at their own paths, so a tool that resolves ~/.ssh/<name>
+    # finds what it expects and nothing else is there to find.
+    ssh_config, ssh_keys, ssh_known = _ssh_config(name, profile)
+    if ssh_config:
+        cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (ssh_config, os.path.join(home, ".ssh", "config"))]
+        for key in ssh_keys:
+            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (key, key)]
+        if ssh_known:
+            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly"
+                    % (ssh_known, os.path.join(home, ".ssh", "known_hosts"))]
 
     # The harness's own directory: settings, MCP servers, agents, history.
     for entry in getattr(provider, "BOX_HOME", ()):

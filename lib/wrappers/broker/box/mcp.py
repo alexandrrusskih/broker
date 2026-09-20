@@ -118,7 +118,12 @@ def _start_bridge(name, server, profile, projects):
     try:
         subprocess.Popen(
             [sys.executable, "-m", "broker.mcpbridge", "serve", name, "--"] + server["command"],
-            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            # The directory the package is imported FROM: this file sits in
+            # broker/box/, so that is three levels up. It was two before the
+            # engine was split into modules, and the bridge silently stopped
+            # starting — "the bridge did not come up", with every MCP server
+            # missing inside the box.
+            cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             env=_bridge_env(name, server, profile, projects),
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True,  # it outlives this process: the box is its client

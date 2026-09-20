@@ -23,6 +23,13 @@ if [ "${BROKER_BOX_DOCKER:-}" = "1" ] && ! docker info >/dev/null 2>&1; then
   chmod 0660 /var/run/docker.sock 2>/dev/null || true
 fi
 
+# The places a personal machine keeps its own commands. Without them a box has
+# a PATH the image chose, and anything mounted from your ~/bin is invisible:
+# an agent told to run one of your tools gets "command not found" and goes
+# looking for the binary across the whole disk.
+PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+export PATH
+
 if [ -n "${BROKER_BOX_UID:-}" ] && [ "$(id -u)" = "0" ]; then
   exec setpriv --reuid "$BROKER_BOX_UID" --regid "${BROKER_BOX_GID:-0}" --clear-groups "$@"
 fi

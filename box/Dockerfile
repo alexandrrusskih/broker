@@ -90,6 +90,16 @@ RUN set -eux; \
     rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gh_* /tmp/bin; \
     agy --version; gh --version | head -1; glab --version | head -1; rtk --version
 
+# A personal machine keeps commands in ~/bin and ~/.local/bin, and things
+# mounted from there must be reachable by name. Set in the shell profile too,
+# not only by the entry point: a login shell re-reads /etc/profile and would
+# otherwise drop them again.
+RUN printf '%s\n' 'case ":$PATH:" in' \
+      '  *":$HOME/bin:"*) ;;' \
+      '  *) PATH="$HOME/bin:$HOME/.local/bin:$PATH"; export PATH ;;' \
+      'esac' > /etc/profile.d/broker-box-path.sh \
+ && chmod 0644 /etc/profile.d/broker-box-path.sh
+
 COPY box-entry.sh /usr/local/bin/broker-box-entry
 RUN chmod 0755 /usr/local/bin/broker-box-entry
 

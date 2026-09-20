@@ -37,7 +37,7 @@ print(json.dumps(box.mcp_servers(claude)))
 `);
   assert.deepEqual(JSON.parse(out), {
     // A server reached over the network needs nothing from us.
-    local: { command: ["/opt/tool/mcp", "serve"], env: { TOOL_ROOT: "/somewhere" } }
+    local: { command: ["/opt/tool/mcp", "serve"], env: { TOOL_ROOT: "/somewhere" }, inherit: [] }
   });
 });
 
@@ -228,4 +228,56 @@ print(json.dumps({
   // The database is keyed by the path given, so the symlinked spelling would
   // start a second one and reindex the project from scratch.
   assert.equal(root, physical);
+});
+
+test("MCP is read from the profile the run actually uses, not the canonical home", async (t) => {
+  const dir = await temp(t);
+  const canonical = path.join(dir, ".codex");
+  const profile = path.join(dir, ".codex-sk");
+  await fs.mkdir(canonical);
+  await fs.mkdir(profile);
+  // The same server, spelled differently in each — which is what actually
+  // happened: one through /Volumes, the other through ~/Projects.
+  await fs.writeFile(path.join(canonical, "config.toml"),
+    '[mcp_servers.probe]\ncommand = "/canonical/path/mcp"\n');
+  await fs.writeFile(path.join(profile, "config.toml"),
+    '[mcp_servers.probe]\ncommand = "/profile/path/mcp"\n');
+
+  const read = (env) => JSON.parse(engine(`
+import json
+from broker import box
+from broker.providers import codex
+codex.MCP_CONFIG = ("${canonical}/config.toml", "toml", "mcp_servers")
+codex.CANONICAL_HOME = ${JSON.stringify(canonical)}
+print(json.dumps(box.mcp_servers(codex, ${JSON.stringify(env)})["probe"]["command"]))
+`, { HOME: dir }));
+
+  // An account's profile carries its own copy, and the two drift. Reading the
+  // canonical one mounts the stand-in where the harness never looks, and the
+  // server is reported missing.
+  assert.deepEqual(read({ CODEX_HOME: profile }), ["/profile/path/mcp"]);
+  assert.deepEqual(read({}), ["/canonical/path/mcp"], "with no profile in play, nothing changes");
+});
+
+test("variables a server is declared to inherit are carried into the box", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+  await fs.writeFile(path.join(dir, "config.toml"),
+    '[mcp_servers.probe]\ncommand = "/opt/tool/mcp"\nenv_vars = ["PROBE_ACTOR", "PROBE_ABSENT"]\n');
+
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import codex
+codex.MCP_CONFIG = ("${dir}/config.toml", "toml", "mcp_servers")
+box._start_bridge = lambda *a: {"port": 1, "token": "x", "command": ["y"]}
+print(json.dumps(box.command(codex, "demo", {"rw": ["${project}"]}, [], {})))
+`, { HOME: dir, PROBE_ACTOR: "reader" });
+
+  const line = JSON.parse(out).join(" ");
+  // codex declares which variables a server expects to inherit rather than
+  // spelling out their values; inside a box nothing is inherited.
+  assert.ok(line.includes("PROBE_ACTOR=reader"));
+  assert.ok(!line.includes("PROBE_ABSENT"), "a variable that is not set is not invented");
 });

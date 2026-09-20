@@ -118,17 +118,32 @@ def take_flag(argv):
     return name, rest
 
 
-def mcp_servers(provider):
+def mcp_servers(provider, env=None):
     """The MCP servers this harness declares that a box would otherwise lose.
 
     Only the ones started as a COMMAND: a server reached over http needs nothing
     from us, it is already reachable from inside the box.
+
+    Read from the profile this run actually uses, not from the canonical home.
+    An account's profile carries its own copy of the config, and the two drift:
+    here one spelled a server's path through ~/Projects and the other through
+    /Volumes, so the box mounted the stand-in where the harness never looked and
+    reported the server missing.
     """
     spec = getattr(provider, "MCP_CONFIG", None)
     if not spec:
         return {}
     path, kind, key = spec
     path = os.path.expanduser(path)
+
+    home_env = getattr(provider, "HOME_ENV", None)
+    canonical = getattr(provider, "CANONICAL_HOME", None)
+    in_use = (env or {}).get(home_env) if home_env else None
+    if in_use and canonical:
+        in_use = os.path.abspath(os.path.expanduser(in_use))
+        canonical = os.path.abspath(os.path.expanduser(canonical))
+        if path.startswith(canonical + os.sep):
+            path = os.path.join(in_use, os.path.relpath(path, canonical))
     try:
         if kind == "toml":
             import tomllib
@@ -151,6 +166,12 @@ def mcp_servers(provider):
         found[name] = {
             "command": [command] + list(server.get("args") or []),
             "env": dict(server.get("env") or {}),
+            # codex declares which variables a server expects to inherit rather
+            # than spelling out their values. Inside a box nothing is inherited,
+            # so the server starts without them — and one that needs them to
+            # know who it is answering for simply exposes no tools, which reads
+            # as "server missing" and is nothing of the kind.
+            "inherit": [v for v in (server.get("env_vars") or []) if isinstance(v, str)],
         }
     return found
 
@@ -550,9 +571,10 @@ def command(provider, name, profile, argv, env):
     # mounted AT THE COMMAND'S OWN PATH, which means the harness's own config
     # needs no rewriting: it already points there. Servers reached over http are
     # left alone; the box can dial them itself.
+    inherited = {}
     if profile.get("mcp") is not False:
         claimed = {}
-        for name, server in sorted(mcp_servers(provider).items()):
+        for name, server in sorted(mcp_servers(provider, env).items()):
             target = server["command"][0]
             if target in claimed:
                 warn("%s and %s start from the same command (%s) — only the first is bridged"
@@ -561,9 +583,14 @@ def command(provider, name, profile, argv, env):
             live = _start_bridge(name, server, profile, projects)
             if not live:
                 continue
+            for variable in server.get("inherit") or []:
+                if os.environ.get(variable) and variable not in inherited:
+                    inherited[variable] = os.environ[variable]
             claimed[target] = name
             cmd += ["--mount", "type=bind,source=%s,target=%s,readonly"
                     % (_write_shim(provider, name, live), target)]
+        for variable, value in sorted(inherited.items()):
+            cmd += ["-e", "%s=%s" % (variable, value)]
         if claimed:
             # Docker Desktop resolves this name already; Colima and plain Linux
             # need to be told, and saying it twice costs nothing.

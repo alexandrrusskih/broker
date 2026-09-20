@@ -451,3 +451,27 @@ print(box.run._resume_hint(claude, "demo", "${project}", {}, time.time() + 60) o
   assert.match(out, /NONE/);
 });
 
+
+test("a box can stand in for a command that must not run inside it", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+print(json.dumps(box.command(claude, "demo", {
+  "rw": ["${project}"],
+  "stubs": {"~/bin/thing": "not in a box; use its MCP tools"},
+}, [], {})))
+`, { HOME: dir });
+
+  // Deliberately absent is not the same as missing: an agent told to run a
+  // command it cannot find searches the whole disk and then asks where it is.
+  assert.match(JSON.parse(out).join(" "), /source=.*box\/stubs\/demo\/thing,target=.*bin\/thing,readonly/);
+  const stub = await fs.readFile(path.join(dir, ".config", "broker", "box", "stubs", "demo", "thing"), "utf8");
+  assert.match(stub, /not in a box; use its MCP tools/);
+  assert.match(stub, /exit 127/, "it fails like a missing command, but says why");
+});

@@ -28,6 +28,24 @@ TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
 # harness discovers that halfway through a task.
 COMMON_RO = ("~/.gitconfig",)
 
+def _write_stub(box, target, message):
+    """A stand-in that explains itself and fails, instead of being missing."""
+    directory = os.path.join(config.CONFIG_DIR, "box", "stubs", box.replace("/", "_"))
+    path = os.path.join(directory, os.path.basename(target) or "stub")
+    body = "#!/bin/sh\n# Written by the broker for the '%s' box.\nprintf '%%s\\n' %s >&2\nexit 127\n" % (
+        box, "'" + message.replace("'", "'\\''") + "'")
+    try:
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        # In place, not replaced: a box already running has this inode mounted.
+        with open(path, "w") as fh:
+            fh.write(body)
+        os.chmod(path, 0o755)
+    except OSError as exc:
+        warn("could not write the stub for %s (%s)" % (target, exc))
+        return None
+    return path
+
+
 def command(provider, name, profile, argv, env):
     """The full container command line for this run."""
     runtime = profile.get("runtime") or "docker"
@@ -92,6 +110,18 @@ def command(provider, name, profile, argv, env):
         host = expand(entry)
         if os.path.exists(host):
             cmd += _mount(host, "ro")
+
+    # A command that exists outside but must not run inside, replaced by a note
+    # saying what to do instead. Some tools are deliberately absent — a CLI that
+    # identifies itself by hostname would introduce itself as a stranger from in
+    # here — but an agent told to run one does not know that: it searches the
+    # whole disk for the binary, finds nothing, and asks where it lives.
+    #
+    #   "stubs": { "~/bin/thing": "not available in a box; use its MCP tools" }
+    for target, message in sorted((profile.get("stubs") or {}).items()):
+        stub = _write_stub(name, expand(target), str(message))
+        if stub:
+            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (stub, expand(target))]
 
     # Named keys only, at their own paths, so a tool that resolves ~/.ssh/<name>
     # finds what it expects and nothing else is there to find.

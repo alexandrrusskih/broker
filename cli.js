@@ -473,6 +473,14 @@ async function main() {
           } catch (_e) {
             console.log(`  ${w.bin} update failed — run '${w.cmd} upgrade' to see why`);
           }
+          // An updater installs beside the old version and leaves the launcher
+          // alone, so without this the update lands on disk and never runs.
+          try {
+            const moved = require("./lib/shim").adoptNewestVersion(name);
+            if (moved) console.log(`  now running ${moved.version}`);
+          } catch (_e) {
+            // nothing to adopt, or not a harness that versions itself this way
+          }
           try {
             execFileSync("broker", [name, "install", "--no-ask"], { stdio: "inherit" });
           } catch (_e) {

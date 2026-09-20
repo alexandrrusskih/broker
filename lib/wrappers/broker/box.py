@@ -694,6 +694,23 @@ def command(provider, name, profile, argv, env):
     cmd.append(image)
     cmd.append("broker-box-entry")
     cmd.append(provider.BIN)
+
+    # Flags the box hands the harness, before what you typed — so a flag you
+    # pass on the command line still wins. This is where a box says how much it
+    # trusts what runs inside it: the broker does not decide that for you, and
+    # nothing here is implied by a box existing. Per harness, because they spell
+    # the same idea differently:
+    #
+    #   "args": { "claude": ["--dangerously-skip-permissions"] }
+    #
+    # A plain list applies to every harness in the box.
+    extra = profile.get("args")
+    if isinstance(extra, dict):
+        extra = extra.get(provider.NAME) or []
+    for flag in extra or []:
+        if flag not in argv:
+            cmd.append(str(flag))
+
     cmd += argv
     return cmd
 

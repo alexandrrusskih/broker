@@ -167,6 +167,21 @@ tools out of the base is the point: a rust toolchain for one project and
 browsers for another would quadruple an image every box shares. See
 `box/Dockerfile.example`.
 
+A box also decides what flags the harness starts with — including how much it is
+trusted inside:
+
+```jsonc
+"work": {
+  "rw": ["~/Projects/example"],
+  "args": { "claude": ["--some-flag"], "codex": ["--another"] }
+}
+```
+
+The broker does not decide that for you, and nothing is implied by a box
+existing: an empty `args` means the harness behaves exactly as it does outside.
+A plain list applies to every harness; flags you type yourself win, because the
+box's come first.
+
 Two decisions are worth knowing about:
 
 **Paths match the host exactly.** `~/Projects/example` is mounted at

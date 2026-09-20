@@ -344,3 +344,27 @@ print(json.dumps([
   const call = await fs.readFile(path.join(dir, "docker-calls"), "utf8");
   assert.match(call.trim(), /build -t broker-box-extended -f .*\.box\/Dockerfile .*\.box$/);
 });
+
+test("a box decides what flags the harness gets, and yours still win", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+
+  const run = (args, argv) => JSON.parse(engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+print(json.dumps(box.command(claude, "demo",
+  {"rw": ["${project}"], "args": ${JSON.stringify(args)}}, ${JSON.stringify(argv)}, {})))
+`, { HOME: dir }));
+
+  // Per harness, because they spell the same idea differently.
+  assert.deepEqual(run({ claude: ["--box-flag"] }, ["-p", "hi"]).slice(-4), ["claude", "--box-flag", "-p", "hi"]);
+  assert.deepEqual(run({ codex: ["--other"] }, []).slice(-1), ["claude"], "another harness's flags are not ours");
+  // A plain list is for every harness in the box.
+  assert.deepEqual(run(["--everywhere"], []).slice(-2), ["claude", "--everywhere"]);
+  // The box says it first, so the same flag typed by hand is the one that counts.
+  assert.deepEqual(run({ claude: ["--mode"] }, ["--mode", "plan"]).slice(-3), ["claude", "--mode", "plan"],
+    "a flag already typed is not added twice");
+});

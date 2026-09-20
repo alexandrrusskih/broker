@@ -63,6 +63,13 @@ def expand(path):
 # Inside a container "localhost" is the container. This is the host.
 HOST_GATEWAY = "host.docker.internal"
 
+# What the terminal is, said in the terminal's own terms. Without these the
+# container substitutes a plain "xterm" and a C locale: mouse reporting,
+# selection and clipboard escapes (OSC 52) stop matching what the outer terminal
+# actually speaks, and text in the pane stops selecting.
+TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
+                "LANG", "LC_ALL", "LC_CTYPE")
+
 # What every box gets regardless of harness, read-only. Without a gitconfig the
 # tools inside behave subtly differently from the same tools outside: git reads
 # history fine, then refuses to commit for want of a user.email — and the
@@ -531,6 +538,9 @@ def command(provider, name, profile, argv, env):
     else:
         cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
     cmd += ["-e", "HOME=%s" % home, "-e", "USER=%s" % (os.environ.get("USER") or "user")]
+    for variable in TERMINAL_ENV:
+        if os.environ.get(variable):
+            cmd += ["-e", "%s=%s" % (variable, os.environ[variable])]
     # $HOME itself is a tmpfs owned by that uid. Without it the harness cannot
     # write to its own home: the container creates missing mount points as root,
     # and mounting the real home instead would hand the box everything in it.

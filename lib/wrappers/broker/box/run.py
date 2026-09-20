@@ -29,7 +29,7 @@ TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
 COMMON_RO = ("~/.gitconfig",)
 
 def _clone(source, destination):
-    """Copy that costs nothing until something is written.
+    """Copy that costs nothing until something is written. Files or trees.
 
     These files are databases, and one of them is nearly four gigabytes; copying
     that on every start would be absurd. APFS clones instead: the copy shares
@@ -37,13 +37,18 @@ def _clone(source, destination):
     this — a box reads almost all of it and writes a little. `cp -c` asks for
     that and falls back on its own when the filesystem cannot.
     """
-    if os.path.exists(destination):
+    if os.path.isdir(destination):
+        shutil.rmtree(destination)
+    elif os.path.exists(destination):
         os.remove(destination)
     try:
-        subprocess.run(["cp", "-c", source, destination], check=True,
+        subprocess.run(["cp", "-c", "-R", source, destination], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
-        shutil.copy2(source, destination)
+        if os.path.isdir(source):
+            shutil.copytree(source, destination, symlinks=True)
+        else:
+            shutil.copy2(source, destination)
 
 
 def _write_stub(box, target, message):
@@ -98,8 +103,12 @@ def command(provider, name, profile, argv, env):
                 # — another pane, another agent — found the store taken and
                 # started without a daemon at all. Reopening the same window
                 # still reuses its images.
+                # Sanitised like the image name: docker accepts only
+                # [a-zA-Z0-9][a-zA-Z0-9_.-] in a volume name, and a box named in
+                # anything else fails to start at all.
                 "--mount", "type=volume,source=broker-box-docker-%s%s,target=/var/lib/docker"
-                % (name, ("-" + mcpbridge.identity_key()) if mcpbridge.identity_key() else "")]
+                % (re.sub(r"[^a-zA-Z0-9_.-]", "-", name).lower(),
+                   ("-" + mcpbridge.identity_key()) if mcpbridge.identity_key() else "")]
     else:
         cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
     cmd += ["-e", "HOME=%s" % home, "-e", "USER=%s" % (os.environ.get("USER") or "user")]
@@ -209,6 +218,33 @@ def command(provider, name, profile, argv, env):
     inside = any(cwd == p or cwd.startswith(p + os.sep) for p in map(os.path.realpath, projects))
     cmd += ["-w", cwd if inside else (os.path.realpath(projects[0]) if projects else home)]
 
+    # What the BOX says it wants its own copy of — same reasoning as the
+    # provider's own list, but for anything else on the machine: credentials
+    # with a token database inside, caches that a tool rewrites in place.
+    #
+    #   "private": ["~/.config/gcloud"]
+    #
+    # Cloned, so it costs nothing until written, and what the box writes stays
+    # in the box.
+    for entry in (profile.get("private") or []):
+        host = expand(entry)
+        if not os.path.exists(host):
+            continue
+        copy = os.path.join(config.CONFIG_DIR, "box", "private",
+                            name.replace("/", "_"), "own",
+                            os.path.basename(host.rstrip(os.sep)))
+        try:
+            os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
+            # Every start, not only when it looks newer. A directory's mtime
+            # does not change when a file INSIDE it is rewritten — and that is
+            # exactly what a login does to a token database. Comparing
+            # timestamps kept handing the box yesterday's credentials.
+            _clone(os.path.realpath(host), copy)
+        except OSError as exc:
+            warn("could not give the box its own %s (%s)" % (entry, exc))
+            continue
+        cmd += ["--mount", "type=bind,source=%s,target=%s" % (copy, host)]
+
     # Files a box must not share with the host, however they got there: cloned
     # in, so writing them inside changes nothing outside. One clone per real
     # file — every profile's copy is a symlink to the same one — mounted at each
@@ -231,8 +267,9 @@ def command(provider, name, profile, argv, env):
                                             os.path.basename(real))
                         try:
                             os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
-                            if not os.path.exists(copy) or os.path.getmtime(real) > os.path.getmtime(copy):
-                                _clone(real, copy)
+                            # Fresh every start: cloning costs nothing, and a
+                            # stale copy is worse than none.
+                            _clone(real, copy)
                         except OSError as exc:
                             warn("could not give the box its own %s (%s)" % (os.path.basename(real), exc))
                             continue

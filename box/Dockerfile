@@ -100,6 +100,18 @@ RUN printf '%s\n' 'case ":$PATH:" in' \
       'esac' > /etc/profile.d/broker-box-path.sh \
  && chmod 0644 /etc/profile.d/broker-box-path.sh
 
+# Cloud SDK: a project's deploy script shells out to `gcloud`, and a box without
+# it cannot ship anything however ready the fix is. Installed from Google's apt
+# repository rather than the tarball so it updates with the image.
+RUN apt-get update && apt-get install -y --no-install-recommends gnupg \
+ && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+      | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+      > /etc/apt/sources.list.d/google-cloud-sdk.list \
+ && apt-get update && apt-get install -y --no-install-recommends google-cloud-cli \
+ && rm -rf /var/lib/apt/lists/* \
+ && gcloud --version | head -1
+
 COPY box-entry.sh /usr/local/bin/broker-box-entry
 RUN chmod 0755 /usr/local/bin/broker-box-entry
 

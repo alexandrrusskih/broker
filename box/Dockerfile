@@ -55,6 +55,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # agy ships platform archives rather than an npm package, so it comes from its
 # own release. gh and glab are here because work that ends in a pull or merge
 # request should not have to leave the box to finish.
+# rtk trims command output before it reaches the model. It hooks every tool use,
+# so bridging it to the host would cost a round trip per command — it belongs in
+# the image.
+ARG RTK_VERSION=0.49.0
 ARG AGY_VERSION=1.2.7
 ARG GH_VERSION=2.101.0
 ARG GLAB_VERSION=1.118.0
@@ -63,6 +67,13 @@ RUN set -eux; \
     case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64 ;; \
                     amd64) agy_arch=x64;   gh_arch=amd64; glab_arch=amd64 ;; \
                     *) echo "unsupported architecture: $arch" >&2; exit 1 ;; esac; \
+    case "$arch" in arm64) rtk_target=aarch64-unknown-linux-gnu ;; \
+                    amd64) rtk_target=x86_64-unknown-linux-musl ;; esac; \
+    curl -fsSL -o /tmp/rtk.tar.gz \
+      "https://github.com/rtk-ai/rtk/releases/download/v${RTK_VERSION}/rtk-${rtk_target}.tar.gz"; \
+    tar -xzf /tmp/rtk.tar.gz -C /tmp; \
+    install -m 0755 "$(find /tmp -maxdepth 2 -name rtk -type f | head -1)" /usr/local/bin/rtk; \
+    rm -rf /tmp/rtk.tar.gz; \
     curl -fsSL -o /tmp/agy.tar.gz \
       "https://github.com/google-antigravity/antigravity-cli/releases/download/${AGY_VERSION}/agy_cli_linux_${agy_arch}.tar.gz"; \
     tar -xzf /tmp/agy.tar.gz -C /tmp; \
@@ -77,7 +88,7 @@ RUN set -eux; \
     tar -xzf /tmp/glab.tar.gz -C /tmp; \
     install -m 0755 /tmp/bin/glab /usr/local/bin/glab; \
     rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gh_* /tmp/bin; \
-    agy --version; gh --version | head -1; glab --version | head -1
+    agy --version; gh --version | head -1; glab --version | head -1; rtk --version
 
 COPY box-entry.sh /usr/local/bin/broker-box-entry
 RUN chmod 0755 /usr/local/bin/broker-box-entry

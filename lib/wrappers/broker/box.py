@@ -560,11 +560,30 @@ def command(provider, name, profile, argv, env):
                     % (ssh_known, os.path.join(home, ".ssh", "known_hosts"))]
 
     # The harness's own directory: settings, MCP servers, agents, history.
+    #
+    # Directories are mounted; single FILES are copied in fresh instead. A bind
+    # mount of a file pins one inode, and these files are rewritten atomically —
+    # written beside, then renamed over. After the first such write the mount
+    # points at an inode nothing links to any more, and inside the box the file
+    # has simply vanished: claude reported ~/.claude.json missing and started
+    # offering to restore it from a backup, while the host's copy was fine.
     for entry in getattr(provider, "BOX_HOME", ()):
         host = expand(entry)
-        if os.path.exists(host):
+        if not os.path.exists(host):
+            continue
+        if os.path.isdir(host):
             cmd += _mount(host)
             mounted.append(host)
+            continue
+        copy = os.path.join(config.CONFIG_DIR, "box", "files", name.replace("/", "_"),
+                            os.path.basename(host))
+        try:
+            os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
+            shutil.copy2(host, copy)
+        except OSError as exc:
+            warn("could not stage %s for the box (%s) — it will be missing inside" % (host, exc))
+            continue
+        cmd += ["--mount", "type=bind,source=%s,target=%s" % (copy, host)]
     # ...minus its credentials file. The token comes from the broker below.
     blank = None
     for entry in getattr(provider, "BOX_SECRETS", ()):
@@ -597,11 +616,13 @@ def command(provider, name, profile, argv, env):
     inside = any(cwd == p or cwd.startswith(p + os.sep) for p in map(os.path.realpath, projects))
     cmd += ["-w", cwd if inside else (os.path.realpath(projects[0]) if projects else home)]
 
-    # A provider that reads its credentials from a FILE has them in a profile
-    # directory; that directory comes in at its own path, and the variable
-    # pointing at it comes with it.
+    # The harness's config directory, wherever this run was pointed at: a
+    # per-account profile for a file-credentials provider, and for claude
+    # whatever CLAUDE_CONFIG_DIR says — a terminal manager gives each agent its
+    # own, with the hooks it reports its state through. Not mounting it left the
+    # harness running fine and the manager blind to it.
     home_env = getattr(provider, "HOME_ENV", None)
-    if getattr(provider, "CREDENTIALS", "file") != "env" and home_env and env.get(home_env):
+    if home_env and home_env != "HOME" and env.get(home_env):
         host = os.path.abspath(os.path.expanduser(env[home_env]))
         if os.path.isdir(host) and host not in mounted:
             cmd += _mount(host)
@@ -674,6 +695,13 @@ def exec_box(provider, name, argv, env):
         die("no box called '%s' in %s%s" % (
             name, PATH,
             (" — defined: " + ", ".join(sorted(defined))) if defined else " (the file does not exist yet)"))
+    # A terminal manager watches the pane's foreground process to know what runs
+    # in it. From here on that process is `docker`, which hides the harness
+    # behind it — Herdr documents the way out: a wrapper says which agent it
+    # stands for, and the manager reads its screen as it would any other.
+    if os.environ.get("HERDR_PANE_ID") and not os.environ.get("HERDR_AGENT"):
+        os.environ["HERDR_AGENT"] = provider.NAME
+
     cmd = command(provider, name, defined[name], argv, env)
     try:
         os.execv(cmd[0], cmd)

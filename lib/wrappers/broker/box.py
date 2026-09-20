@@ -294,8 +294,27 @@ def _write_shim(provider, name, live):
 
 
 def _paths(profile, key):
+    """Each path a box lists, as (what to mount, where it lands inside).
+
+    Usually those are the same — a project keeps its own path, which is what
+    makes session history and --resume work. They differ when a box needs its
+    OWN copy of something the host also has: a directory a shared tool insists
+    on writing to, where two boxes writing into one place would mix their state.
+    Then the box names where it really is and where the tool expects it.
+    """
     for entry in profile.get(key) or []:
-        yield os.path.abspath(os.path.expanduser(entry))
+        if isinstance(entry, dict):
+            source = os.path.abspath(os.path.expanduser(entry.get("source") or ""))
+            target = os.path.abspath(os.path.expanduser(entry.get("target") or source))
+            if not entry.get("source"):
+                die("a path in the box lists no source: %r" % (entry,))
+            # Its own, so it has to exist before the box can start.
+            if not os.path.exists(source):
+                os.makedirs(source, mode=0o700, exist_ok=True)
+            yield source, target
+        else:
+            path = os.path.abspath(os.path.expanduser(entry))
+            yield path, path
 
 
 def _ssh_config(name, profile):
@@ -418,7 +437,7 @@ def _passwd_file(runtime, image):
     return cache
 
 
-def _mount(host, mode="rw"):
+def _mount(host, mode="rw", target=None):
     """Mount a path at its own path — and at its physical one too, if they differ.
 
     ~/Projects/foo is often a symlink to /Volumes/.../foo. Inside the box only
@@ -428,9 +447,12 @@ def _mount(host, mode="rw"):
     more bind of the same source.
     """
     flag = ",readonly" if mode == "ro" else ""
-    args = ["--mount", "type=bind,source=%s,target=%s%s" % (host, host, flag)]
+    target = target or host
+    args = ["--mount", "type=bind,source=%s,target=%s%s" % (host, target, flag)]
+    # Only when the path is kept as-is: a redirected mount is already somewhere
+    # else on purpose, and its physical twin would land on top of the original.
     physical = os.path.realpath(host)
-    if physical != host:
+    if target == host and physical != host:
         args += ["--mount", "type=bind,source=%s,target=%s%s" % (physical, physical, flag)]
     return args
 
@@ -517,15 +539,18 @@ def command(provider, name, profile, argv, env):
             blank = blank or _empty_file()
             cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (blank, host)]
 
-    projects = list(_paths(profile, "rw"))
-    for host in projects:
+    writable = list(_paths(profile, "rw"))
+    for host, target in writable:
         if not os.path.isdir(host):
             die("the '%s' box lists %s, which does not exist" % (name, host))
-        cmd += _mount(host)
-    for host in _paths(profile, "ro"):
+        cmd += _mount(host, "rw", target)
+    for host, target in _paths(profile, "ro"):
         if not os.path.isdir(host):
             die("the '%s' box lists %s, which does not exist" % (name, host))
-        cmd += _mount(host, "ro")
+        cmd += _mount(host, "ro", target)
+
+    # Where work happens: the paths as the box sees them.
+    projects = [target for _, target in writable]
 
     # Start where you started, when that is inside the box; otherwise in the
     # first writable project, so a bare `claude --box work` lands somewhere real.

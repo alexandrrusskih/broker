@@ -225,3 +225,31 @@ print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]}, [], {})))
 `, { HOME: dir });
   assert.ok(!JSON.parse(out).join(" ").includes(".ssh"), "mounting ~/.ssh is never implicit");
 });
+
+test("a box can give a shared tool its own copy of a directory the host also has", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const own = path.join(dir, "own-state");
+  await fs.mkdir(project);
+
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+print(json.dumps(box.command(claude, "demo", {"rw": [
+  "${project}",
+  {"source": "${own}", "target": "/shared/tool/.state"},
+]}, [], {})))
+`, { HOME: dir });
+  const cmd = JSON.parse(out);
+  const line = cmd.join(" ");
+
+  // Two boxes writing into one state would mix their work; each gets its own,
+  // mounted where the tool insists on looking.
+  assert.ok(line.includes(`source=${own},target=/shared/tool/.state`));
+  // Created on demand: its own directory cannot be expected to exist yet.
+  assert.ok((await fs.stat(own)).isDirectory());
+  // The working directory is the path as the BOX sees it, never the host's.
+  assert.equal(cmd[cmd.indexOf("-w") + 1], project);
+});

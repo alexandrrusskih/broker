@@ -136,6 +136,18 @@ def cmd_refresh(cfg, provider, args):
             moved = adopt_shared(provider, home)
             if moved:
                 note = "(now shares %s; old copies kept as *.pre-share)" % ", ".join(moved)
+        else:
+            # A file that should be a link but is not — usually because whatever
+            # wrote it did so through a temporary file and a rename, which
+            # replaces the link rather than following it. Left unsaid, the two
+            # copies drift: that is how one account ended up with a full thread
+            # history and the others with an empty one. Not repaired on its own,
+            # because repairing means one of the two copies loses.
+            drifted = [os.path.relpath(dst, home)
+                       for src, dst in profile.shared_entries(provider, home)
+                       if os.path.exists(src) and os.path.exists(dst) and not os.path.islink(dst)]
+            if drifted:
+                note = "(its own %s, not shared — 'refresh --share' to join them)" % ", ".join(drifted)
         warn("%-10s %s %s" % (row["account"], home, note))
 
     # Profiles left behind by an account that is no longer seeded. Never removed

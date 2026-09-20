@@ -620,3 +620,58 @@ print(json.dumps({
   // SIGKILL cannot be caught; 'broker box repair' is the way back from that one.
   assert.deepEqual(got.signals, ["SIGHUP", "SIGTERM"]);
 });
+
+test("a database the harness invents in a profile becomes everyone's", () => {
+  // codex added state_5.sqlite, and later thread_history_1.sqlite, at a moment
+  // when the canonical home had no such name. There was nothing to link to, so
+  // whichever profile ran first wrote its own — and the accounts drifted apart
+  // in silence until one held the only real history.
+  const out = engine(`
+import json, os, tempfile
+from broker import profile
+
+
+class Provider:
+    SHARED_GLOBS = ("*.sqlite",)
+    SHARED = ()
+
+
+with tempfile.TemporaryDirectory() as root:
+    Provider.CANONICAL_HOME = os.path.join(root, "home")
+    prof = os.path.join(root, "home-acct")
+    os.makedirs(Provider.CANONICAL_HOME)
+    os.makedirs(prof)
+
+    # One the canonical home has never heard of, with a checkpoint beside it.
+    open(os.path.join(prof, "state_5.sqlite"), "w").write("new")
+    open(os.path.join(prof, "state_5.sqlite-wal"), "w").write("wal")
+    # ...and one it already has: that one is a choice between two copies, and
+    # stays a deliberate act rather than something a plain run decides.
+    open(os.path.join(Provider.CANONICAL_HOME, "logs_2.sqlite"), "w").write("theirs")
+    open(os.path.join(prof, "logs_2.sqlite"), "w").write("mine")
+
+    moved = profile.promote(Provider, prof)
+    link = os.path.join(prof, "state_5.sqlite")
+    print(json.dumps({
+        "moved": moved,
+        "now_a_link": os.path.islink(link),
+        # realpath both sides: on macOS the temp root is /var, a symlink to
+        # /private/var, and only one of the two comes back resolved.
+        "points_at_canonical": os.path.realpath(link) == os.path.realpath(
+            os.path.join(Provider.CANONICAL_HOME, "state_5.sqlite")),
+        "content_kept": open(link).read(),
+        "wal_followed": os.path.exists(os.path.join(Provider.CANONICAL_HOME, "state_5.sqlite-wal")),
+        "existing_untouched": open(os.path.join(prof, "logs_2.sqlite")).read(),
+        "canonical_untouched": open(os.path.join(Provider.CANONICAL_HOME, "logs_2.sqlite")).read(),
+    }))
+`);
+  const got = JSON.parse(out);
+  assert.deepEqual(got.moved, ["state_5.sqlite"]);
+  assert.equal(got.now_a_link, true, "the profile keeps reaching it, by link");
+  assert.equal(got.points_at_canonical, true);
+  assert.equal(got.content_kept, "new", "the data moves, it is not recreated empty");
+  assert.equal(got.wal_followed, true, "a stranded -wal would lose a checkpoint");
+  // Nothing is overwritten when both sides have a copy.
+  assert.equal(got.existing_untouched, "mine");
+  assert.equal(got.canonical_untouched, "theirs");
+});

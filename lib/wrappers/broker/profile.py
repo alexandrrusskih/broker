@@ -194,10 +194,65 @@ def _link(src, dst):
                 warn("could not relink %s: %s" % (dst, exc))
 
 
+def promote(provider, path):
+    """Move a file the harness invented in a profile into the shared home.
+
+    link_shared can only point at what already exists: it walks the names that
+    are shared, finds them in the canonical home, and links them. A harness
+    that invents a NEW one defeats that. codex added state_5.sqlite, then
+    thread_history_1.sqlite, at a moment when the canonical home had nothing by
+    those names — nothing to link to, so it wrote its own inside whichever
+    profile ran first. From then on the name was taken, link_shared left it
+    alone as it must, and the accounts drifted apart in silence: one profile
+    ended up holding the only copy of a 13,722-thread history while the others
+    wrote into an empty database of their own.
+
+    So a real file whose name is meant to be shared, and which the canonical
+    home does not have, is moved there and left behind as a link. Nothing can
+    be lost doing it: there is no file on the other side to overwrite. The move
+    is a rename within one volume, so anything holding the file open keeps
+    writing to the same inode.
+
+    A name the canonical home DOES have is a different matter — one of the two
+    copies would have to lose — and that stays a deliberate act:
+    `broker <provider> refresh --share`.
+    """
+    canonical = provider.CANONICAL_HOME
+    if os.path.realpath(path) == os.path.realpath(canonical):
+        return []
+
+    moved = []
+    for pattern in getattr(provider, "SHARED_GLOBS", ()):
+        for src in sorted(Path(path).glob(pattern)):
+            if src.is_symlink() or not src.is_file():
+                continue
+            dst = os.path.join(canonical, src.name)
+            if os.path.lexists(dst):
+                continue
+            try:
+                os.replace(str(src), dst)
+                # sqlite keeps -wal/-shm beside the real file; leaving them
+                # behind would strand a checkpoint that has not been folded in.
+                for side in ("-wal", "-shm"):
+                    if os.path.exists(str(src) + side):
+                        os.replace(str(src) + side, dst + side)
+                os.symlink(dst, str(src))
+                moved.append(src.name)
+            except OSError as exc:
+                # A different volume, or no permission: leave it where it is
+                # rather than half-move it.
+                warn("could not share %s: %s" % (src.name, exc))
+    return moved
+
+
 def prepare(provider, path):
     """Lay out a profile the way this provider needs it."""
     if getattr(provider, "MIRROR_HOME", False):
         return mirror(provider, path)
+    # Before linking: anything the harness invented in here, which belongs to
+    # everyone, goes to the shared home first — otherwise the link below has
+    # nothing to point at and the file stays private for good.
+    promote(provider, path)
     return link_shared(provider, path)
 
 

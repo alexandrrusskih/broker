@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `broker box build --claude <v> --codex <v>` overrides these.
 # Pinned rather than floating: an image whose harness version changes between
 # builds is an image you cannot reproduce a bug in. Raise them deliberately.
-ARG CLAUDE_VERSION=2.1.278
+ARG CLAUDE_VERSION=2.1.267
 ARG CODEX_VERSION=0.155.1
 # bun is a project dependency, not a harness one: repositories pin it in
 # "packageManager", and without it `bun install` and every script that shells out
@@ -58,10 +58,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # rtk trims command output before it reaches the model. It hooks every tool use,
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
-ARG RTK_VERSION=0.49.0
+ARG RTK_VERSION=0.48.0
 ARG AGY_VERSION=1.2.7
-ARG GH_VERSION=2.101.0
-ARG GLAB_VERSION=1.118.0
+ARG GH_VERSION=2.100.0
+ARG GLAB_VERSION=1.116.0
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64 ;; \

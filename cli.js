@@ -488,6 +488,20 @@ async function main() {
           }
         }
       }
+      // A box is meant to reproduce THIS machine, so the image pins follow what
+      // the machine now has — otherwise the box quietly runs a different
+      // version of the same harness than the one you just updated to.
+      try {
+        const moved = require("./lib/box").syncPins();
+        if (moved.length) {
+          console.log(`\nbox image pins updated:`);
+          for (const p of moved) console.log(`  ${p.arg}: ${p.from} → ${p.to}`);
+          console.log("  run 'broker box build' to rebuild the image");
+        }
+      } catch (_e) {
+        // no box context here — nothing to pin
+      }
+
       if (flags.server) {
         // Use the new source, not modules already loaded by this old CLI.
         execFileSync(process.execPath, [pathMod.join(pkg, "cli.js"), "server", "install", "--no-ask", "--from", pkg], { stdio: "inherit" });

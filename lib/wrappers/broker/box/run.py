@@ -277,6 +277,31 @@ def command(provider, name, profile, argv, env):
                             continue
                         clones[real] = copy
                     cmd += ["--mount", "type=bind,source=%s,target=%s" % (copy, host)]
+                    # sqlite keeps its write-ahead log and shared-memory file
+                    # BESIDE the database, and those are part of its state: the
+                    # newest pages live in -wal until a checkpoint folds them
+                    # in. Cloning the database alone leaves them coming from
+                    # the directory mount underneath — so the box wrote its
+                    # pages into its own copy and its journal into everyone's,
+                    # and both tore. Measured as "wrong # of entries in index"
+                    # on the host while a box was running.
+                    #
+                    # Mounted even when the host has no such file yet, or
+                    # sqlite would create one in the shared directory the
+                    # moment it opens the database.
+                    for side in ("-wal", "-shm"):
+                        beside = copy + side
+                        try:
+                            if os.path.exists(real + side):
+                                _clone(real + side, beside)
+                            elif not os.path.exists(beside):
+                                open(beside, "a").close()
+                        except OSError as exc:
+                            warn("could not give the box its own %s (%s)"
+                                 % (os.path.basename(real) + side, exc))
+                            continue
+                        cmd += ["--mount", "type=bind,source=%s,target=%s"
+                                % (beside, host + side)]
 
     # Directories that every profile of this harness should reach, not only the
     # one this run uses: a harness can record a path through a profile it is no
@@ -466,14 +491,23 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None):
     return "\nResume it in this box with:\n  %s%s --box %s %s\n" % (pin, provider.BIN, name, resume)
 
 
+SYNC_LOG = os.path.join(config.CONFIG_DIR, "box", "sync.log")
+
+
 def _sync_back(provider, session, env=None):
-    """Put what the box wrote back into the history out here.
+    """Put what the box wrote back into the history out here — in the background.
 
     A box works on its own clone of the harness's databases, because sharing one
     SQLite file across the container boundary tears it. The work itself is in
     the session file, which IS shared — so the harness is asked to read that
     session back into its history, which is what the command exists for. Merging
     its tables by hand would be us guessing at someone else's schema.
+
+    Waited for, this held the prompt for several seconds every time: the harness
+    looks through every session it has to find the one named, and there are
+    thirteen thousand of them here. Nothing downstream depends on it having
+    finished — the session file is the record, the database is a view of it — so
+    it is started and left to run, with its output kept in case it fails.
     """
     template = getattr(provider, "BOX_SYNC", None)
     if not template:
@@ -484,17 +518,33 @@ def _sync_back(provider, session, env=None):
     if not binary:
         return
     argv = [binary] + [part % {"session": session} for part in template]
+    by_hand = " ".join([provider.BIN] + [p % {"session": session} for p in template])
     try:
-        done = subprocess.run(argv, env={**os.environ, **(env or {})},
-                              capture_output=True, text=True, timeout=180)
+        os.makedirs(os.path.dirname(SYNC_LOG), mode=0o700, exist_ok=True)
+        log = open(SYNC_LOG, "a")
+    except OSError:
+        log = subprocess.DEVNULL
+    try:
+        log.write("\n=== %s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), by_hand))
+        log.flush()
+    except (AttributeError, OSError, ValueError):
+        pass
+    try:
+        # Its own session, so quitting the terminal does not take it with it.
+        subprocess.Popen(argv, env={**os.environ, **(env or {})},
+                         stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         start_new_session=True)
     except (OSError, subprocess.SubprocessError) as exc:
-        warn("could not fold this session back into the history (%s)" % exc)
-        return
-    if done.returncode != 0:
-        # Not fatal: the session file is intact, and the command can be run
-        # again by hand. Say which one, so it can be.
-        warn("this session is not in the history yet — run: %s"
-             % " ".join([provider.BIN] + [p % {"session": session} for p in template]))
+        # Not fatal: the session file is intact and the command can be run again
+        # by hand. Say which one, so it can be.
+        warn("could not fold this session back into the history (%s) — run: %s"
+             % (exc, by_hand))
+    finally:
+        if log is not subprocess.DEVNULL:
+            try:
+                log.close()
+            except OSError:
+                pass
 
 
 def container_name(name):
@@ -612,10 +662,16 @@ def exec_box(provider, name, argv, env, account=None):
     # forwards the signals itself.
     saved = _terminal_state()
     _guard_terminal(saved)
+    status = 0
     try:
         finished = subprocess.run(cmd)
+        status = finished.returncode
     except KeyboardInterrupt:
-        sys.exit(130)
+        # Ctrl-C reaches this process as well as the container. The harness
+        # inside still exits properly and its session file is complete, so the
+        # rest of this — folding the session back, saying how to return — is
+        # exactly as valuable as after an ordinary exit.
+        status = 130
     except OSError as exc:
         die("cannot start the '%s' box: %s" % (name, exc))
     finally:
@@ -625,8 +681,14 @@ def exec_box(provider, name, argv, env, account=None):
 
     session = _last_session(provider, workdir, env, started)
     if session:
-        _sync_back(provider, session, env)
+        # Printed BEFORE the session is folded back, and not only after a clean
+        # exit. Folding asks the harness to re-read its own session, and it
+        # looks through every session it has to find the one named — thirteen
+        # thousand of them here, which is seconds of silence. The line is what
+        # the person is waiting for; the bookkeeping can happen behind it.
         hint = _resume_hint(provider, name, workdir, env, started, account)
-        if hint and finished.returncode == 0:
+        if hint:
             sys.stdout.write(hint)
-    sys.exit(finished.returncode)
+            sys.stdout.flush()
+        _sync_back(provider, session, env)
+    sys.exit(status)

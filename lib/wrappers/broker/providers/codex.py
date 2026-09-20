@@ -124,6 +124,10 @@ SHARED = (
     "prompts",
     "AGENTS.md",
     "sessions",
+    # The names given to threads. The sessions themselves are shared, so a
+    # per-profile index means the same conversation is titled under one account
+    # and nameless under the next.
+    "session_index.jsonl",
     "history.jsonl",
     "log",
     "cache",

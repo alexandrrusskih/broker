@@ -630,7 +630,7 @@ def command(provider, name, profile, argv, env):
             cmd += ["-e", "%s=%s" % (key, env[key])]
 
     # MCP servers that exist only on this machine. Half of them cannot come
-    # along at all — ntk and codebase-memory are macOS binaries — so the server
+    # along at all — some are native macOS binaries — so the server
     # stays on the host and only its stdio is carried across. The shim is
     # mounted AT THE COMMAND'S OWN PATH, which means the harness's own config
     # needs no rewriting: it already points there. Servers reached over http are

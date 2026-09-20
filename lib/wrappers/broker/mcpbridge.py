@@ -1,7 +1,7 @@
 """Reaching the machine's own MCP servers from inside a box.
 
-Half of them cannot come along: `ntk` and `codebase-memory` are macOS binaries,
-and a Linux container has nothing to run them with. Copying them into the image
+Half of them cannot come along: they are native macOS binaries, and a Linux
+container has nothing to run them with. Copying them into the image
 is not an option either — they are private tools with their own dependencies,
 and an image that bundles them goes stale the moment they change.
 

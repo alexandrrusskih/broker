@@ -93,7 +93,7 @@ print(mcpbridge.identity_key(${JSON.stringify(env)}))
 
   const here = key({ HERDR_PANE_ID: "pane-1", HERDR_WORKSPACE_ID: "misc" });
   const otherPane = key({ HERDR_PANE_ID: "pane-2", HERDR_WORKSPACE_ID: "misc" });
-  const otherWs = key({ HERDR_PANE_ID: "pane-1", HERDR_WORKSPACE_ID: "finik" });
+  const otherWs = key({ HERDR_PANE_ID: "pane-1", HERDR_WORKSPACE_ID: "other-workspace" });
   assert.notEqual(here, otherPane, "another pane is another agent");
   assert.notEqual(here, otherWs, "another workspace is another group on the bus");
   assert.equal(here, key({ HERDR_PANE_ID: "pane-1", HERDR_WORKSPACE_ID: "misc" }), "the same pane reuses its bridge");

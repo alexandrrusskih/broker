@@ -227,8 +227,8 @@ A box with no `ssh` section gets no ssh material at all.
 ### MCP inside a box
 
 MCP servers keep working, including the ones that could never run in a container:
-`ntk` and `codebase-memory` are macOS binaries, and the image has nothing to run
-them with. So the server stays on the host and only its stdio crosses the
+some of them are native macOS binaries, and the image has nothing to run them
+with. So the server stays on the host and only its stdio crosses the
 boundary — a listener on loopback here, a stand-in mounted **at the server's own
 command path** there. The harness's config is not rewritten: it already points
 at that path.
@@ -262,7 +262,7 @@ what a server should see:
       "codebase-memory": {
         "env": {
           "CBM_ALLOWED_ROOT": "~/Projects/example",
-          "CBM_CACHE_DIR": "~/.cache/skk-cbm/example"
+          "CBM_CACHE_DIR": "~/.cache/code-memory/example"
         }
       }
     }

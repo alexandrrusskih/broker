@@ -3,8 +3,8 @@
 # in the environment on every run.
 #
 # Build it with: broker box build
-# node 24 deliberately, not the newest: projects pin it in "engines" (finik asks
-# for >=24 <25), and the harnesses run on anything recent. trixie for the rest —
+# node 24 deliberately, not the newest: projects pin it in "engines" (one here
+# asks for >=24 <25), and the harnesses run on anything recent. trixie for the rest —
 # it carries python 3.13 rather than 3.11, and the MCP shims run on the image's
 # python.
 FROM node:24-trixie-slim
@@ -34,7 +34,7 @@ RUN npm install -g --no-fund --no-audit \
  && npm cache clean --force
 
 # A box that runs a project's test suite needs the runtime that suite expects:
-# finik's orchestrator shells out to `docker compose`, binds ports and then
+# a test orchestrator shells out to `docker compose`, binds ports and then
 # connects to them on localhost. A socket shared from the host would put those
 # containers — and those ports — on the host's localhost, not the box's, so the
 # daemon has to live in here. Only installed; started per box (see box.py).

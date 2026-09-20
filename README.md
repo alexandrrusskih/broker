@@ -200,6 +200,64 @@ that can leave it.
 Everything after a bare `--` reaches the harness untouched, so a prompt that
 mentions `--box` is a prompt.
 
+### What a box shares, and what it keeps
+
+Sessions are shared; databases are not.
+
+The harness's own directory comes along on its own — settings, MCP servers,
+agents, history. Inside that directory the split is:
+
+| | |
+|---|---|
+| session files (`jsonl`) | **shared** — written straight into the real pile on the host |
+| databases (`*.sqlite`) | **private** — a copy per box, made fresh at every start |
+| journals (`-wal`, `-shm`) | **private**, cloned and mounted alongside their database |
+
+The databases cannot be shared, because SQLite's locks do not cross the
+container boundary: a box holding an exclusive lock is invisible to the harness
+outside, both write at once, and the file tears. Measured, then seen repeatedly
+in one afternoon as "database disk image is malformed" and "wrong # of entries
+in index".
+
+The journals are part of that and are easy to miss. SQLite keeps them BESIDE
+the database, and the newest pages live in `-wal` until a checkpoint folds them
+in. Cloning the database alone leaves the journals coming from the directory
+mount underneath — so a box writes its pages into its own copy and its journal
+into everyone's. They are cloned too, including when the host has no journal
+yet, since SQLite would otherwise create one in the shared directory the moment
+it opens the database.
+
+Nothing is lost by working on a copy, because the work itself is in the session
+file, which is shared. On the way out the box asks the harness to read that
+session back into the history out here (see `BOX_SYNC`), in the background —
+folding is a full scan of every session the harness has, and waiting for it held
+the prompt for seconds.
+
+One consequence worth knowing: a thread started inside a box is recorded in the
+box's copy of the database, and that record dies with the copy. The session
+file survives, so `resume <id>` opens it and registers the thread out here — the
+line the box prints on the way out is exactly that command. Until it is opened
+once, the thread will not appear in the picker.
+
+### When a box dies badly
+
+A harness takes the terminal over completely: alternate screen, mouse
+reporting, and the kitty keyboard protocol, in which Enter arrives as `27;3u`
+and an arrow as `1:1A`. On a normal exit it undoes all of that.
+
+Killed outright it undoes none of it, and the pane is left answering the
+keyboard in a language the shell underneath does not speak — typing into it
+produces `zsh: command not found: 1:1A`. So the undoing lives out here, in the
+thing that outlives the container: the terminal's settings are captured before
+the run and restored afterwards whatever happened — a clean exit, a crash,
+`docker stop` from another window, SIGTERM.
+
+SIGKILL cannot be caught. For that one:
+
+```sh
+broker box repair    # run it in the pane that went strange
+```
+
 ### ssh from a box
 
 Mounting `~/.ssh` hands a box every key on the machine — GitHub, the cloud VMs,

@@ -241,9 +241,12 @@ async function main() {
       const r = install(provider, pinned, undefined, { container: flags.container === true });
       const shown = r.pinned || (picksPerRun ? "named per run, or picked" : `${config.read().account || "default"}, follows the default`);
       console.log(`✓ installed wrapper '${r.cmd}' → ${r.path} (account: ${shown})`);
-      if (picksPerRun) {
-        const base = provider === "codex" ? "~/.codex-<account>" : "~/.agy-<account>";
-        console.log(`  profiles: every account gets ${base}`);
+      // Only a harness whose credentials are a FILE keeps a profile per account
+      // on disk. claude carries its token in the environment and has none, so
+      // this line used to tell it that its accounts live in ~/.agy-<account>.
+      const profileBase = { codex: "~/.codex-<account>", agy: "~/.agy-<account>" }[provider];
+      if (picksPerRun && profileBase) {
+        console.log(`  profiles: every account gets ${profileBase}`);
       }
       if (!r.inPath) console.log(`  note: ${require("path").dirname(r.path)} is not in PATH — add it`);
       for (const old of r.dropped || []) console.log(`  removed the old name ${old}`);

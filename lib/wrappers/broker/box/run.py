@@ -415,6 +415,32 @@ def _last_session(provider, workdir, env=None, since=0):
     return match.group(0) if match else stem
 
 
+def _session_root(provider, config_dir):
+    """Where this harness keeps its sessions, with links resolved."""
+    pattern = getattr(provider, "SESSION_GLOB", "") or ""
+    head = pattern.split("*", 1)[0] % {
+        "config": config_dir, "home": home_dir(), "key": "",
+    }
+    return os.path.realpath(head)
+
+
+def _sessions_are_shared(provider, env=None):
+    """Whether a session can be reopened without naming the account.
+
+    The account only matters when sessions live INSIDE the profile: the broker
+    moves to another account when one runs out of room, and an id recorded
+    under the first is then not found at all. When every profile reaches one
+    pile — a link, or simply the same directory — naming the account adds
+    nothing, and the broker choosing an account for itself is the point of it.
+    """
+    home_env = getattr(provider, "HOME_ENV", None)
+    config = (env or {}).get(home_env) if home_env and home_env != "HOME" else None
+    if not config:
+        return True
+    canonical = expand(getattr(provider, "CANONICAL_HOME", "~"))
+    return _session_root(provider, expand(config)) == _session_root(provider, canonical)
+
+
 def _resume_hint(provider, name, workdir, env=None, since=0, account=None):
     """What to type to come back INTO this box, on the same account.
 
@@ -422,11 +448,11 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None):
     the box: run it as printed and the session reopens on the host, in a
     different world, which is not obvious until something behaves oddly.
 
-    And for a harness whose sessions live inside a per-account profile, the
-    account matters as much as the box. The broker moves to another account when
-    one runs out of room, and the session recorded under the first is then not
-    found at all: "no rollout found for thread id". Naming the account makes the
-    line reopen what it says it will.
+    The account is named only when it would otherwise be lost: a harness that
+    files its sessions INSIDE the per-account profile records an id the next
+    account cannot find ("no rollout found for thread id"). When the profiles
+    all reach one pile of sessions — which is the normal arrangement — the
+    broker picks an account by itself and the line stays clean.
     """
     session = _last_session(provider, workdir, env, since)
     if not session:
@@ -434,7 +460,8 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None):
     # Each harness spells resuming its own way.
     resume = getattr(provider, "SESSION_RESUME", "--resume %s") % session
     pin = ""
-    if account and getattr(provider, "CREDENTIALS", "file") != "env":
+    if (account and getattr(provider, "CREDENTIALS", "file") != "env"
+            and not _sessions_are_shared(provider, env)):
         pin = "%s_ACCOUNT=%s " % (provider.NAME.upper(), account)
     return "\nResume it in this box with:\n  %s%s --box %s %s\n" % (pin, provider.BIN, name, resume)
 

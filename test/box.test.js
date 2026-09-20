@@ -476,12 +476,16 @@ print(json.dumps(box.command(claude, "demo", {
   assert.match(stub, /exit 127/, "it fails like a missing command, but says why");
 });
 
-test("the resume line names the account when sessions live in one", async (t) => {
+test("the resume line names an account only when the session would be lost without it", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");
   const sessions = path.join(dir, "cfg", "sessions", "2026", "09", "20");
   await fs.mkdir(project, { recursive: true });
   await fs.mkdir(sessions, { recursive: true });
+  // A profile that reaches the canonical pile through a link — the normal
+  // arrangement once the profiles share one set of databases and sessions.
+  await fs.mkdir(path.join(dir, "profile"), { recursive: true });
+  await fs.symlink(path.join(dir, "cfg", "sessions"), path.join(dir, "profile", "sessions"));
   await fs.writeFile(path.join(sessions,
     "rollout-2026-09-20T10-00-00-019efe7b-889a-72d3-8a7c-bfae7be3dacd.jsonl"), "{}\n");
 
@@ -492,9 +496,23 @@ ${provider}.SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl" if "${pro
 print(box.run._resume_hint(${provider}, "demo", "${project}", {"CODEX_HOME": "${path.join(dir, "cfg")}"}, 0, ${JSON.stringify(account)}) or "NONE")
 `, { HOME: dir });
 
-  // The broker moves to another account when one runs out of room, and a
-  // session recorded under the first is then not found at all.
+  // Sessions inside the profile: the broker moves to another account when one
+  // runs out of room, and an id recorded under the first is then not found.
   assert.match(hint("codex", "sk"), /CODEX_ACCOUNT=sk codex --box demo resume /);
+
+  // Sessions reached through a link instead. Naming an account here says
+  // nothing that the line does not already say, and picking one is the
+  // broker's job to begin with.
+  const shared = engine(`
+from broker import box
+from broker.providers import codex
+codex.SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl"
+codex.CANONICAL_HOME = ${JSON.stringify(path.join(dir, "cfg"))}
+print(box.run._resume_hint(codex, "demo", ${JSON.stringify(project)},
+      {"CODEX_HOME": ${JSON.stringify(path.join(dir, "profile"))}}, 0, "sk") or "NONE")
+`, { HOME: dir });
+  assert.doesNotMatch(shared, /CODEX_ACCOUNT/);
+  assert.match(shared, /codex --box demo resume /);
   // claude keeps its sessions outside any profile, so naming an account there
   // would only be noise.
   await fs.mkdir(path.join(dir, ".claude", "projects", project.split(path.sep).join("-")), { recursive: true });

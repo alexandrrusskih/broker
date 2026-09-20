@@ -22,6 +22,7 @@ Two things make the difference between "it runs" and "it is usable":
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -506,7 +507,10 @@ def command(provider, name, profile, argv, env):
         die("%s is not installed — the '%s' box asks for it" % (runtime, name))
 
     home = home_dir()
-    image = profile.get("image") or "broker-box"
+    # A box with its own Dockerfile runs its own image, built from the base.
+    image = profile.get("image") or (
+        "broker-box-%s" % re.sub(r"[^a-zA-Z0-9_.-]", "-", name).lower()
+        if profile.get("dockerfile") else "broker-box")
 
     cmd = [binary, "run", "--rm", "--init"]
     if sys.stdin.isatty() and sys.stdout.isatty():

@@ -301,3 +301,46 @@ print(json.dumps(box.command(agy, "demo", {"rw": ["${project}"]}, [], {})))
     "the harness directory is looked for in the real home");
   assert.ok(!line.includes(".some-profile/.gemini"), "never inside the profile");
 });
+
+test("a box that needs more than the base brings its own Dockerfile", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(path.join(project, ".box"), { recursive: true });
+  await fs.writeFile(path.join(project, ".box", "Dockerfile"), "FROM broker-box\nUSER root\n");
+  await fs.mkdir(path.join(dir, ".config", "broker"), { recursive: true });
+  await fs.writeFile(path.join(dir, ".config", "broker", "boxes.json"), JSON.stringify({
+    plain: { rw: [project] },
+    extended: { rw: [project], dockerfile: path.join(project, ".box", "Dockerfile") },
+  }));
+
+  // Which image each box runs — the engine decides this on its own, from the
+  // same rule the builder tags with.
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+box.PATH = "${path.join(dir, ".config", "broker", "boxes.json")}"
+p = box.profiles()
+print(json.dumps([
+  box.command(claude, "plain", p["plain"], [], {})[-3],
+  box.command(claude, "extended", p["extended"], [], {})[-3],
+]))
+`, { HOME: dir });
+  assert.deepEqual(JSON.parse(out), ["broker-box", "broker-box-extended"]);
+
+  // The builder agrees. Run in its own process: the module resolves the profile
+  // path once, when it is first loaded.
+  const fakeBin = path.join(dir, "bin");
+  await fs.mkdir(fakeBin);
+  await fs.writeFile(path.join(fakeBin, "docker"), '#!/bin/sh\necho "$@" >> "$HOME/docker-calls"\n', { mode: 0o755 });
+  const built = JSON.parse(execFileSync(process.execPath,
+    ["-e", "process.stdout.write(JSON.stringify(require('./lib/box').buildBoxes({})))"],
+    { cwd: root, encoding: "utf8", env: { ...process.env, HOME: dir, PATH: `${fakeBin}:${process.env.PATH}` } }));
+
+  assert.equal(built.length, 1, "only boxes that name a Dockerfile are built");
+  assert.equal(built[0].tag, "broker-box-extended");
+  // Built from its own directory, so the Dockerfile can COPY what sits beside it.
+  const call = await fs.readFile(path.join(dir, "docker-calls"), "utf8");
+  assert.match(call.trim(), /build -t broker-box-extended -f .*\.box\/Dockerfile .*\.box$/);
+});

@@ -495,6 +495,9 @@ async function main() {
           noCache: flags["no-cache"] === true, runtime: flags.runtime
         });
         console.log(`Image ready: ${out.image}`);
+        for (const extra of out.extended || []) {
+          console.log(`  + ${extra.tag}  (${extra.name}, from ${extra.file})`);
+        }
         if (boxes.seedProfiles()) console.log(`Wrote an example box file: ${boxes.PROFILES}`);
         console.log(`Define boxes in ${boxes.PROFILES}, then: claude --box <name>`);
       } else if (action === "list" || action === "ls") {
@@ -507,9 +510,10 @@ async function main() {
           break;
         }
         for (const [name, box] of Object.entries(out.boxes)) {
-          const rw = (box.rw || []).join(", ") || "—";
+          const rw = (box.rw || []).map((e) => (typeof e === "string" ? e : `${e.source} → ${e.target}`)).join(", ") || "—";
           const ro = (box.ro || []).length ? `  ro: ${box.ro.join(", ")}` : "";
-          console.log(`\n${name}\n  rw: ${rw}${ro ? "\n" + ro : ""}`);
+          const image = box.image || (box.dockerfile ? boxes.imageFor(name) : boxes.IMAGE);
+          console.log(`\n${name}\n  image: ${image}${box.dockerfile ? `  ← ${box.dockerfile}` : ""}\n  rw: ${rw}${ro ? "\n" + ro : ""}`);
         }
       } else {
         throw new Error(`unknown box command '${action}' — use 'build' or 'list'`);

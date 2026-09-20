@@ -152,6 +152,21 @@ rewritten by the broker (comments are fine):
 }
 ```
 
+A box that needs more than the base image brings its own Dockerfile:
+
+```jsonc
+"infra": {
+  "rw": ["~/Projects/example-infra"],
+  "dockerfile": "~/Projects/example-infra/.box/Dockerfile"
+}
+```
+
+It starts `FROM broker-box`, and `broker box build` builds the base and then
+every box extending it, tagging this one `broker-box-infra`. Keeping project
+tools out of the base is the point: a rust toolchain for one project and
+browsers for another would quadruple an image every box shares. See
+`box/Dockerfile.example`.
+
 Two decisions are worth knowing about:
 
 **Paths match the host exactly.** `~/Projects/example` is mounted at

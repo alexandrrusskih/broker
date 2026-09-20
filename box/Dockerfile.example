@@ -1,0 +1,32 @@
+# A box that needs more than the base image brings its own Dockerfile, named in
+# ~/.config/broker/boxes.json:
+#
+#   "infra": {
+#     "rw": ["~/Projects/example-infra"],
+#     "dockerfile": "~/Projects/example-infra/.box/Dockerfile"
+#   }
+#
+# `broker box build` builds the base, then every box that extends it, tagging
+# this one broker-box-infra. Keeping project tools here rather than in the base
+# is the point: a rust toolchain for one project and browsers for another would
+# quadruple an image that forty projects share.
+FROM broker-box
+
+USER root
+
+# Whatever this project's checks shell out to. Pin versions for the same reason
+# the base does — a check that pulls a different tool between runs is a check
+# whose failures you cannot reproduce.
+ARG TOFU_VERSION=1.10.6
+RUN curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_$(dpkg --print-architecture).tar.gz" \
+      -o /tmp/tofu.tar.gz \
+ && tar -xzf /tmp/tofu.tar.gz -C /tmp tofu \
+ && install -m 0755 /tmp/tofu /usr/local/bin/tofu \
+ && rm -f /tmp/tofu.tar.gz /tmp/tofu
+
+# npm tools this project expects globally rather than in its node_modules.
+RUN npm install -g --no-fund --no-audit firebase-tools@14.24.0 && npm cache clean --force
+
+# Leave it as the base does: the entry point drops to your uid, and the harness
+# must not run as root.
+WORKDIR /

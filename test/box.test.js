@@ -405,3 +405,46 @@ print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
   // oddly. This one names the box.
   assert.match(out, /claude --box demo --resume newest/);
 });
+
+test("each harness is told to resume the way it spells it", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project, { recursive: true });
+  // codex keeps one pile per config directory, named by when the session
+  // started, with the id at the end.
+  const codexSessions = path.join(dir, "cfg", "sessions", "2026", "09", "20");
+  await fs.mkdir(codexSessions, { recursive: true });
+  await fs.writeFile(path.join(codexSessions,
+    "rollout-2026-09-20T10-00-00-019efe7b-889a-72d3-8a7c-bfae7be3dacd.jsonl"), "{}\n");
+
+  const out = engine(`
+from broker import box
+from broker.providers import codex
+codex.SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl"
+codex.SESSION_RESUME = "resume %s"
+print(box.run._resume_hint(codex, "demo", "${project}", {"CODEX_HOME": "${path.join(dir, "cfg")}"}) or "NONE")
+`, { HOME: dir });
+
+  // Its own verb, and the id taken off the end of a timestamped name.
+  assert.match(out, /codex --box demo resume 019efe7b-889a-72d3-8a7c-bfae7be3dacd/);
+});
+
+test("a session written before the box started is not mistaken for this one", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const sessions = path.join(dir, ".claude", "projects", project.split(path.sep).join("-"));
+  await fs.mkdir(project, { recursive: true });
+  await fs.mkdir(sessions, { recursive: true });
+  await fs.writeFile(path.join(sessions, "earlier.jsonl"), "{}\n");
+
+  // Harnesses that keep one pile for every project would otherwise offer the
+  // newest file on the machine, which may belong to another window entirely.
+  const out = engine(`
+import time
+from broker import box
+from broker.providers import claude
+claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
+print(box.run._resume_hint(claude, "demo", "${project}", {}, time.time() + 60) or "NONE")
+`, { HOME: dir });
+  assert.match(out, /NONE/);
+});

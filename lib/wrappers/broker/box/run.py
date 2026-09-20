@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 from .. import config
 from ..out import die, warn
@@ -236,32 +237,53 @@ def command(provider, name, profile, argv, env):
     return cmd
 
 
-def _last_session(provider, workdir):
-    """The session just left, if the harness keys them by working directory."""
+def _last_session(provider, workdir, env=None, since=0):
+    """The session just written, as this harness records them.
+
+    `since` is when the box started. Only claude files its sessions under the
+    working directory; codex and agy keep one pile each, so without it the
+    newest file could belong to a run in another window entirely.
+    """
     pattern = getattr(provider, "SESSION_GLOB", None)
     if not pattern:
         return None
     import glob as globmodule
 
-    key = workdir.replace(os.sep, "-")
-    found = globmodule.glob(pattern % {"key": key, "home": home_dir()})
+    home_env = getattr(provider, "HOME_ENV", None)
+    fields = {
+        "key": workdir.replace(os.sep, "-"),
+        "home": home_dir(),
+        # Where this run's own settings live: a per-account profile, or the
+        # harness's usual directory when nothing was pointed elsewhere.
+        "config": (env or {}).get(home_env) if home_env and home_env != "HOME" else None,
+    }
+    if fields["config"] is None:
+        fields["config"] = expand(getattr(provider, "CANONICAL_HOME", "~"))
+
+    found = [f for f in globmodule.glob(pattern % fields) if os.path.getmtime(f) >= since]
     if not found:
         return None
     newest = max(found, key=lambda f: os.path.getmtime(f))
-    return os.path.splitext(os.path.basename(newest))[0]
+    stem = os.path.splitext(os.path.basename(newest))[0]
+    # Some name the file after the session; others prefix it with a timestamp
+    # and leave the id at the end.
+    match = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", stem)
+    return match.group(0) if match else stem
 
 
-def _resume_hint(provider, name, workdir):
+def _resume_hint(provider, name, workdir, env=None, since=0):
     """What to type to come back INTO this box.
 
     The harness prints its own resume line as it exits, and that line is missing
     the box: run it as printed and the session reopens on the host, in a
     different world, which is not obvious until something behaves oddly.
     """
-    session = _last_session(provider, workdir)
+    session = _last_session(provider, workdir, env, since)
     if not session:
         return None
-    return "\nResume it in this box with:\n  %s --box %s --resume %s\n" % (provider.BIN, name, session)
+    # Each harness spells resuming its own way.
+    resume = getattr(provider, "SESSION_RESUME", "--resume %s") % session
+    return "\nResume it in this box with:\n  %s --box %s %s\n" % (provider.BIN, name, resume)
 
 
 def exec_box(provider, name, argv, env):
@@ -280,6 +302,7 @@ def exec_box(provider, name, argv, env):
 
     cmd = command(provider, name, defined[name], argv, env)
     workdir = cmd[cmd.index("-w") + 1] if "-w" in cmd else os.getcwd()
+    started = time.time()
 
     # Waited for rather than exec'd into, only so the box can add its own line
     # after the harness has printed its resume hint. Everything else about the
@@ -293,7 +316,7 @@ def exec_box(provider, name, argv, env):
     except OSError as exc:
         die("cannot start the '%s' box: %s" % (name, exc))
 
-    hint = _resume_hint(provider, name, workdir)
+    hint = _resume_hint(provider, name, workdir, env, started)
     if hint and finished.returncode == 0:
         sys.stdout.write(hint)
     sys.exit(finished.returncode)

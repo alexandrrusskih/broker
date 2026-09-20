@@ -34,6 +34,14 @@ BOX_HOME = ("~/.codex",)
 BOX_SECRETS = ("~/.codex/auth.json",)
 MCP_CONFIG = ("~/.codex/config.toml", "toml", "mcp_servers")
 
+# Sessions, in one pile per config directory rather than per project: the file
+# is named for when it started, with the id at the end. A box reads the newest
+# one written while it was running, so a leaving box can print a resume line
+# that includes the box — the harness prints its own, and that one reopens the
+# session on the host instead.
+SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl"
+SESSION_RESUME = "resume %s"
+
 REAL_BINS = (
     os.path.expanduser("~/.codex/packages/standalone/current/bin/codex"),
     "/usr/local/lib/node_modules/@openai/codex/bin/codex.js",

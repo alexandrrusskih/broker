@@ -38,6 +38,12 @@ PROFILE_ENV = "BROKER_AGY_HOME"
 CANONICAL_HOME = os.path.expanduser("~")
 PROFILE_BASE = os.path.expanduser("~/.agy")
 AUTH_NAME = os.path.join(".gemini", "antigravity-cli", "antigravity-oauth-token")
+
+# Conversations, one database each, in the real home rather than the profile —
+# the profile only differs in the token. Used to print a resume line that keeps
+# the box (see box/run.py).
+SESSION_GLOB = "%(home)s/.gemini/antigravity-cli/conversations/*.db"
+SESSION_RESUME = "--conversation %s"
 MIRROR_HOME = True
 
 # The installer drops agy in ~/.local/bin; container images put it on the system

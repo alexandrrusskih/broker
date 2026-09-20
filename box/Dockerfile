@@ -29,6 +29,26 @@ RUN npm install -g --no-fund --no-audit \
       "bun@${BUN_VERSION}" \
  && npm cache clean --force
 
+# A box that runs a project's test suite needs the runtime that suite expects:
+# finik's orchestrator shells out to `docker compose`, binds ports and then
+# connects to them on localhost. A socket shared from the host would put those
+# containers — and those ports — on the host's localhost, not the box's, so the
+# daemon has to live in here. Only installed; started per box (see box.py).
+# compose is not packaged for bookworm, so the plugin comes from its release
+# directly. Pinned: a test suite that pulls a different compose between runs is
+# a test suite whose failures you cannot reproduce.
+ARG COMPOSE_VERSION=v5.5.1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      docker.io iptables \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /usr/libexec/docker/cli-plugins \
+ && curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \
+      "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(dpkg --print-architecture | sed s/amd64/x86_64/ | sed s/arm64/aarch64/)" \
+ && chmod 0755 /usr/libexec/docker/cli-plugins/docker-compose
+
+COPY box-entry.sh /usr/local/bin/broker-box-entry
+RUN chmod 0755 /usr/local/bin/broker-box-entry
+
 # The harnesses' own updaters must not run here: the image is the version, and a
 # self-update inside a container would be thrown away with it anyway.
 ENV DISABLE_AUTOUPDATER=1 \

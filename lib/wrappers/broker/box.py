@@ -320,7 +320,19 @@ def command(provider, name, profile, argv, env):
         cmd.append("-it")
     # The harness writes as you, not as root: files it creates in the project
     # stay yours, and nothing needs chown afterwards.
-    cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
+    # A box that runs containers starts as root — the daemon needs it — and the
+    # entry point drops to this uid before the harness starts. Everything else
+    # never becomes root at all.
+    wants_docker = bool(profile.get("docker"))
+    if wants_docker:
+        cmd += ["--privileged", "-e", "BROKER_BOX_DOCKER=1",
+                "-e", "BROKER_BOX_UID=%d" % os.getuid(),
+                "-e", "BROKER_BOX_GID=%d" % os.getgid(),
+                # Its own layer store, kept between runs: no two boxes share
+                # images, and a test suite does not re-pull Postgres every time.
+                "--mount", "type=volume,source=broker-box-docker-%s,target=/var/lib/docker" % name]
+    else:
+        cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
     cmd += ["-e", "HOME=%s" % home, "-e", "USER=%s" % (os.environ.get("USER") or "user")]
     # $HOME itself is a tmpfs owned by that uid. Without it the harness cannot
     # write to its own home: the container creates missing mount points as root,
@@ -423,6 +435,7 @@ def command(provider, name, profile, argv, env):
             cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
 
     cmd.append(image)
+    cmd.append("broker-box-entry")
     cmd.append(provider.BIN)
     cmd += argv
     return cmd

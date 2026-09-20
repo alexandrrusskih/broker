@@ -74,8 +74,8 @@ print(json.dumps(cmd))
   // that can leave it.
   assert.ok(line.includes(`target=${home}/.claude/.credentials.json,readonly`), "credentials are covered by an empty file");
   assert.ok(line.includes("-e CLAUDE_CODE_OAUTH_TOKEN=fake-token"));
-  // Image, then the harness, then exactly what you typed — nothing rewritten.
-  assert.deepEqual(cmd.slice(-4), ["broker-box", "claude", "-p", "hi"]);
+  // Image, entry point, harness, then exactly what you typed — nothing rewritten.
+  assert.deepEqual(cmd.slice(-5), ["broker-box", "broker-box-entry", "claude", "-p", "hi"]);
 });
 
 test("a file-credentials harness gets its per-account profile, not the shared directory's token", async (t) => {
@@ -118,4 +118,33 @@ except SystemExit as exc:
 `);
   assert.match(out, /\['other', 'work'\]/, "comments do not stop it parsing");
   assert.match(out, /exit 1/);
+});
+
+test("only a box that runs containers gets a daemon, root and privileges", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+
+  const build = (extra) => JSON.parse(engine(`
+import json
+from broker import box
+from broker.providers import claude
+claude.MCP_CONFIG = None
+print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]${extra}}, [], {})))
+`, { HOME: dir })).join(" ");
+
+  const plain = build("");
+  assert.ok(plain.includes(`--user ${process.getuid()}:${process.getgid()}`), "no daemon, no root");
+  assert.ok(!plain.includes("--privileged"));
+  assert.ok(!plain.includes("BROKER_BOX_DOCKER"));
+
+  const withDocker = build(', "docker": True');
+  // The daemon needs root, so the container starts as root and the entry point
+  // drops to your uid — otherwise files written into the project come back
+  // owned by root.
+  assert.ok(!withDocker.includes("--user "), "root at start, dropped by the entry point");
+  assert.ok(withDocker.includes("--privileged"));
+  assert.ok(withDocker.includes(`BROKER_BOX_UID=${process.getuid()}`));
+  // Its own layer store, so two boxes never share images.
+  assert.ok(withDocker.includes("type=volume,source=broker-box-docker-demo,target=/var/lib/docker"));
 });

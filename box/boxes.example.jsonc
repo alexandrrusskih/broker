@@ -16,7 +16,11 @@
     //
     // Per harness, because each spells the same idea its own way; a plain list
     // applies to all of them. Flags you type yourself still win.
-    "args": { "claude": ["--dangerously-skip-permissions"] }
+    "args": {
+      "claude": ["--dangerously-skip-permissions"],
+      "codex": ["--dangerously-bypass-approvals-and-sandbox"],
+      "agy": ["--dangerously-skip-permissions"]
+    }
   },
 
   // The harness's own directory (~/.claude, ~/.codex) comes along by itself:

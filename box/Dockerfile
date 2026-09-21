@@ -71,7 +71,7 @@ ARG GH_VERSION=2.101.0
 ARG GLAB_VERSION=1.118.0
 ARG GITLEAKS_VERSION=8.30.1
 ARG CLOUD_SQL_PROXY_VERSION=2.25.4
-ARG TOFU_VERSION=1.11.2
+ARG TOFU_VERSION=1.12.6
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64; leaks_arch=arm64 ;; \

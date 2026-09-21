@@ -796,3 +796,38 @@ test("image pins follow the machine forward, never backward", async (t) => {
   // An older pin genuinely loses to a newer install.
   assert.equal(box.laterVersion("2.1.251", "2.1.267"), "2.1.267");
 });
+
+test("state a box must not share can be keyed to the window", async (t) => {
+  // A box's name is the same in every window, so a directory named after the
+  // box is one directory for all of them. Measured here as thirteen boxes
+  // writing into a single runner state, where one run's teardown deleted
+  // another's job files mid-run.
+  const out = engine(`
+import json, os
+from broker.box import paths
+
+os.environ["HERDR_PANE_ID"] = "wM:p8"
+first = paths.expand("~/.cache/box/{window}/state")
+key_one = paths.window_key()
+
+os.environ["HERDR_PANE_ID"] = "wM:pK"
+second = paths.expand("~/.cache/box/{window}/state")
+
+os.environ.pop("HERDR_PANE_ID", None)
+print(json.dumps({
+    "first": first,
+    "second": second,
+    "differ": first != second,
+    "key_not_empty": bool(key_one),
+    # A path without the placeholder is untouched: every other box keeps
+    # sharing what it was already sharing.
+    "plain": paths.expand("~/.cache/box/state"),
+    "no_braces_left": "{window}" not in first,
+}))
+`);
+  const got = JSON.parse(out);
+  assert.equal(got.differ, true, "two windows must not land on one directory");
+  assert.equal(got.key_not_empty, true, "an empty key would rebuild the shared path");
+  assert.equal(got.no_braces_left, true);
+  assert.ok(got.plain.endsWith("/.cache/box/state"), "paths without the placeholder are untouched");
+});

@@ -6,6 +6,7 @@ file a container needs to know who you are.
 """
 
 import os
+import re
 import pwd
 import subprocess
 
@@ -31,13 +32,39 @@ def home_dir():
 
 
 def expand(path):
-    """expanduser(), but against the real home rather than the current $HOME."""
+    """expanduser(), but against the real home rather than the current $HOME.
+
+    `{window}` in a path becomes this window's own key — the same one the MCP
+    bridges are keyed by. It exists for state a tool insists on writing to, and
+    which two runs must not share: a box's name is the same in every window, so
+    a directory named after the box is one directory for all of them. Measured
+    here as thirteen boxes writing into a single runner state, where one run's
+    teardown deleted another's job files mid-run.
+    """
     path = str(path)
+    if "{window}" in path:
+        path = path.replace("{window}", window_key())
     if path == "~":
         return home_dir()
     if path.startswith("~" + os.sep):
         return os.path.join(home_dir(), path[2:])
     return os.path.expanduser(path)
+
+
+def window_key():
+    """What tells one window from another, for paths that must not be shared.
+
+    The terminal pane when there is one — that is what a person means by "this
+    window" — and otherwise the process group, so two runs in the same shell
+    still differ. Never empty: a path with nothing in it would quietly become
+    the shared one this exists to avoid.
+    """
+    from .. import mcpbridge
+
+    key = mcpbridge.identity_key()
+    if key:
+        return re.sub(r"[^A-Za-z0-9_.-]", "-", key)
+    return "pgid-%d" % os.getpgrp()
 
 
 # Inside a container "localhost" is the container. This is the host.

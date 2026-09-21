@@ -363,6 +363,30 @@ print(json.dumps([
   assert.match(call.trim(), /build -t broker-box-extended -f .*\.box\/Dockerfile .*\.box$/);
 });
 
+test("a version pin follows the machine into a box's own Dockerfile", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(path.join(project, ".box"), { recursive: true });
+  const own = path.join(project, ".box", "Dockerfile");
+  await fs.writeFile(own, "FROM broker-box\nARG GH_VERSION=1.0.0\n");
+  await fs.mkdir(path.join(dir, ".config", "broker"), { recursive: true });
+  await fs.writeFile(path.join(dir, ".config", "broker", "boxes.json"), JSON.stringify({
+    extended: { rw: [project], dockerfile: own },
+  }));
+
+  // A tool that lives in one box rather than the base still has to move with
+  // the machine — otherwise the box that needs it most is the one left behind.
+  const fakeBin = path.join(dir, "bin");
+  await fs.mkdir(fakeBin);
+  await fs.writeFile(path.join(fakeBin, "gh"), '#!/bin/sh\necho "gh version 2.101.0"\n', { mode: 0o755 });
+  const changed = JSON.parse(execFileSync(process.execPath,
+    ["-e", "process.stdout.write(JSON.stringify(require('./lib/box').syncPins({})))"],
+    { cwd: root, encoding: "utf8", env: { ...process.env, HOME: dir, PATH: `${fakeBin}:${process.env.PATH}` } }));
+
+  assert.ok(changed.some((c) => c.arg === "GH_VERSION" && c.to === "2.101.0"), JSON.stringify(changed));
+  assert.match(await fs.readFile(own, "utf8"), /ARG GH_VERSION=2\.101\.0/);
+});
+
 test("a box decides what flags the harness gets, and yours still win", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");

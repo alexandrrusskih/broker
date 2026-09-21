@@ -138,6 +138,19 @@ ENV DISABLE_AUTOUPDATER=1 \
     AGY_CLI_DISABLE_AUTO_UPDATE=1 \
     npm_config_update_notifier=false
 
+# git refuses to touch a repository it believes belongs to someone else, and in
+# here it always believes so: Docker Desktop's file sharing presents a mounted
+# directory as root while the box runs as your own uid. run.py already passes
+# safe.directory through GIT_CONFIG_* environment variables, but a program that
+# rebuilds its environment for a child — dropping every GIT_* on the way, which is
+# a reasonable thing to do — strips that protection off git without meaning to,
+# and the failure surfaces far from its cause as "detected dubious ownership".
+# The system config is read whatever the environment says, so this is the copy
+# that survives. It grants nothing: every path in a box was named by the box and
+# mounted from this machine.
+RUN git config --system --add safe.directory '*' \
+ && git config --system --get-all safe.directory
+
 # The box runs as the host's own uid, passed at run time, so no user is created
 # here — and nothing in the image is owned by it. $HOME comes in as a tmpfs with
 # the right owner (see box.py), with the harness's real directories mounted on

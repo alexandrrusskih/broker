@@ -44,15 +44,8 @@ RUN npm install -g --no-fund --no-audit \
 ARG COMPOSE_VERSION=v5.5.1
 # docker.io is the daemon only on Debian 13; the client is its own package now,
 # and without it the box has a daemon nothing can talk to.
-# cloud-sql-proxy is psql's other half here: the gate reaches the cloud database
-# THROUGH it, with IAM impersonation, so without the proxy the gate dies one step
-# earlier than it would without psql.
-# postgresql-client: a deploy gate checks migrations against the cloud database
-# with psql before it lets a release through. Without it the gate cannot run at
-# all, and the alternative — a wrapper that starts a postgres container for
-# every psql call — pays a container start to borrow one binary.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      docker.io docker-cli iptables postgresql-client \
+      docker.io docker-cli iptables \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /usr/libexec/docker/cli-plugins \
  && curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \
@@ -70,7 +63,6 @@ ARG AGY_VERSION=1.2.7
 ARG GH_VERSION=2.101.0
 ARG GLAB_VERSION=1.118.0
 ARG GITLEAKS_VERSION=8.30.1
-ARG CLOUD_SQL_PROXY_VERSION=2.25.4
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64; leaks_arch=arm64 ;; \
@@ -100,13 +92,10 @@ RUN set -eux; \
       "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${leaks_arch}.tar.gz"; \
     tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks; \
     install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks; \
-    curl -fsSL -o /tmp/cloud-sql-proxy \
-      "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${CLOUD_SQL_PROXY_VERSION}/cloud-sql-proxy.linux.${arch}"; \
-    install -m 0755 /tmp/cloud-sql-proxy /usr/local/bin/cloud-sql-proxy; \
     rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gitleaks.tar.gz /tmp/gitleaks \
-           /tmp/cloud-sql-proxy /tmp/gh_* /tmp/bin; \
+           /tmp/gh_* /tmp/bin; \
     agy --version; gh --version | head -1; glab --version | head -1; rtk --version; \
-    gitleaks version; cloud-sql-proxy --version
+    gitleaks version
 
 # A personal machine keeps commands in ~/bin and ~/.local/bin, and things
 # mounted from there must be reachable by name. Set in the shell profile too,
@@ -117,18 +106,6 @@ RUN printf '%s\n' 'case ":$PATH:" in' \
       '  *) PATH="$HOME/bin:$HOME/.local/bin:$PATH"; export PATH ;;' \
       'esac' > /etc/profile.d/broker-box-path.sh \
  && chmod 0644 /etc/profile.d/broker-box-path.sh
-
-# Cloud SDK: a project's deploy script shells out to `gcloud`, and a box without
-# it cannot ship anything however ready the fix is. Installed from Google's apt
-# repository rather than the tarball so it updates with the image.
-RUN apt-get update && apt-get install -y --no-install-recommends gnupg \
- && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-      | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
- && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
-      > /etc/apt/sources.list.d/google-cloud-sdk.list \
- && apt-get update && apt-get install -y --no-install-recommends google-cloud-cli \
- && rm -rf /var/lib/apt/lists/* \
- && gcloud --version | head -1
 
 COPY box-entry.sh /usr/local/bin/broker-box-entry
 RUN chmod 0755 /usr/local/bin/broker-box-entry

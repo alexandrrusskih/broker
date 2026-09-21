@@ -767,3 +767,32 @@ print(json.dumps({"log": open(${JSON.stringify(log)}).read()}))
   assert.ok(text.indexOf("archive SID") < text.indexOf("unarchive SID"),
     "order matters: the second undoes the first");
 });
+
+test("image pins follow the machine forward, never backward", async (t) => {
+  const dir = await temp(t);
+  const context = path.join(dir, "box");
+  await fs.mkdir(context, { recursive: true });
+  await fs.writeFile(path.join(context, "Dockerfile"), [
+    "FROM node:24-trixie-slim",
+    "ARG CLAUDE_VERSION=2.1.267",
+    "ARG GH_VERSION=2.100.0",
+    "",
+  ].join("\n"));
+
+  const box = require("../lib/box");
+  const original = box.installedVersion;
+  t.after(() => { box.installedVersion = original; });
+
+  // This machine is behind on one tool and ahead on the other — the situation
+  // that lowered six pins for everybody when a colleague ran `upgrade`.
+  box.installedVersion = (spec) => ({ CLAUDE_VERSION: "2.1.251", GH_VERSION: "2.101.0" })[spec.arg];
+
+  // laterVersion is what decides, and it has to compare numbers as numbers:
+  // 1.116.0 is newer than 1.107.0, and 2.101.0 newer than 2.100.0.
+  assert.equal(box.laterVersion("1.116.0", "1.107.0"), "1.116.0");
+  assert.equal(box.laterVersion("2.101.0", "2.100.0"), "2.101.0");
+  assert.equal(box.laterVersion("1.4.2", "1.3.14"), "1.4.2");
+  assert.equal(box.laterVersion("v5.5.1", "v5.4.0"), "v5.5.1");
+  // An older pin genuinely loses to a newer install.
+  assert.equal(box.laterVersion("2.1.251", "2.1.267"), "2.1.267");
+});

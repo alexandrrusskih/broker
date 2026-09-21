@@ -493,17 +493,27 @@ async function main() {
         }
       }
       // A box is meant to reproduce THIS machine, so the image pins follow what
-      // the machine now has — otherwise the box quietly runs a different
-      // version of the same harness than the one you just updated to.
-      try {
-        const moved = require("./lib/box").syncPins();
-        if (moved.length) {
-          console.log(`\nbox image pins updated:`);
-          for (const p of moved) console.log(`  ${p.arg}: ${p.from} → ${p.to}`);
-          console.log("  run 'broker box build' to rebuild the image");
+      // the machine now has — but only after the machine has actually been
+      // brought up to date. A plain `upgrade` updates the broker and nothing
+      // else, and pinning there wrote whatever happened to be installed:
+      // someone running it on an older toolchain lowered six pins at once, for
+      // everybody, because the pins are shared through the repository.
+      if (flags.all || flags.harnesses) {
+        try {
+          const moved = require("./lib/box").syncPins();
+          if (moved.length) {
+            console.log(`\nbox image pins updated:`);
+            for (const p of moved) console.log(`  ${p.arg}: ${p.from} → ${p.to}`);
+            console.log("  run 'broker box build' to rebuild the image");
+          }
+          // Said out loud rather than passed over: a pin that stayed put
+          // because this machine is behind is worth knowing about.
+          for (const p of moved.skipped || []) {
+            console.log(`  ${p.arg}: kept at ${p.pinned}; this machine has ${p.installed}`);
+          }
+          } catch (_e) {
+          // no box context here — nothing to pin
         }
-      } catch (_e) {
-        // no box context here — nothing to pin
       }
 
       if (flags.server) {

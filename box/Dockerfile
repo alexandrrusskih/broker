@@ -58,14 +58,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # rtk trims command output before it reaches the model. It hooks every tool use,
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
-ARG RTK_VERSION=0.48.0
+ARG RTK_VERSION=0.49.0
 ARG AGY_VERSION=1.2.7
-ARG GH_VERSION=2.100.0
-ARG GLAB_VERSION=1.116.0
+ARG GH_VERSION=2.101.0
+ARG GLAB_VERSION=1.118.0
+ARG GITLEAKS_VERSION=8.30.1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
-    case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64 ;; \
-                    amd64) agy_arch=x64;   gh_arch=amd64; glab_arch=amd64 ;; \
+    case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64; leaks_arch=arm64 ;; \
+                    amd64) agy_arch=x64;   gh_arch=amd64; glab_arch=amd64; leaks_arch=x64 ;; \
                     *) echo "unsupported architecture: $arch" >&2; exit 1 ;; esac; \
     case "$arch" in arm64) rtk_target=aarch64-unknown-linux-gnu ;; \
                     amd64) rtk_target=x86_64-unknown-linux-musl ;; esac; \
@@ -87,8 +88,13 @@ RUN set -eux; \
       "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_${glab_arch}.tar.gz"; \
     tar -xzf /tmp/glab.tar.gz -C /tmp; \
     install -m 0755 /tmp/bin/glab /usr/local/bin/glab; \
-    rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gh_* /tmp/bin; \
-    agy --version; gh --version | head -1; glab --version | head -1; rtk --version
+    curl -fsSL -o /tmp/gitleaks.tar.gz \
+      "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${leaks_arch}.tar.gz"; \
+    tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks; \
+    install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks; \
+    rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gitleaks.tar.gz /tmp/gitleaks /tmp/gh_* /tmp/bin; \
+    agy --version; gh --version | head -1; glab --version | head -1; rtk --version; \
+    gitleaks version
 
 # A personal machine keeps commands in ~/bin and ~/.local/bin, and things
 # mounted from there must be reachable by name. Set in the shell profile too,

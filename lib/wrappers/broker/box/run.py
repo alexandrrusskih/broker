@@ -15,7 +15,7 @@ from ..out import die, warn
 # it where it lives, and a bound name here would keep pointing at the original.
 from . import boxes, mcp, ssh
 from .mcp import HOST_GATEWAY
-from .paths import _empty_file, _mount, _passwd_file, _paths, expand, home_dir
+from .paths import _empty_file, _mount, _passwd_file, _paths, expand, home_dir, window_key
 
 # What the terminal is, said in the terminal's own terms. Without these the
 # container substitutes a plain "xterm" and a C locale: mouse reporting,
@@ -114,6 +114,10 @@ def command(provider, name, profile, argv, env):
     else:
         cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
     cmd += ["-e", "HOME=%s" % home, "-e", "USER=%s" % (os.environ.get("USER") or "user")]
+    # Which window this is, for tools inside that keep per-run state of their
+    # own. The same key `{window}` resolves to in a box's paths, so a tool and
+    # the directory it was given agree on what "this run" means.
+    cmd += ["-e", "BROKER_WINDOW_ID=%s" % window_key()]
     for variable in TERMINAL_ENV:
         if os.environ.get(variable):
             cmd += ["-e", "%s=%s" % (variable, os.environ[variable])]

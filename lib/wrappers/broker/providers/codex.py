@@ -62,21 +62,23 @@ BOX_SHARED = ("sessions",)
 # out by the harness's own command — see BOX_SYNC.
 BOX_PRIVATE = ("*.sqlite",)
 
-# How a session written inside a box joins the history out here.
+# Nothing is folded back on the way out, and that is deliberate.
 #
-# A thread started in a box is recorded in the box's own copy of the database,
-# and that record dies with the copy: out here the session file exists but the
-# thread is in no list, and `migrate-rollouts` refuses it — "missing its SQLite
-# metadata" — because the metadata it wants went with the copy.
+# A thread started in a box is recorded in the box's copy of the database, and
+# that record dies with the copy: out here the session file exists but the
+# thread is in no list. `migrate-rollouts` refuses it — "missing its SQLite
+# metadata" — because the metadata went with the copy.
 #
-# Archiving a session, then unarchiving it, makes the harness read the file and
-# write the thread into the history here. Two ordinary commands about a session
-# the user owns; no TUI, no model call, nothing guessed about someone else's
-# schema. Run in order, and the second undoes the first.
-BOX_SYNC = (
-    ("archive", "%(session)s"),
-    ("unarchive", "%(session)s"),
-)
+# Archiving the session and unarchiving it does register the thread, and it was
+# tried here. It is a race: between the two commands the session IS archived,
+# and a box starting in that instant clones a database that says so. The box
+# then refuses to reopen its own session — "Failed to unarchive session" — over
+# a thread the host considers perfectly live. Seen within the hour.
+#
+# So the session file is left as the record, which it already is. Opening it
+# once out here registers the thread as a side effect, and the line the box
+# prints on the way out is exactly that command.
+BOX_SYNC = ()
 
 
 SESSION_RESUME = "resume %s"

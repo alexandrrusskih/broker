@@ -239,6 +239,13 @@ file survives, so `resume <id>` opens it and registers the thread out here — t
 line the box prints on the way out is exactly that command. Until it is opened
 once, the thread will not appear in the picker.
 
+Registering it automatically on the way out was tried and taken back out.
+Archiving the session and unarchiving it does the job, but between those two
+commands the session IS archived — and a box starting in that instant clones a
+database that says so, then refuses to reopen its own session over a thread the
+host considers perfectly live. The session file is the record; one `resume` is
+the price of having it listed.
+
 ### When a box dies badly
 
 A harness takes the terminal over completely: alternate screen, mouse

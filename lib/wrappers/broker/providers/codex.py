@@ -137,13 +137,12 @@ SHARED = (
     "prompts",
     "AGENTS.md",
     "sessions",
-    # OAuth tokens for the MCP servers, and the locks that serialise renewing
-    # them. These are credentials for OTHER services — sentry, an internal
-    # ticket tracker — not for the codex account, and the services are the same
-    # whichever account is picked. Per-profile copies meant logging into each
-    # of them again every time the broker moved to another account.
-    ".credentials.json",
-    "mcp-oauth-locks",
+    # NOT the MCP OAuth tokens (.credentials.json) or their locks. Sharing them
+    # is the right idea — they are credentials for OTHER services, the same ones
+    # whichever account is picked — but not through a symlink: the harness
+    # writes that file by rename and opens the lock directory in a way that
+    # refuses to follow links, and a login then dies with "Symbolic link loop".
+    # Tried, and taken back out.
     # The names given to threads. The sessions themselves are shared, so a
     # per-profile index means the same conversation is titled under one account
     # and nameless under the next.

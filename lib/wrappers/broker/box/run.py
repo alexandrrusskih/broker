@@ -577,6 +577,7 @@ TERMINAL_RESET = (
     "\033[=0;1u"                   # ...and clear any that were set outright
     "\033[?1l\033>"                # cursor keys and keypad back to normal
     "\033[?2004l"                  # bracketed paste off
+    "\033[?1004l"                  # focus in/out reporting off — it arrives as "\033[O"
     "\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l"  # mouse reporting off
     "\033[?25h"                    # cursor visible again
     "\033[0m"                      # attributes back to default

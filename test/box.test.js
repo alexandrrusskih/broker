@@ -41,7 +41,7 @@ print(json.dumps([
   ]);
 });
 
-test("the box carries the harness's own directory, the project, and no credentials file", async (t) => {
+test("the box carries the harness's own directory and the project, with the token only in the environment", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");
   const reference = path.join(dir, "reference");
@@ -72,10 +72,14 @@ print(json.dumps(cmd))
   assert.ok(line.includes(`source=${reference},target=${reference},readonly`), "ro stays ro");
   assert.ok(line.includes(`source=${home}/.claude,target=${home}/.claude`), "settings, MCP and history come along");
 
-  // The token rides in the environment; a copy on disk inside the box is a copy
-  // that can leave it.
-  assert.ok(line.includes(`target=${home}/.claude/.credentials.json,readonly`), "credentials are covered by an empty file");
+  // The account's token rides in the environment and is never written to disk.
   assert.ok(line.includes("-e CLAUDE_CODE_OAUTH_TOKEN=fake-token"));
+  // .credentials.json is NOT that token — it holds the logins for the MCP
+  // servers, which are the same services whichever account is picked. Covering
+  // it with a read-only empty file started every box logged out of all of them,
+  // with nowhere to save a new login.
+  assert.ok(!line.includes(`target=${home}/.claude/.credentials.json`),
+    "MCP logins travel with the directory, and a login inside a box sticks");
   // Image, entry point, harness, then exactly what you typed — nothing rewritten.
   assert.deepEqual(cmd.slice(-5), ["broker-box", "broker-box-entry", "claude", "-p", "hi"]);
 });

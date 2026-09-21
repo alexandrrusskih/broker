@@ -36,9 +36,16 @@ ENV_NAME = "CLAUDE_CODE_OAUTH_TOKEN"
 # session history is keyed by the project's absolute path, which the box
 # preserves, so `--resume` inside the box finds the same sessions.
 BOX_HOME = ("~/.claude", "~/.claude.json")
-# ...except the credentials file: the token arrives in the environment from the
-# broker, and a copy on disk inside the box is a copy that can leave it.
-BOX_SECRETS = ("~/.claude/.credentials.json",)
+# The account's own token never travels: it arrives in the environment from the
+# broker (CREDENTIALS = "env") and is never written to disk here at all.
+#
+# .credentials.json is NOT that token. It holds mcpOAuth — the logins for the
+# MCP servers a box talks to, which are the same services whichever account is
+# picked. Handing the box a read-only empty file in its place meant every box
+# started logged out of all of them, with nowhere to save a new login: the
+# session was gone again at the next start. So it travels like the rest of the
+# directory, and a login inside a box is a login everywhere.
+BOX_SECRETS = ()
 # Where this harness declares its MCP servers, so a box can reach the ones that
 # only exist on this machine (see mcpbridge.py).
 MCP_CONFIG = ("~/.claude.json", "json", "mcpServers")

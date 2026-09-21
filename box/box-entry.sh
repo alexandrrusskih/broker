@@ -25,7 +25,18 @@ if [ "${BROKER_BOX_DOCKER:-}" = "1" ] && ! docker info >/dev/null 2>&1; then
   (
     while read -r _ < /run/broker-docker-start; do
       docker info >/dev/null 2>&1 && continue
-      dockerd --host=unix:///var/run/docker.sock >/var/log/dockerd.log 2>&1 &
+      # Images come from the machine's own pull-through cache when there is
+      # one: the first box to want Postgres downloads it, every box after that
+      # copies it over the loopback. It also steps around a resolver that
+      # occasionally times out on registry-1.docker.io and takes a deploy with
+      # it. Plain http, and only to this machine — the cache is bound to its
+      # loopback and serves public images.
+      mirror=""
+      if [ -n "${BROKER_BOX_REGISTRY_MIRROR:-}" ]; then
+        mirror="--registry-mirror=${BROKER_BOX_REGISTRY_MIRROR} --insecure-registry=${BROKER_BOX_REGISTRY_MIRROR#http://}"
+      fi
+      # shellcheck disable=SC2086
+      dockerd --host=unix:///var/run/docker.sock $mirror >/var/log/dockerd.log 2>&1 &
       waited=0
       while ! docker info >/dev/null 2>&1; do
         waited=$((waited + 1))

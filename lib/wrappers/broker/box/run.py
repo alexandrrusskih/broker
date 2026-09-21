@@ -72,6 +72,49 @@ def _write_stub(box, target, message):
     return path
 
 
+# A pull-through cache for the images a box's own docker daemon fetches, run
+# once on this machine and shared by every box on it.
+#
+# Each window's daemon owns its own layer store — two daemons cannot share one
+# /var/lib/docker — so every new window used to fetch Postgres and Redis from
+# the internet again, and a person who opens and kills boxes all day pays that
+# download every time. The cache turns the second fetch and every one after it
+# into a copy over the loopback.
+#
+# Bound to 127.0.0.1: it holds public images and answers only this machine.
+REGISTRY_CACHE = "broker-box-registry"
+REGISTRY_PORT = 5009
+REGISTRY_MIRROR = "http://%s:%d" % (mcp.HOST_GATEWAY, REGISTRY_PORT)
+
+
+def _ensure_registry_cache(binary):
+    """Have the cache running, or carry on without it.
+
+    Never fatal: a box whose images come straight from the internet works
+    exactly as it did before, only slower on a cold window.
+    """
+    try:
+        state = subprocess.run([binary, "inspect", "-f", "{{.State.Running}}", REGISTRY_CACHE],
+                               capture_output=True, text=True, timeout=20)
+        if state.returncode == 0:
+            if state.stdout.strip() == "true":
+                return True
+            return subprocess.run([binary, "start", REGISTRY_CACHE],
+                                  capture_output=True, timeout=30).returncode == 0
+        started = subprocess.run(
+            [binary, "run", "-d", "--name", REGISTRY_CACHE, "--restart", "unless-stopped",
+             "-p", "127.0.0.1:%d:5000" % REGISTRY_PORT,
+             "-v", "%s-cache:/var/lib/registry" % REGISTRY_CACHE,
+             "-e", "REGISTRY_PROXY_REMOTEURL=https://registry-1.docker.io",
+             "registry:2"], capture_output=True, text=True, timeout=180)
+        if started.returncode:
+            warn("the image cache did not start, images will come from the internet: %s"
+                 % started.stderr.strip().splitlines()[-1:] or "")
+        return started.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def command(provider, name, profile, argv, env):
     """The full container command line for this run."""
     runtime = profile.get("runtime") or "docker"
@@ -112,6 +155,11 @@ def command(provider, name, profile, argv, env):
                 "--mount", "type=volume,source=broker-box-docker-%s%s,target=/var/lib/docker"
                 % (re.sub(r"[^a-zA-Z0-9_.-]", "-", name).lower(),
                    ("-" + mcpbridge.identity_key()) if mcpbridge.identity_key() else "")]
+        # Where that daemon looks before the internet. The name resolves through
+        # the host-gateway line added below.
+        if _ensure_registry_cache(binary):
+            cmd += ["-e", "BROKER_BOX_REGISTRY_MIRROR=%s" % REGISTRY_MIRROR]
+        cmd += ["--add-host", "%s:host-gateway" % mcp.HOST_GATEWAY]
     else:
         cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
     cmd += ["-e", "HOME=%s" % home, "-e", "USER=%s" % (os.environ.get("USER") or "user")]
@@ -127,12 +175,19 @@ def command(provider, name, profile, argv, env):
     # and mounting the real home instead would hand the box everything in it.
     # The directories below land on top of this, so what is mounted survives and
     # what is not is discarded with the container.
-    cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700" % (home, os.getuid(), os.getgid())]
+    #
+    # Executable, deliberately. Docker mounts a tmpfs noexec by default, and
+    # that default cost a day here: a browser unpacked into ~/.cache refused to
+    # start with EACCES while its permissions read as executable, and it looked
+    # like something was wiping the environment. Nothing was. A box is already a
+    # container with only the directories it was given — forbidding execution
+    # inside its own home protects nothing that the box itself does not.
+    cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec" % (home, os.getuid(), os.getgid())]
     # ...and the same for ~/.config, which tools expect to be able to write to.
     # Mounting anything below it makes the container create the directory
     # itself, owned by root — and then `glab` cannot make its config directory
     # and refuses to run at all. Read-only mounts land on top of this.
-    cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700"
+    cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
             % (os.path.join(home, ".config"), os.getuid(), os.getgid())]
 
     mounted = []

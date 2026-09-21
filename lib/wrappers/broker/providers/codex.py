@@ -135,6 +135,13 @@ SHARED = (
     "prompts",
     "AGENTS.md",
     "sessions",
+    # OAuth tokens for the MCP servers, and the locks that serialise renewing
+    # them. These are credentials for OTHER services — sentry, an internal
+    # ticket tracker — not for the codex account, and the services are the same
+    # whichever account is picked. Per-profile copies meant logging into each
+    # of them again every time the broker moved to another account.
+    ".credentials.json",
+    "mcp-oauth-locks",
     # The names given to threads. The sessions themselves are shared, so a
     # per-profile index means the same conversation is titled under one account
     # and nameless under the next.

@@ -71,6 +71,7 @@ ARG GH_VERSION=2.101.0
 ARG GLAB_VERSION=1.118.0
 ARG GITLEAKS_VERSION=8.30.1
 ARG CLOUD_SQL_PROXY_VERSION=2.25.4
+ARG TOFU_VERSION=1.11.2
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64; leaks_arch=arm64 ;; \
@@ -100,12 +101,21 @@ RUN set -eux; \
       "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${leaks_arch}.tar.gz"; \
     tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks; \
     install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks; \
+    # Pinned level with the host's own tofu, not at the newest: OpenTofu
+    # records the version that last wrote a state file, and once a newer one
+    # has written it the older refuses to read it. A box reaching for the
+    # latest would put the machine's own infrastructure beyond the machine.
+    curl -fsSL -o /tmp/tofu.tar.gz \
+      "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${arch}.tar.gz"; \
+    tar -xzf /tmp/tofu.tar.gz -C /tmp tofu; \
+    install -m 0755 /tmp/tofu /usr/local/bin/tofu; \
     curl -fsSL -o /tmp/cloud-sql-proxy \
       "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${CLOUD_SQL_PROXY_VERSION}/cloud-sql-proxy.linux.${arch}"; \
     install -m 0755 /tmp/cloud-sql-proxy /usr/local/bin/cloud-sql-proxy; \
-    rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gitleaks.tar.gz /tmp/gitleaks /tmp/cloud-sql-proxy /tmp/gh_* /tmp/bin; \
+    rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gitleaks.tar.gz /tmp/gitleaks \
+           /tmp/cloud-sql-proxy /tmp/tofu.tar.gz /tmp/tofu /tmp/gh_* /tmp/bin; \
     agy --version; gh --version | head -1; glab --version | head -1; rtk --version; \
-    gitleaks version; cloud-sql-proxy --version
+    gitleaks version; cloud-sql-proxy --version; tofu --version | head -1
 
 # A personal machine keeps commands in ~/bin and ~/.local/bin, and things
 # mounted from there must be reachable by name. Set in the shell profile too,

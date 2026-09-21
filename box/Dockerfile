@@ -44,8 +44,12 @@ RUN npm install -g --no-fund --no-audit \
 ARG COMPOSE_VERSION=v5.5.1
 # docker.io is the daemon only on Debian 13; the client is its own package now,
 # and without it the box has a daemon nothing can talk to.
+# postgresql-client: a deploy gate checks migrations against the cloud database
+# with psql before it lets a release through. Without it the gate cannot run at
+# all, and the alternative — a wrapper that starts a postgres container for
+# every psql call — pays a container start to borrow one binary.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      docker.io docker-cli iptables \
+      docker.io docker-cli iptables postgresql-client \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /usr/libexec/docker/cli-plugins \
  && curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \

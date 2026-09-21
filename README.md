@@ -363,6 +363,40 @@ For the same reason a project that is a symlink (`~/Projects/foo` →
 resolves symlinks and answers with the physical path; without the second mount
 the harness inside the box could not open a single file it named.
 
+### Logging into an MCP server that wants OAuth
+
+Some servers are reached over https and ask you to sign in (an error tracker, a
+ticket tracker, anything with accounts of its own). Two things decide whether
+that login survives, and both bite inside a box.
+
+**Log in on the host, not in a box.** The flow opens a browser and waits on a
+callback at `http://127.0.0.1:<port>`. A container has no browser, and the port
+it listens on is not the port your browser would reach. Signing in on the host
+is enough, because the tokens are shared — see below.
+
+**Keep the tokens in a file.** codex stores them in the system keyring by
+default, and a container has none: the callback arrives, the login succeeds, and
+then there is nowhere to save it. In `~/.codex/config.toml`:
+
+```toml
+mcp_oauth_credentials_store = "file"
+```
+
+It is read at startup, so a box already running keeps the old setting.
+
+**The tokens themselves are shared, deliberately.** They are credentials for
+OTHER services, and those services are the same whichever account the broker
+picks — so `~/.codex/.credentials.json` and the locks beside it are shared by
+every profile, and a box gets the real file rather than an empty stand-in. One
+login, and it holds for every account and inside every box.
+
+The same applies to claude: `~/.claude/.credentials.json` holds `mcpOAuth`, not
+the account's token — that one arrives in the environment and is never written
+to disk — so it travels into a box like the rest of the directory.
+
+A server that speaks stdio needs none of this: it runs on the host as you, and a
+box reaches it through the bridge above.
+
 ## Accounts
 
 Tokens are isolated per account in the broker, and every command takes

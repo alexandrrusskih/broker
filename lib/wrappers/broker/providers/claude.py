@@ -56,6 +56,19 @@ MCP_CONFIG = ("~/.claude.json", "json", "mcpServers")
 # session on the host instead.
 SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
 
+# Reading the newest file is only right when one harness writes there. Thirteen
+# boxes open on the same project write into this one directory, so "newest"
+# regularly belongs to somebody else's window, and the box would offer a resume
+# line into a session the person had never seen. This harness will take the id
+# as an argument, so the box names it up front and never has to guess.
+SESSION_ID_FLAG = ("--session-id", "%s")
+
+# Ways of asking for a session that already exists: the id is the person's to
+# choose then, not ours. `-r` and `--continue` may also come with nothing at
+# all, which opens a picker — the id is unknowable until it closes, and the box
+# falls back to reading the directory.
+SESSION_PICKERS = ("--resume", "-r", "--continue", "-c", "--session-id", "--from-pr")
+
 # An API key in the environment outranks the OAuth token, so a stray one would
 # quietly bill the wrong thing while looking like it worked.
 CLEAR_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")

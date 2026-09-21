@@ -8,6 +8,7 @@ import subprocess
 import sys
 import termios
 import time
+import uuid
 
 from .. import config, mcpbridge
 from ..out import die, warn
@@ -410,6 +411,42 @@ def command(provider, name, profile, argv, env):
     return cmd
 
 
+SESSION_ID = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _pin_session(provider, argv):
+    """Decide this run's session id before it starts, if the harness lets us.
+
+    Otherwise the box has to work it out afterwards by reading the newest
+    session file in the project's directory — which is right only while one
+    harness writes there. Every box open on the same project shares that
+    directory, so on a busy machine the newest file is somebody else's window,
+    and the resume line the box prints leads into a stranger's conversation.
+    The id is unguessable but not unknowable: harnesses accept it as an
+    argument, so it is chosen here and simply known.
+
+    Returns the id and the arguments to run with. When the person is already
+    naming a session — resuming, continuing, picking one from a list — the id
+    is theirs: it is read from what they typed, or left unknown when only a
+    picker can answer, and nothing is added.
+    """
+    flag = getattr(provider, "SESSION_ID_FLAG", None)
+    if not flag:
+        return None, argv
+    pickers = getattr(provider, "SESSION_PICKERS", ())
+    for index, arg in enumerate(argv):
+        key, _, inline = arg.partition("=")
+        if key not in pickers:
+            continue
+        value = inline if inline else (argv[index + 1] if index + 1 < len(argv) else "")
+        # A picker with nothing after it, or followed by the next flag: the
+        # session is chosen inside the harness, out of our sight.
+        return (value if SESSION_ID.match(value) else None), argv
+    chosen = str(uuid.uuid4())
+    return chosen, [flag[0], flag[1] % chosen, *argv]
+
+
 def _last_session(provider, workdir, env=None, since=0):
     """The session just written, as this harness records them.
 
@@ -470,7 +507,7 @@ def _sessions_are_shared(provider, env=None):
     return _session_root(provider, expand(config)) == _session_root(provider, canonical)
 
 
-def _resume_hint(provider, name, workdir, env=None, since=0, account=None):
+def _resume_hint(provider, name, workdir, env=None, since=0, account=None, session=None):
     """What to type to come back INTO this box, on the same account.
 
     The harness prints its own resume line as it exits, and that line is missing
@@ -483,7 +520,7 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None):
     all reach one pile of sessions — which is the normal arrangement — the
     broker picks an account by itself and the line stays clean.
     """
-    session = _last_session(provider, workdir, env, since)
+    session = session or _last_session(provider, workdir, env, since)
     if not session:
         return None
     # Each harness spells resuming its own way.
@@ -651,6 +688,7 @@ def exec_box(provider, name, argv, env, account=None):
     if os.environ.get("HERDR_PANE_ID") and not os.environ.get("HERDR_AGENT"):
         os.environ["HERDR_AGENT"] = provider.NAME
 
+    pinned, argv = _pin_session(provider, argv)
     cmd = command(provider, name, defined[name], argv, env)
     workdir = cmd[cmd.index("-w") + 1] if "-w" in cmd else os.getcwd()
     started = time.time()
@@ -679,14 +717,14 @@ def exec_box(provider, name, argv, env, account=None):
         # another window — the pane is usable again from this line on.
         _restore_terminal(saved)
 
-    session = _last_session(provider, workdir, env, started)
+    session = pinned or _last_session(provider, workdir, env, started)
     if session:
         # Printed BEFORE the session is folded back, and not only after a clean
         # exit. Folding asks the harness to re-read its own session, and it
         # looks through every session it has to find the one named — thirteen
         # thousand of them here, which is seconds of silence. The line is what
         # the person is waiting for; the bookkeeping can happen behind it.
-        hint = _resume_hint(provider, name, workdir, env, started, account)
+        hint = _resume_hint(provider, name, workdir, env, started, account, session)
         if hint:
             sys.stdout.write(hint)
             sys.stdout.flush()

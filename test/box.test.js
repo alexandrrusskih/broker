@@ -456,6 +456,63 @@ print(box.run._resume_hint(claude, "demo", "${project}", {}, time.time() + 60) o
 });
 
 
+test("the session a box offers to resume is its own, not the newest on the machine", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const sessions = path.join(dir, ".claude", "projects", project.split(path.sep).join("-"));
+  await fs.mkdir(project, { recursive: true });
+  await fs.mkdir(sessions, { recursive: true });
+  // Another window, open on the same project, writing its own session into the
+  // one directory they share — and writing it last.
+  await fs.writeFile(path.join(sessions, "aaaaaaaa-1111-2222-3333-444444444444.jsonl"), "{}\n");
+
+  const out = engine(`
+from broker import box
+from broker.providers import claude
+claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
+claude.SESSION_ID_FLAG = ("--session-id", "%s")
+claude.SESSION_PICKERS = ("--resume", "-r", "--continue", "-c", "--session-id")
+
+pinned, argv = box.run._pin_session(claude, ["--dangerously-skip-permissions"])
+print("FLAG", argv[0], argv[1] == pinned, argv[2])
+print(box.run._resume_hint(claude, "demo", "${project}", {}, 0, None, pinned))
+`, { HOME: dir });
+
+  // The id is decided before the run, passed to the harness, and printed back
+  // unchanged — the neighbour's newer file never enters into it.
+  assert.match(out, /FLAG --session-id True --dangerously-skip-permissions/);
+  const offered = out.match(/--resume ([0-9a-f-]{36})/);
+  assert.ok(offered, out);
+  assert.notStrictEqual(offered[1], "aaaaaaaa-1111-2222-3333-444444444444");
+});
+
+test("naming a session yourself leaves the command exactly as you typed it", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project, { recursive: true });
+
+  const out = engine(`
+from broker import box
+from broker.providers import claude
+claude.SESSION_ID_FLAG = ("--session-id", "%s")
+claude.SESSION_PICKERS = ("--resume", "-r", "--continue", "-c", "--session-id")
+
+# Resuming by id: yours, and already known.
+print("BYID", *box.run._pin_session(claude, ["--resume", "bbbbbbbb-1111-2222-3333-444444444444"]))
+# A picker with nothing to pick from yet: the answer lives inside the harness.
+print("PICKER", box.run._pin_session(claude, ["--continue"])[0])
+# A harness that cannot be told an id keeps the old way of finding out.
+claude.SESSION_ID_FLAG = None
+print("UNTOLD", box.run._pin_session(claude, ["--print", "hi"]))
+`, { HOME: dir });
+
+  // Nothing added, nothing reordered: a session the person named is theirs.
+  assert.match(out, /BYID bbbbbbbb-1111-2222-3333-444444444444 \['--resume', 'bbbbbbbb-1111-2222-3333-444444444444'\]/);
+  assert.match(out, /PICKER None/);
+  assert.match(out, /UNTOLD \(None, \['--print', 'hi'\]\)/);
+});
+
+
 test("a box can stand in for a command that must not run inside it", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");

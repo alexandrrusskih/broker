@@ -44,6 +44,9 @@ RUN npm install -g --no-fund --no-audit \
 ARG COMPOSE_VERSION=v5.5.1
 # docker.io is the daemon only on Debian 13; the client is its own package now,
 # and without it the box has a daemon nothing can talk to.
+# cloud-sql-proxy is psql's other half here: the gate reaches the cloud database
+# THROUGH it, with IAM impersonation, so without the proxy the gate dies one step
+# earlier than it would without psql.
 # postgresql-client: a deploy gate checks migrations against the cloud database
 # with psql before it lets a release through. Without it the gate cannot run at
 # all, and the alternative — a wrapper that starts a postgres container for
@@ -67,6 +70,7 @@ ARG AGY_VERSION=1.2.7
 ARG GH_VERSION=2.101.0
 ARG GLAB_VERSION=1.118.0
 ARG GITLEAKS_VERSION=8.30.1
+ARG CLOUD_SQL_PROXY_VERSION=2.25.4
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in arm64) agy_arch=arm64; gh_arch=arm64; glab_arch=arm64; leaks_arch=arm64 ;; \
@@ -96,9 +100,12 @@ RUN set -eux; \
       "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${leaks_arch}.tar.gz"; \
     tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks; \
     install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks; \
-    rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gitleaks.tar.gz /tmp/gitleaks /tmp/gh_* /tmp/bin; \
+    curl -fsSL -o /tmp/cloud-sql-proxy \
+      "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v${CLOUD_SQL_PROXY_VERSION}/cloud-sql-proxy.linux.${arch}"; \
+    install -m 0755 /tmp/cloud-sql-proxy /usr/local/bin/cloud-sql-proxy; \
+    rm -rf /tmp/agy.tar.gz /tmp/gh.tar.gz /tmp/glab.tar.gz /tmp/gitleaks.tar.gz /tmp/gitleaks /tmp/cloud-sql-proxy /tmp/gh_* /tmp/bin; \
     agy --version; gh --version | head -1; glab --version | head -1; rtk --version; \
-    gitleaks version
+    gitleaks version; cloud-sql-proxy --version
 
 # A personal machine keeps commands in ~/bin and ~/.local/bin, and things
 # mounted from there must be reachable by name. Set in the shell profile too,

@@ -1,6 +1,6 @@
 {
   "name": "@pbl/broker",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Centralized OAuth token broker — sole refresh authority for codex/claude/agy across CI and dev machines",
   "bin": {
     "broker": "cli.js"

@@ -52,6 +52,56 @@ if [ "${BROKER_BOX_DOCKER:-}" = "1" ] && ! docker info >/dev/null 2>&1; then
     done
   ) &
 
+  # The private network, raised the same way and for the same reason: most
+  # boxes never touch it, and a daemon that joined on startup would put every
+  # open window on the network as a member of its own. This way a box appears
+  # there only if something in it actually goes looking.
+  #
+  # The daemon needs root and a tun device, so the same root listener raises it;
+  # the wrapper below only asks. Authorisation is kept in /var/lib/tailscale,
+  # mounted from outside, so a box joins once rather than on every run.
+  if [ -x /usr/local/sbin/tailscaled ]; then
+    rm -f /run/broker-tailscale-start
+    mkfifo -m 0622 /run/broker-tailscale-start 2>/dev/null || true
+    mkdir -p /var/lib/tailscale /var/run/tailscale
+    chgrp "${BROKER_BOX_GID:-0}" /var/run/tailscale 2>/dev/null || true
+    chmod 0770 /var/run/tailscale 2>/dev/null || true
+    (
+      while read -r _ < /run/broker-tailscale-start; do
+        pgrep -x tailscaled >/dev/null 2>&1 && continue
+        /usr/local/sbin/tailscaled --state=/var/lib/tailscale/tailscaled.state \
+          --socket=/var/run/tailscale/tailscaled.sock >/var/log/tailscaled.log 2>&1 &
+        waited=0
+        while [ ! -S /var/run/tailscale/tailscaled.sock ]; do
+          waited=$((waited + 1))
+          if [ "$waited" -gt 40 ]; then
+            echo "broker box: tailscaled did not start; see /var/log/tailscaled.log" >&2
+            break
+          fi
+          sleep 0.25
+        done
+        chgrp "${BROKER_BOX_GID:-0}" /var/run/tailscale/tailscaled.sock 2>/dev/null || true
+        chmod 0660 /var/run/tailscale/tailscaled.sock 2>/dev/null || true
+      done
+    ) &
+
+    cat > /usr/local/bin/tailscale <<'TSWRAP'
+#!/bin/sh
+# Raise the box's own tailscale daemon the first time anything asks for it.
+if [ ! -S /var/run/tailscale/tailscaled.sock ]; then
+  echo start > /run/broker-tailscale-start 2>/dev/null || true
+  waited=0
+  while [ ! -S /var/run/tailscale/tailscaled.sock ]; do
+    waited=$((waited + 1))
+    [ "$waited" -gt 60 ] && break
+    sleep 0.25
+  done
+fi
+exec /usr/local/bin/tailscale.real "$@"
+TSWRAP
+    chmod 0755 /usr/local/bin/tailscale
+  fi
+
   # Ahead of the real docker on PATH (/usr/local/bin comes before /usr/bin).
   # `docker compose` is a plugin of this same command, so it is covered too.
   cat > /usr/local/bin/docker <<'WRAPPER'

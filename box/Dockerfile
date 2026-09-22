@@ -129,6 +129,17 @@ ENV DISABLE_AUTOUPDATER=1 \
 RUN git config --system --add safe.directory '*' \
  && git config --system --get-all safe.directory
 
+# What git may believe about a file without opening it. The index remembers
+# size, mtime, inode, device and ctime, and takes a mismatch as "this file
+# changed". The file sharing under a box renumbers inodes whenever a directory
+# is remounted, so after a restart git reports local changes to files nobody
+# touched — `cherry-pick` and `rebase` refuse to run, while `status` in the same
+# worktree says the tree is clean. It reads as a corrupt checkout and is not
+# one. "minimal" leaves git comparing size and mtime, which cross the boundary
+# intact, and the content itself settles anything they cannot.
+RUN git config --system core.checkStat minimal \
+ && git config --system --get core.checkStat
+
 # The box runs as the host's own uid, passed at run time, so no user is created
 # here — and nothing in the image is owned by it. $HOME comes in as a tmpfs with
 # the right owner (see box.py), with the harness's real directories mounted on

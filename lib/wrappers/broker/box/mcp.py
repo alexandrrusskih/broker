@@ -185,10 +185,21 @@ SHIM_TEMPLATE = "\n".join([
 
 
 def _write_shim(provider, name, live):
-    """A stand-in for the server's command, to be mounted at its own path."""
+    """A stand-in for the server's command, to be mounted at its own path.
+
+    One file per window, not one per server. A bind mount holds the INODE it
+    was given, and writing this file replaces the inode — so a box starting up
+    used to pull the shim out from under every box already running the same
+    harness. Inside those, the mount went stale: `ls` showed the entry as
+    `-?????????`, the harness could no longer start its server, and the only
+    clue was that it had been fine until somebody opened another box. Which is
+    exactly what it looks like when a bridge "randomly" drops.
+    """
+    from .paths import window_key
+
     directory = os.path.join(config.CONFIG_DIR, "box", "shims", provider.NAME)
     os.makedirs(directory, mode=0o700, exist_ok=True)
-    path = os.path.join(directory, name.replace("/", "_"))
+    path = os.path.join(directory, "%s-%s" % (name.replace("/", "_"), window_key()))
     body = SHIM_TEMPLATE % {"name": name, "host": HOST_GATEWAY,
                             "port": live["port"], "token": live["token"]}
     tmp = path + ".new"

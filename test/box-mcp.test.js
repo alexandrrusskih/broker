@@ -168,13 +168,17 @@ print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]}, [], {})))
   const line = cmd.join(" ");
   // The harness config already points at /opt/tool/mcp — so that is where the
   // stand-in goes, and nothing has to be rewritten.
-  assert.match(line, /source=.*box\/shims\/claude\/probe,target=\/opt\/tool\/mcp,readonly/);
+  // One file per window: writing this replaces the inode, and a bind mount
+  // holds the inode it was given — a shared name meant a box starting up
+  // pulled the shim out from under every box already running.
+  const mount = line.match(/source=(\S*box\/shims\/claude\/probe-[^,]+),target=\/opt\/tool\/mcp,readonly/);
+  assert.ok(mount, line);
   assert.ok(line.includes("--add-host host.docker.internal:host-gateway"));
 
-  const shim = await fs.readFile(path.join(dir, ".config", "broker", "box", "shims", "claude", "probe"), "utf8");
+  const shim = await fs.readFile(mount[1], "utf8");
   assert.match(shim, /HOST, PORT, TOKEN = 'host\.docker\.internal', 41234, 'fake-secret'/);
   assert.match(shim, /read1/, "read() on a pipe blocks for a full buffer and would deadlock the bridge");
-  assert.equal((await fs.stat(path.join(dir, ".config", "broker", "box", "shims", "claude", "probe"))).mode & 0o777, 0o700);
+  assert.equal((await fs.stat(mount[1])).mode & 0o777, 0o700);
 });
 
 test("a box can turn bridging off, and can say what a server should see", async (t) => {

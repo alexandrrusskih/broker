@@ -431,7 +431,7 @@ print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
   // The harness prints its own resume line, and that one reopens the session on
   // the HOST — a different world, which is not obvious until something behaves
   // oddly. This one names the box.
-  assert.match(out, /claude --box demo --resume only/);
+  assert.match(out, /claude --resume only --box demo/);
 
   // With a second session written in the same window there is no way to tell
   // which one was this box's, and the newest is a coin toss — on this machine
@@ -445,7 +445,7 @@ from broker.providers import claude
 claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
 print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
 `, { HOME: dir });
-  assert.match(ambiguous, /claude --box demo --resume <the id printed above>/);
+  assert.match(ambiguous, /claude --resume <the id printed above> --box demo/);
   assert.ok(!/only|another/.test(ambiguous), "no session is named when it cannot be known");
 });
 
@@ -469,7 +469,7 @@ print(box.run._resume_hint(codex, "demo", "${project}", {"CODEX_HOME": "${path.j
 `, { HOME: dir });
 
   // Its own verb, and the id taken off the end of a timestamped name.
-  assert.match(out, /codex --box demo resume 019efe7b-889a-72d3-8a7c-bfae7be3dacd/);
+  assert.match(out, /codex resume 019efe7b-889a-72d3-8a7c-bfae7be3dacd --box demo/);
 });
 
 test("a session written before the box started is not mistaken for this one", async (t) => {
@@ -491,7 +491,7 @@ print(box.run._resume_hint(claude, "demo", "${project}", {}, time.time() + 60) o
 `, { HOME: dir });
   // The way back into the box is still worth saying; the id is not ours to
   // guess, and the harness printed its own one line above.
-  assert.match(out, /claude --box demo --resume <the id printed above>/);
+  assert.match(out, /claude --resume <the id printed above> --box demo/);
   assert.ok(!/earlier/.test(out), "a session from before the box started is not offered");
 });
 
@@ -599,7 +599,7 @@ print(box.run._resume_hint(${provider}, "demo", "${project}", {"CODEX_HOME": "${
 
   // Sessions inside the profile: the broker moves to another account when one
   // runs out of room, and an id recorded under the first is then not found.
-  assert.match(hint("codex", "sk"), /CODEX_ACCOUNT=sk codex --box demo resume /);
+  assert.match(hint("codex", "sk"), /CODEX_ACCOUNT=sk codex resume .* --box demo/);
 
   // Sessions reached through a link instead. Naming an account here says
   // nothing that the line does not already say, and picking one is the
@@ -613,7 +613,7 @@ print(box.run._resume_hint(codex, "demo", ${JSON.stringify(project)},
       {"CODEX_HOME": ${JSON.stringify(path.join(dir, "profile"))}}, 0, "sk") or "NONE")
 `, { HOME: dir });
   assert.doesNotMatch(shared, /CODEX_ACCOUNT/);
-  assert.match(shared, /codex --box demo resume /);
+  assert.match(shared, /codex resume .* --box demo/);
   // claude keeps its sessions outside any profile, so naming an account there
   // would only be noise.
   await fs.mkdir(path.join(dir, ".claude", "projects", project.split(path.sep).join("-")), { recursive: true });

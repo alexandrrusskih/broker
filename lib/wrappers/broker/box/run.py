@@ -593,7 +593,10 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None, sessi
     if (account and getattr(provider, "CREDENTIALS", "file") != "env"
             and not _sessions_are_shared(provider, env)):
         pin = "%s_ACCOUNT=%s " % (provider.NAME.upper(), account)
-    return "\nResume it in this box with:\n  %s%s --box %s %s\n" % (pin, provider.BIN, name, resume)
+    # The box goes last, after the id, so the line differs from the one the
+    # harness printed above it only by a suffix: type that suffix onto the end
+    # of what you already have, or delete it to go back to the host.
+    return "\nResume it in this box with:\n  %s%s %s --box %s\n" % (pin, provider.BIN, resume, name)
 
 
 SYNC_LOG = os.path.join(config.CONFIG_DIR, "box", "sync.log")

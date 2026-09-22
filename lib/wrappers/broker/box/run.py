@@ -528,6 +528,14 @@ def _last_session(provider, workdir, env=None, since=0):
     found = [f for f in globmodule.glob(pattern % fields) if os.path.getmtime(f) >= since]
     if not found:
         return None
+    # More than one session was written while this box ran, so the newest is
+    # only a guess — and on this machine a wrong guess is the normal case:
+    # every window open on the same project files its sessions in the same
+    # directory, and they all write constantly. A line that names a stranger's
+    # conversation is worse than no line: it looks exactly like the right
+    # answer. Say nothing instead, and let the harness's own line stand.
+    if len(found) > 1:
+        return None
     newest = max(found, key=lambda f: os.path.getmtime(f))
     stem = os.path.splitext(os.path.basename(newest))[0]
     # Some name the file after the session; others prefix it with a timestamp
@@ -576,10 +584,11 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None, sessi
     broker picks an account by itself and the line stays clean.
     """
     session = session or _last_session(provider, workdir, env, since)
-    if not session:
-        return None
-    # Each harness spells resuming its own way.
-    resume = getattr(provider, "SESSION_RESUME", "--resume %s") % session
+    # Not knowing which session this was is not a reason to leave someone
+    # without the box. The harness prints its own id as it exits, one line
+    # above this one; point at that rather than invent one.
+    resume = (getattr(provider, "SESSION_RESUME", "--resume %s")
+              % (session or "<the id printed above>"))
     pin = ""
     if (account and getattr(provider, "CREDENTIALS", "file") != "env"
             and not _sessions_are_shared(provider, env)):

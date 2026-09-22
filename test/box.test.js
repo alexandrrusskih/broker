@@ -418,9 +418,7 @@ test("leaving a box says how to come back into it", async (t) => {
   const sessions = path.join(dir, ".claude", "projects", project.replace(/\//g, "-"));
   await fs.mkdir(project, { recursive: true });
   await fs.mkdir(sessions, { recursive: true });
-  await fs.writeFile(path.join(sessions, "older.jsonl"), "{}\n");
-  await new Promise((r) => setTimeout(r, 1100));
-  await fs.writeFile(path.join(sessions, "newest.jsonl"), "{}\n");
+  await fs.writeFile(path.join(sessions, "only.jsonl"), "{}\n");
 
   const out = engine(`
 from broker import box
@@ -433,7 +431,22 @@ print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
   // The harness prints its own resume line, and that one reopens the session on
   // the HOST — a different world, which is not obvious until something behaves
   // oddly. This one names the box.
-  assert.match(out, /claude --box demo --resume newest/);
+  assert.match(out, /claude --box demo --resume only/);
+
+  // With a second session written in the same window there is no way to tell
+  // which one was this box's, and the newest is a coin toss — on this machine
+  // a losing one, since every window open on a project writes here. Point at
+  // the id the harness itself just printed instead of naming a stranger's.
+  await fs.writeFile(path.join(sessions, "another.jsonl"), "{}\n");
+  const ambiguous = engine(`
+from broker import box
+from broker.box import boxes, mcp, run
+from broker.providers import claude
+claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
+print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
+`, { HOME: dir });
+  assert.match(ambiguous, /claude --box demo --resume <the id printed above>/);
+  assert.ok(!/only|another/.test(ambiguous), "no session is named when it cannot be known");
 });
 
 test("each harness is told to resume the way it spells it", async (t) => {
@@ -476,7 +489,10 @@ from broker.providers import claude
 claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
 print(box.run._resume_hint(claude, "demo", "${project}", {}, time.time() + 60) or "NONE")
 `, { HOME: dir });
-  assert.match(out, /NONE/);
+  // The way back into the box is still worth saying; the id is not ours to
+  // guess, and the harness printed its own one line above.
+  assert.match(out, /claude --box demo --resume <the id printed above>/);
+  assert.ok(!/earlier/.test(out), "a session from before the box started is not offered");
 });
 
 

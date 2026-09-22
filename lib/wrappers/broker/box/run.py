@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -761,6 +762,48 @@ def _guard_terminal(saved):
             pass
 
 
+def _over_ssh(cmd, machine, name):
+    """The same container command, run on another machine instead of this one.
+
+    Only the terminal stays here. The image, the project and the harness are all
+    over there, so the paths in the command are that machine's paths — a box
+    describes what it may touch, and a machine says where those things live on
+    it. Anything the machine does not redirect is passed through unchanged,
+    which is right when both sides keep a project in the same place and wrong
+    silently when they do not, so a machine that differs must say so.
+    """
+    swaps = sorted((machine.get("paths") or {}).items(), key=lambda kv: -len(kv[0]))
+
+    def moved(value):
+        for mine, theirs in swaps:
+            mine = expand(mine)
+            if value == mine or value.startswith(mine + os.sep):
+                return expand(theirs) + value[len(mine):]
+        return value
+
+    # ONLY the source half of a bind mount is a path on the other machine.
+    # Everything else that looks like a path — the target of a mount, the
+    # working directory, a tmpfs, $HOME — is a path INSIDE the container, and
+    # the whole point of a box is that those stay the same wherever it runs.
+    # Rewriting them would move the box's own furniture and break --resume.
+    out = []
+    for part in cmd:
+        if part.startswith("type=bind,source="):
+            head, _, rest = part.partition("source=")
+            source, sep, tail = rest.partition(",")
+            out.append(head + "source=" + moved(source) + sep + tail)
+        else:
+            out.append(part)
+
+    target = machine.get("ssh")
+    if not target:
+        die("machine '%s' has no \"ssh\" target in %s" % (name, boxes.PATH))
+    # -t: a harness is a full-screen program and needs a terminal on the far
+    # side. Without it the pane comes up in line mode and nothing redraws.
+    ssh = ["ssh", "-t", "-o", "ServerAliveInterval=20", "-o", "ServerAliveCountMax=120", target]
+    return ssh + ["--"] + [shlex.quote(part) for part in out]
+
+
 def exec_box(provider, name, argv, env, account=None):
     """Run the container, then say how to come back to it."""
     defined = boxes.profiles()
@@ -775,8 +818,16 @@ def exec_box(provider, name, argv, env, account=None):
     if os.environ.get("HERDR_PANE_ID") and not os.environ.get("HERDR_AGENT"):
         os.environ["HERDR_AGENT"] = provider.NAME
 
+    remote, machine, argv = boxes.take_remote(argv)
     pinned, argv = _pin_session(provider, argv)
     cmd = command(provider, name, defined[name], argv, env)
+    if remote:
+        # Sessions, databases and MCP bridges all belong to the machine the box
+        # runs on, and none of them reach across. Say so once, rather than let
+        # it be discovered by something behaving oddly.
+        warn("box '%s' runs on %s: its sessions and bridged MCP servers live there, not here"
+             % (name, remote))
+        cmd = _over_ssh(cmd, machine, remote)
     workdir = cmd[cmd.index("-w") + 1] if "-w" in cmd else os.getcwd()
     started = time.time()
 

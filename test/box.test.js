@@ -941,13 +941,17 @@ test("the session a box names is the one born while it ran", async (t) => {
   // harness keeps five hundred of these with nothing separating projects.
   const theirs = path.join(sessions, "aaaaaaaa-1111-2222-3333-444444444444.jsonl");
   await fs.writeFile(theirs, "{}\n");
-  const started = Date.now() / 1000;
   await new Promise((r) => setTimeout(r, 1100));
 
   // Ours: created after the box started. Theirs is touched a moment later, so
   // by modification time it would win.
   const ours = path.join(sessions, "bbbbbbbb-1111-2222-3333-444444444444.jsonl");
   await fs.writeFile(ours, "{}\n");
+  // Taken from the filesystem rather than the clock: under a parallel test run
+  // the two drift apart, and this test is about which side of `started` each
+  // file was born on.
+  const born = await fs.stat(ours);
+  const started = (born.birthtimeMs || born.ctimeMs) / 1000 - 0.05;
   await new Promise((r) => setTimeout(r, 50));
   await fs.appendFile(theirs, "{}\n");
 
@@ -960,4 +964,43 @@ print(box.run._resume_hint(claude, "demo", "${project}", {}, ${started}) or "NON
 
   assert.match(out, /--resume bbbbbbbb-1111-2222-3333-444444444444 --box demo/);
   assert.ok(!/aaaaaaaa/.test(out), "the neighbour typed last; that does not make it ours");
+});
+
+test("a box can run on another machine, and only its sources move", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project, { recursive: true });
+  await fs.mkdir(path.join(dir, ".config", "broker"), { recursive: true });
+  await fs.writeFile(path.join(dir, ".config", "broker", "boxes.json"), JSON.stringify({
+    demo: { rw: [project] },
+    machines: { windows: { ssh: "me@win", paths: { [project]: "D:/work/project" } } },
+  }));
+
+  const out = engine(`
+import json
+from broker import box
+from broker.box import boxes, mcp, run
+from broker.providers import claude
+claude.MCP_CONFIG = None
+box.boxes.PATH = "${path.join(dir, ".config", "broker", "boxes.json")}"
+print(json.dumps(sorted(box.profiles())))
+name, machine, rest = box.boxes.take_remote(["--remote", "windows", "-p", "hi"])
+print(json.dumps([name, rest]))
+cmd = box.command(claude, "demo", box.profiles()["demo"], rest, {})
+print(json.dumps(box.run._over_ssh(cmd, machine, name)))
+`, { HOME: dir });
+
+  const [boxesLine, flagLine, sshLine] = out.trim().split("\n");
+  // A machine is not a box, however it is spelled in the same file.
+  assert.deepEqual(JSON.parse(boxesLine), ["demo"]);
+  assert.deepEqual(JSON.parse(flagLine), ["windows", ["-p", "hi"]]);
+
+  const sent = JSON.parse(sshLine).join(" ");
+  assert.match(sent, /^ssh -t .*me@win --/, sent);
+  // The source of a bind mount is a path on THAT machine...
+  assert.match(sent, /source=D:\/work\/project,target=/, sent);
+  // ...and everything inside the container stays exactly where it was, or
+  // --resume and every path the harness remembers would break.
+  assert.match(sent, new RegExp(`target=${project.replace(/[/\\]/g, "\\$&")}`), sent);
+  assert.match(sent, new RegExp(`-w ${project.replace(/[/\\]/g, "\\$&")}`), sent);
 });

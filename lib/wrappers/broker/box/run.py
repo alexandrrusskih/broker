@@ -525,7 +525,17 @@ def _last_session(provider, workdir, env=None, since=0):
     if fields["config"] is None:
         fields["config"] = expand(getattr(provider, "CANONICAL_HOME", "~"))
 
-    found = [f for f in globmodule.glob(pattern % fields) if os.path.getmtime(f) >= since]
+    every = globmodule.glob(pattern % fields)
+    # Born during this run, rather than merely touched by it. A session file is
+    # created once and written to for as long as the conversation lasts, so on a
+    # machine where a dozen windows share one directory, "created since the box
+    # started" identifies this box's own session and "modified" identifies
+    # whoever typed last. One harness keeps five hundred of these in a single
+    # directory, with nothing separating projects at all.
+    born = [f for f in every if _created(f) >= since]
+    if len(born) == 1:
+        return _session_id(born[0])
+    found = [f for f in every if os.path.getmtime(f) >= since]
     if not found:
         return None
     # More than one session was written while this box ran, so the newest is
@@ -536,8 +546,18 @@ def _last_session(provider, workdir, env=None, since=0):
     # answer. Say nothing instead, and let the harness's own line stand.
     if len(found) > 1:
         return None
-    newest = max(found, key=lambda f: os.path.getmtime(f))
-    stem = os.path.splitext(os.path.basename(newest))[0]
+    return _session_id(max(found, key=lambda f: os.path.getmtime(f)))
+
+
+def _created(path):
+    """When this file came into being, where the filesystem records it."""
+    stat = os.stat(path)
+    return getattr(stat, "st_birthtime", stat.st_ctime)
+
+
+def _session_id(path):
+    """The id a harness gave this session, however it spells the filename."""
+    stem = os.path.splitext(os.path.basename(path))[0]
     # Some name the file after the session; others prefix it with a timestamp
     # and leave the id at the end.
     match = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", stem)

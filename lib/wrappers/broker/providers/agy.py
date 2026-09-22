@@ -49,6 +49,12 @@ MCP_CONFIG = ("~/.gemini/config/mcp_config.json", "json", "mcpServers")
 # the box (see box/run.py).
 SESSION_GLOB = "%(home)s/.gemini/antigravity-cli/conversations/*.db"
 SESSION_RESUME = "--conversation %s"
+
+# Ways of naming a conversation that already exists: the id is the person's
+# then, not ours to guess. This harness keeps every conversation it has ever
+# had in one directory — five hundred of them here, with nothing separating
+# projects — so guessing is the last resort, not the first.
+SESSION_PICKERS = ("--conversation", "--continue")
 MIRROR_HOME = True
 
 # The installer drops agy in ~/.local/bin; container images put it on the system

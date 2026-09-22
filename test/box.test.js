@@ -928,3 +928,36 @@ print(json.dumps({
   assert.equal(got.no_braces_left, true);
   assert.ok(got.plain.endsWith("/.cache/box/state"), "paths without the placeholder are untouched");
 });
+
+test("the session a box names is the one born while it ran", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const sessions = path.join(dir, ".claude", "projects", project.replace(/\//g, "-"));
+  await fs.mkdir(project, { recursive: true });
+  await fs.mkdir(sessions, { recursive: true });
+
+  // A neighbour's conversation, started long ago and still being written —
+  // which is the normal state of a directory shared by a dozen windows. One
+  // harness keeps five hundred of these with nothing separating projects.
+  const theirs = path.join(sessions, "aaaaaaaa-1111-2222-3333-444444444444.jsonl");
+  await fs.writeFile(theirs, "{}\n");
+  const started = Date.now() / 1000;
+  await new Promise((r) => setTimeout(r, 1100));
+
+  // Ours: created after the box started. Theirs is touched a moment later, so
+  // by modification time it would win.
+  const ours = path.join(sessions, "bbbbbbbb-1111-2222-3333-444444444444.jsonl");
+  await fs.writeFile(ours, "{}\n");
+  await new Promise((r) => setTimeout(r, 50));
+  await fs.appendFile(theirs, "{}\n");
+
+  const out = engine(`
+from broker import box
+from broker.providers import claude
+claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
+print(box.run._resume_hint(claude, "demo", "${project}", {}, ${started}) or "NONE")
+`, { HOME: dir });
+
+  assert.match(out, /--resume bbbbbbbb-1111-2222-3333-444444444444 --box demo/);
+  assert.ok(!/aaaaaaaa/.test(out), "the neighbour typed last; that does not make it ours");
+});

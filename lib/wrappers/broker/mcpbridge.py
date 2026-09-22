@@ -33,7 +33,7 @@ from . import config
 STATE_DIR = os.path.join(config.CONFIG_DIR, "box", "mcp")
 # A listener with nothing connected for this long has outlived the box that
 # asked for it. Without this every box ever started would leave a process behind.
-IDLE_TIMEOUT = 4 * 3600
+IDLE_TIMEOUT = int(os.environ.get("BROKER_MCP_IDLE_SECONDS") or 4 * 3600)
 
 
 # A bridged server inherits the environment of whatever raised it, and then
@@ -144,14 +144,37 @@ def serve(name, command, key=""):
     os.chmod(tmp, 0o600)
     os.replace(tmp, path)
 
+    # A client that is still talking keeps this alive. The timeout exists to
+    # collect listeners whose box is gone, and it used to be measured between
+    # CONNECTIONS — which says nothing about whether anyone is connected. A
+    # harness opens its MCP server once at startup and holds that one
+    # connection for as long as the session lasts, so after four hours the
+    # accept() timed out, this process returned, and its worker threads —
+    # daemons, all of them — died with it. The conversation lost its server
+    # mid-sentence, with nothing in the log to say why.
+    open_sessions = [0]
+    counted = threading.Lock()
+
+    def session(conn):
+        try:
+            _session(conn, command, token)
+        finally:
+            with counted:
+                open_sessions[0] -= 1
+
     listener.settimeout(IDLE_TIMEOUT)
     try:
         while True:
             try:
                 conn, _ = listener.accept()
             except socket.timeout:
-                return 0  # nobody came back; the box is long gone
-            threading.Thread(target=_session, args=(conn, command, token), daemon=True).start()
+                with counted:
+                    if open_sessions[0]:
+                        continue  # someone is still on the line
+                return 0  # nobody connected, nobody came back: the box is gone
+            with counted:
+                open_sessions[0] += 1
+            threading.Thread(target=session, args=(conn,), daemon=True).start()
     finally:
         try:
             os.remove(path)

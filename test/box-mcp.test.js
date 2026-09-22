@@ -79,6 +79,50 @@ test("the bridge carries stdio both ways and refuses a connection without the se
   assert.equal(await talk(state.token, "still alive"), "still alive", "a refused client does not take the bridge down");
 });
 
+test("a client that is still connected keeps the bridge alive", async (t) => {
+  const dir = await temp(t);
+  const env = { ...process.env, HOME: dir, PYTHONDONTWRITEBYTECODE: "1", BROKER_MCP_IDLE_SECONDS: "1" };
+  for (const name of Object.keys(env)) if (name.startsWith("HERDR_")) delete env[name];
+  const bridge = spawn("python3", ["-m", "broker.mcpbridge", "serve", "probe", "--", "cat"],
+    { cwd: path.join(root, "lib", "wrappers"), env, stdio: "ignore" });
+  t.after(() => bridge.kill());
+
+  const statePath = path.join(dir, ".config", "broker", "box", "mcp", "probe.json");
+  let state = null;
+  for (let i = 0; i < 100 && !state; i++) {
+    try { state = JSON.parse(await fs.readFile(statePath, "utf8")); }
+    catch (_e) { await new Promise((r) => setTimeout(r, 50)); }
+  }
+  assert.ok(state, "the listener should publish its port");
+
+  // A harness opens its MCP server once and holds that connection for the whole
+  // session. The idle timeout used to be measured between CONNECTIONS, so a
+  // conversation that outlasted it lost its server mid-sentence.
+  const held = net.connect(state.port, "127.0.0.1");
+  t.after(() => held.destroy());
+  await new Promise((resolve, reject) => {
+    held.on("connect", () => { held.write(`${state.token}\nfirst\n`); resolve(); });
+    held.on("error", reject);
+  });
+  const answered = await new Promise((resolve) => {
+    let seen = "";
+    held.on("data", (d) => { seen += d; if (seen.includes("\n")) resolve(seen.trim()); });
+    setTimeout(() => resolve(seen.trim()), 5000);
+  });
+  assert.equal(answered, "first");
+
+  // Well past the idle timeout, with nobody new connecting.
+  await new Promise((r) => setTimeout(r, 3000));
+  assert.equal(bridge.exitCode, null, "the listener must still be running");
+  const laterAnswer = await new Promise((resolve) => {
+    let seen = "";
+    held.on("data", (d) => { seen += d; if (seen.includes("\n")) resolve(seen.trim()); });
+    held.write("second\n");
+    setTimeout(() => resolve(seen.trim()), 5000);
+  });
+  assert.equal(laterAnswer, "second", "the held connection still reaches the server");
+});
+
 test("a bridge belongs to the identity that raised it", async (t) => {
   const dir = await temp(t);
   await fs.writeFile(path.join(dir, ".claude.json"), JSON.stringify({

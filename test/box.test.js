@@ -106,6 +106,32 @@ print(json.dumps(cmd))
   assert.ok(line.includes(`target=${os.homedir()}/.codex/auth.json,readonly`), "the shared directory's own token is covered");
 });
 
+test("the MCP logins of the machine are not the box's to empty", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import agy
+cmd = box.command(agy, "demo", {"rw": [${JSON.stringify(project)}]}, ["hi"], {})
+print(json.dumps(cmd))
+`);
+  const line = JSON.parse(out).join(" ");
+  const home = os.homedir();
+  const tokens = `${home}/.gemini/antigravity-cli/mcp_oauth_tokens.json`;
+
+  // This harness rewrites that file whole, keeping only what its own session
+  // logged in — so a box, which knows nothing, writes an empty object over the
+  // logins of this machine. It gets its own instead.
+  assert.ok(line.includes(`target=${tokens}`), "the box's view of the tokens is covered");
+  assert.ok(!line.includes(`source=${tokens}`), "and it is not the machine's file underneath");
+  // Not read-only: the harness would fail on a write it expects to succeed,
+  // instead of carrying on without the servers that need a login.
+  assert.ok(!line.includes(`target=${tokens},readonly`), "a box may write its own");
+});
+
 test("an undefined box names what is defined instead of failing blankly", async (t) => {
   const dir = await temp(t);
   const file = path.join(dir, "boxes.json");

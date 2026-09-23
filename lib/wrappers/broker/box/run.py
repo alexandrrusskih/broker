@@ -164,6 +164,47 @@ def command(provider, name, profile, argv, env):
         cmd += ["--add-host", "%s:host-gateway" % mcp.HOST_GATEWAY]
     else:
         cmd += ["--user", "%d:%d" % (os.getuid(), os.getgid())]
+    # What the person set in the shell they typed from, carried in as it is.
+    # Anything else would mean the box answers a different question than the
+    # same command answers outside it: a variable set on the command line — the
+    # actor to act as, the ticket being worked on — simply vanished, and the
+    # tool inside used its default while the person watched their setting be
+    # ignored. Placed FIRST, so everything the box decides for itself below
+    # overrides it; and the few that describe THIS machine rather than the work
+    # are left out, because inside they mean something else entirely.
+    # Left out because inside they name something that is not there: PATH points
+    # at this machine's /opt/homebrew, HOME at a directory the box replaces,
+    # SSH_AUTH_SOCK at a socket that does not cross. Carrying them in does not
+    # pass a setting along, it breaks the box in its first second. The list is
+    # short and technical on purpose.
+    OWN = {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "PWD", "OLDPWD", "TMPDIR",
+           "SHLVL", "_", "XPC_SERVICE_NAME", "XPC_FLAGS", "__CF_USER_TEXT_ENCODING",
+           "DISPLAY", "SSH_AUTH_SOCK", "SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY"}
+    # ...and whatever else this box would rather not see, said in its own file:
+    #
+    #   "unset": ["AWS_PROFILE", "EQUILL_*"]
+    #
+    # A name, or a name ending in * for a family of them. For keeping a
+    # machine-wide habit out of one box — the alternative being to remember not
+    # to have it set before typing, which nobody does.
+    dropped = tuple(profile.get("unset") or ())
+
+    def wanted(name):
+        for pattern in dropped:
+            if pattern.endswith("*"):
+                if name.startswith(pattern[:-1]):
+                    return False
+            elif name == pattern:
+                return False
+        return True
+
+    for variable, value in sorted((env or os.environ).items()):
+        if variable in OWN or variable.startswith("BROKER_") or not wanted(variable):
+            continue
+        if "\n" in value or "\0" in value:
+            continue  # docker takes one line per variable
+        cmd += ["-e", "%s=%s" % (variable, value)]
+
     cmd += ["-e", "HOME=%s" % home, "-e", "USER=%s" % (os.environ.get("USER") or "user")]
     # Which window this is, for tools inside that keep per-run state of their
     # own. The same key `{window}` resolves to in a box's paths, so a tool and
@@ -266,6 +307,53 @@ def command(provider, name, profile, argv, env):
             blank = blank or _empty_file()
             cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (blank, host)]
 
+    # Files a box gets EMPTY and keeps to itself: it may write them, and what
+    # it writes stays inside. Not a secret it must not see (that is above, and
+    # is read-only) — a file this harness rewrites WHOLE, dropping whatever it
+    # did not put there itself.
+    #
+    # agy's MCP tokens are the case this exists for. Mounted straight through,
+    # a box emptied that file and two logins granted an hour earlier were gone,
+    # reported afterwards as "Unauthorized [Auth Needed]" — which reads as an
+    # expired token rather than as a file cleared by a program next door. Four
+    # times in one afternoon.
+    #
+    # Read-only would stop the damage and cost more than it saves: the harness
+    # then fails on a write it expects to succeed, rather than carrying on
+    # without the servers that need a login. So: its own copy, writable,
+    # starting out empty, never seeded from here. A box that wants those
+    # servers logs in for itself; a box that does not is no worse off than one
+    # that never had the file.
+    for entry, seed in getattr(provider, "BOX_BLANK", ()):
+        host = expand(entry)
+        if not any(host.startswith(m + os.sep) for m in mounted):
+            continue
+        own = os.path.join(config.CONFIG_DIR, "box", "blank", name.replace("/", "_"),
+                           host.lstrip(os.sep).replace(os.sep, "_"))
+        try:
+            os.makedirs(os.path.dirname(own), mode=0o700, exist_ok=True)
+            if not os.path.exists(own):
+                with open(own, "w") as handle:
+                    handle.write(seed)
+                os.chmod(own, 0o600)
+        except OSError as exc:
+            warn("could not give the box a blank %s (%s)" % (entry, exc))
+            continue
+        cmd += ["--mount", "type=bind,source=%s,target=%s" % (own, host)]
+
+    # Files a box may READ but must not touch. Not the same as a secret it may
+    # not see at all: a harness inside needs these to work, and needs them to
+    # be the real ones. agy's MCP tokens are the case this exists for — started
+    # in a box it rewrote that file EMPTY, and two logins granted an hour
+    # earlier were gone, reported afterwards as "Unauthorized [Auth Needed]",
+    # which reads as an expired token rather than as a file destroyed by a
+    # program on the same machine. Mounted read-only, the worst it can do is
+    # fail to write.
+    for entry in getattr(provider, "BOX_READONLY", ()):
+        host = expand(entry)
+        if os.path.exists(host) and any(host.startswith(m + os.sep) for m in mounted):
+            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (host, host)]
+
     writable = list(_paths(profile, "rw"))
     for host, target in writable:
         if not os.path.isdir(host):
@@ -311,7 +399,16 @@ def command(provider, name, profile, argv, env):
             # does not change when a file INSIDE it is rewritten — and that is
             # exactly what a login does to a token database. Comparing
             # timestamps kept handing the box yesterday's credentials.
-            _clone(os.path.realpath(host), copy)
+            #
+            # Except for what the box is expected to WRITE and keep: a login
+            # done inside belongs to that box, and copying the machine's copy
+            # over it on the next start throws the login away. Seeded once,
+            # then left alone — which is how a container that authenticates
+            # once and keeps working is usually set up.
+            if entry in getattr(provider, "BOX_KEEPS", ()) and os.path.exists(copy):
+                pass
+            else:
+                _clone(os.path.realpath(host), copy)
         except OSError as exc:
             warn("could not give the box its own %s (%s)" % (entry, exc))
             continue

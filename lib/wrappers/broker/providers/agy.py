@@ -50,6 +50,26 @@ MCP_CONFIG = ("~/.gemini/config/mcp_config.json", "json", "mcpServers")
 SESSION_GLOB = "%(home)s/.gemini/antigravity-cli/conversations/*.db"
 SESSION_RESUME = "--conversation %s"
 
+# The MCP tokens do not go into a box at all.
+#
+# This harness does not merge that file: it writes what its own session knows
+# and drops everything else. A box has no keyring and no browser, so it knows
+# nothing and writes an empty object — and the logins on this machine are gone.
+# Four times in one afternoon, reported each time as "Unauthorized [Auth
+# Needed]", which reads as an expired token rather than as a file emptied by a
+# program next door.
+#
+# Giving each box its own copy was tried and is worse in the way that matters:
+# the copy cannot be refreshed from outside, so it rots, and a box that
+# authenticates for itself has to do it again in every other box. There are a
+# dozen of them.
+#
+# So: one place holds these, and it is this machine. A box gets its own empty
+# one, may ruin it as it likes, and the logins here survive. What a box loses
+# is the http servers that need OAuth — ntk and joppa — which is a real loss,
+# and a smaller one than losing the login itself.
+BOX_BLANK = ((os.path.join("~", ".gemini", "antigravity-cli", "mcp_oauth_tokens.json"), "{}"),)
+
 # Ways of naming a conversation that already exists: the id is the person's
 # then, not ours to guess. This harness keeps every conversation it has ever
 # had in one directory — five hundred of them here, with nothing separating

@@ -143,7 +143,8 @@ def _start_bridge(name, server, profile, projects):
         return live
     try:
         subprocess.Popen(
-            [sys.executable, "-m", "broker.mcpbridge", "serve", name, "--"] + server["command"],
+            [sys.executable, "-m", "broker.mcpbridge", "serve", name, "--key", key, "--"]
+            + server["command"],
             # The directory the package is imported FROM: this file sits in
             # broker/box/, so that is three levels up. It was two before the
             # engine was split into modules, and the bridge silently stopped

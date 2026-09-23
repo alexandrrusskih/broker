@@ -213,7 +213,16 @@ def main(argv=None):
     if argv and argv[0] == "serve":
         name = argv[1]
         command = argv[argv.index("--") + 1:]
-        return serve(name, command, identity_key())
+        # The caller works out which listener this is and SAYS so, rather than
+        # letting this process work it out again from its own environment. It
+        # cannot: what the listener is started with is not what the caller was
+        # holding — the bridge is given the server's own variables on top — so
+        # the two arrived at different answers, the listener registered under
+        # one name and the caller waited five seconds for the other. Every
+        # bridged server then reported itself missing inside the box, while the
+        # http ones, which need no bridge, connected fine.
+        key = argv[argv.index("--key") + 1] if "--key" in argv[:argv.index("--")] else identity_key()
+        return serve(name, command, key)
     if argv and argv[0] == "connect":
         # Inside the box everything comes from the environment the shim sets.
         return connect(os.environ["BROKER_MCP_HOST"],

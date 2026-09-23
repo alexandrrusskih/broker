@@ -151,6 +151,14 @@ PRIVATE = (
 # of them holding something the server has already forgotten.
 HARD_LINKED = (".credentials.json",)
 
+# The lock directory that goes WITH that file. It exists so two processes do
+# not refresh the same token at once — and kept per profile it does nothing at
+# all: several accounts run side by side here, they share the token file, and
+# without a shared lock two of them refresh together, one wins, and the other
+# is left holding a refresh token the server has just revoked. Which is exactly
+# how the login was lost twice in one day.
+LOCKED_TOGETHER = ("mcp-oauth-locks",)
+
 SHARED_GLOBS = ("*.sqlite",)
 
 # Invocations that must reach the real binary untouched. Two kinds: things about

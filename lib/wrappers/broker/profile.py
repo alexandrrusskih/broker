@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -110,6 +111,19 @@ def link_shared(provider, path):
     for name in shared:
         src = os.path.join(canonical, name)
         dst = os.path.join(path, name)
+        # A lock that is not shared is not a lock. These directories exist so
+        # two processes do not refresh the same token at once; one per profile
+        # means several accounts refresh together, one wins, and the rest are
+        # left holding a refresh token the server has just revoked. They hold
+        # no data — only empty lock files — so replacing a private one is safe
+        # where replacing anything else would not be.
+        if name in getattr(provider, "LOCKED_TOGETHER", ()) and os.path.isdir(src):
+            if os.path.isdir(dst) and not os.path.islink(dst):
+                try:
+                    shutil.rmtree(dst)
+                except OSError as exc:
+                    warn("could not share the lock directory %s: %s" % (name, exc))
+
         if os.path.exists(src) and not os.path.lexists(dst):
             try:
                 # Some files a harness refuses to open through a symlink, as a

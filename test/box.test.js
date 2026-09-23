@@ -1196,3 +1196,35 @@ print(json.dumps({"free": free}))
 `));
   assert.equal(after.free, 2, "asking the question leaves nothing held");
 });
+
+test("a lock that is not shared is not a lock", async (t) => {
+  const dir = await temp(t);
+  const canonical = path.join(dir, ".codex");
+  const profile = path.join(dir, ".codex-second");
+  await fs.mkdir(path.join(canonical, "mcp-oauth-locks"), { recursive: true });
+  await fs.writeFile(path.join(canonical, "mcp-oauth-locks", "file-store.lock"), "");
+  await fs.writeFile(path.join(canonical, ".credentials.json"), '{"ntk":"x"}');
+  // The profile already has one of its own — which is how it ends up in life:
+  // the harness made it before anyone thought about sharing.
+  await fs.mkdir(path.join(profile, "mcp-oauth-locks"), { recursive: true });
+
+  const out = engine(`
+import json, os
+from broker import profile
+from broker.providers import codex
+codex.CANONICAL_HOME = ${JSON.stringify(canonical)}
+profile.prepare(codex, ${JSON.stringify(profile)})
+locks = os.path.join(${JSON.stringify(profile)}, "mcp-oauth-locks")
+print(json.dumps({
+    "is_link": os.path.islink(locks),
+    "same": os.path.realpath(locks) == os.path.realpath(os.path.join(${JSON.stringify(canonical)}, "mcp-oauth-locks")),
+}))
+`, { HOME: dir });
+
+  const seen = JSON.parse(out);
+  // Several accounts run side by side and share one token file. With a lock
+  // each, two of them refresh at once: one wins, the other is left holding a
+  // refresh token the server has just revoked.
+  assert.equal(seen.is_link, true, "the profile's own lock directory is replaced");
+  assert.equal(seen.same, true, "and points at the one everybody else uses");
+});

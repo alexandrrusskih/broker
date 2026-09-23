@@ -1111,3 +1111,41 @@ print(json.dumps({"held": held, "after": after}))
   assert.ok(after.indexOf("\narchive SID") < after.indexOf("\nunarchive SID"),
     "in the order the provider listed them");
 });
+
+test("a file the harness will not open through a link gets a second name instead", async (t) => {
+  const dir = await temp(t);
+  const canonical = path.join(dir, ".codex");
+  const profile = path.join(dir, ".codex-other");
+  await fs.mkdir(canonical, { recursive: true });
+  // The profile directory exists before this runs: the broker makes it when it
+  // writes the account's own credentials into it.
+  await fs.mkdir(profile, { recursive: true });
+  await fs.writeFile(path.join(canonical, ".credentials.json"), '{"ntk":"x"}');
+  await fs.writeFile(path.join(canonical, "config.toml"), "");
+
+  const out = engine(`
+import json, os
+from broker import profile
+from broker.providers import codex
+codex.CANONICAL_HOME = ${JSON.stringify(canonical)}
+profile.prepare(codex, ${JSON.stringify(profile)})
+
+creds = os.path.join(${JSON.stringify(profile)}, ".credentials.json")
+conf = os.path.join(${JSON.stringify(profile)}, "config.toml")
+print(json.dumps({
+    "creds_is_symlink": os.path.islink(creds),
+    "same_file": os.stat(creds).st_ino == os.stat(os.path.join(${JSON.stringify(canonical)}, ".credentials.json")).st_ino,
+    "conf_is_symlink": os.path.islink(conf),
+}))
+`, { HOME: dir });
+
+  const seen = JSON.parse(out);
+  // Not a symlink: this harness refuses to open its token file through one and
+  // reports "too many levels of symbolic links" for a single link.
+  assert.equal(seen.creds_is_symlink, false);
+  // But still ONE file — copies would drift, and OAuth rotates the refresh
+  // token, so the profile that refreshed last would strand all the others.
+  assert.equal(seen.same_file, true);
+  // Everything else is shared the ordinary way.
+  assert.equal(seen.conf_is_symlink, true);
+});

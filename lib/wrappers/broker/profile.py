@@ -112,7 +112,15 @@ def link_shared(provider, path):
         dst = os.path.join(path, name)
         if os.path.exists(src) and not os.path.lexists(dst):
             try:
-                os.symlink(src, dst)
+                # Some files a harness refuses to open through a symlink, as a
+                # guard against being handed someone else's: it reports "too
+                # many levels of symbolic links" for a single one. Give those a
+                # second NAME instead — one file either way, so a token
+                # refreshed under one account is refreshed under all at once.
+                if name in getattr(provider, "HARD_LINKED", ()) and os.path.isfile(src):
+                    os.link(src, dst)
+                else:
+                    os.symlink(src, dst)
             except OSError as exc:
                 warn("could not link %s: %s" % (name, exc))
 
@@ -197,14 +205,34 @@ def _entries(directory):
         return []
 
 
-def _link(src, dst):
-    """Link one shared entry, leaving anything already there alone."""
+def _link(src, dst, hard=False):
+    """Link one shared entry, leaving anything already there alone.
+
+    `hard` gives the file a second NAME instead of pointing at it. For most
+    things a symlink is better — it survives the target being replaced — but
+    some a harness refuses to open through one at all, as a guard against
+    being handed someone else's file, and reports "too many levels of symbolic
+    links" for what is a single link. A hard link is indistinguishable from an
+    ordinary file to whoever opens it, and there is still only one file: a
+    token refreshed under one account is refreshed under all of them at once,
+    with nothing to synchronise and no copy to lose the race.
+    """
     if not os.path.lexists(dst):
         try:
-            os.symlink(src, dst)
+            if hard and os.path.isfile(src):
+                os.link(src, dst)
+            else:
+                os.symlink(src, dst)
         except OSError as exc:
             warn("could not link %s: %s" % (dst, exc))
         return
+    # Already a name for the same file: nothing to do, and nothing to warn about.
+    if hard and os.path.isfile(dst) and not os.path.islink(dst):
+        try:
+            if os.stat(dst).st_ino == os.stat(src).st_ino:
+                return
+        except OSError:
+            pass
     # A link that points at the wrong place is worse than no link: it silently
     # feeds the harness someone else's state. Repoint ours; leave real files and
     # links the user aimed elsewhere untouched.

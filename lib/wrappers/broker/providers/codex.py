@@ -141,6 +141,16 @@ PRIVATE = (
     "auth.json",   # the account's own credentials — the whole point of a profile
 )
 
+# Shared, but as a second NAME rather than a link. This harness opens its MCP
+# token file refusing to follow symlinks — a guard against being handed someone
+# else's — and reports "too many levels of symbolic links" for a single one. It
+# writes into the file it already has rather than replacing it, so a hard link
+# holds: one file, six names, and a token refreshed under one account is
+# refreshed under all of them at once. Copies would not do — OAuth rotates the
+# refresh token, so five profiles refreshing their own copies would leave four
+# of them holding something the server has already forgotten.
+HARD_LINKED = (".credentials.json",)
+
 SHARED_GLOBS = ("*.sqlite",)
 
 # Invocations that must reach the real binary untouched. Two kinds: things about

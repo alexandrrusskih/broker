@@ -123,8 +123,21 @@ def _start_bridge(name, server, profile, projects):
     from .. import mcpbridge
 
     # Same server, same caller identity — anything else gets its own listener.
-    key = mcpbridge.identity_key(
-        extra=((profile.get("mcp") or {}).get(name) or {}).get("identity_env") or ())
+    # Which listener this is. Same server and same caller is the same listener
+    # — but ALSO the same environment: a server started once keeps whatever it
+    # was started with, and a variable the person sets on the command line to
+    # change how it behaves would be ignored by a listener raised before they
+    # typed it. That is not a small thing when the variable decides WHO the
+    # server acts as: the work is done under the wrong name, and the store
+    # refuses it as read-only, which reads as a permissions problem rather than
+    # as a stale process.
+    #
+    # So the values of the variables this server actually receives from the
+    # environment are part of its identity. Change one, get your own listener.
+    matters = list(((profile.get("mcp") or {}).get(name) or {}).get("identity_env") or ())
+    matters += [v for v in (server.get("inherit") or []) if v not in matters]
+    matters += [v for v in (server.get("env") or {}) if v not in matters]
+    key = mcpbridge.identity_key(extra=tuple(matters))
     live = mcpbridge.running(name, key)
     if live and live.get("command") == server["command"]:
         return live

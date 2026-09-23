@@ -30,6 +30,30 @@ def shared_names(provider):
     A mirroring provider has no such list — everything except the credentials is
     shared — so this is empty for one, and callers use shared_entries instead.
     """
+    private = getattr(provider, "PRIVATE", None)
+    if private is not None:
+        # Everything is shared except what genuinely belongs to ONE account.
+        # Listing what to share instead of what to keep apart is a list that is
+        # always one item out of date: the harness invents a file, nobody adds
+        # it here, and the second account silently gets its own copy — which is
+        # how a login granted hours earlier came back as "authentication
+        # required". What is private is short, known, and does not grow.
+        skip = set(private) | {"." , ".."}
+        names = []
+        for entry in sorted(os.listdir(provider.CANONICAL_HOME)):
+            if entry in skip or entry.startswith(".tmp"):
+                continue
+            # Copies kept aside by hand while fixing something. Linking them
+            # would spread yesterday's rescue across every profile.
+            if any(mark in entry for mark in (".bak-", ".pre-share", ".revoked-", ".old-")):
+                continue
+            # Sidecars belong to the file they sit beside: sqlite makes them
+            # itself, next to whichever copy of the database is in use.
+            if entry.endswith(("-wal", "-shm")):
+                continue
+            names.append(entry)
+        return names
+
     names = list(getattr(provider, "SHARED", ()))
     for pattern in getattr(provider, "SHARED_GLOBS", ()):
         names += [p.name for p in Path(provider.CANONICAL_HOME).glob(pattern)]

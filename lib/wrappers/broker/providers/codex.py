@@ -127,39 +127,20 @@ USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 # sqlite is safe to share this way: it resolves the symlink and puts -wal/-shm
 # beside the REAL database, so profiles opening it through different links land
 # on one file and one WAL — ordinary multi-process sqlite, not corruption.
-SHARED = (
-    "packages",
-    "config.toml",
-    "hooks.json",
-    "plugins",
-    "skills",
-    "rules",
-    "prompts",
-    "AGENTS.md",
-    "sessions",
-    # NOT the MCP OAuth tokens (.credentials.json) or their locks. Sharing them
-    # is the right idea — they are credentials for OTHER services, the same ones
-    # whichever account is picked — but not through a symlink: the harness
-    # writes that file by rename and opens the lock directory in a way that
-    # refuses to follow links, and a login then dies with "Symbolic link loop".
-    # Tried, and taken back out.
-    # The names given to threads. The sessions themselves are shared, so a
-    # per-profile index means the same conversation is titled under one account
-    # and nameless under the next.
-    "session_index.jsonl",
-    "history.jsonl",
-    "log",
-    "cache",
-    "models_cache.json",
-    # The thread database is shared, so the locks that serialise its writers must
-    # be too — per-profile locks would let two accounts think they hold the same
-    # thread.
-    "thread-writer-locks",
+# What belongs to ONE account, and therefore must NOT be shared. Everything
+# else in the harness's directory is: sessions, databases, config, hooks,
+# skills, prompts, tokens for other services, the lot.
+#
+# Said this way round on purpose. A list of what to SHARE is always one item
+# behind — the harness invents a file, nobody adds it to the list, and the next
+# account quietly gets a copy of its own. That is exactly how a login granted
+# in the morning came back as "authentication required" in the afternoon: the
+# broker had moved to a second account because the first ran out of room, and
+# the MCP tokens had stayed behind with the first.
+PRIVATE = (
+    "auth.json",   # the account's own credentials — the whole point of a profile
 )
 
-# Names carry a schema version (state_5.sqlite, thread_history_1.sqlite), so they
-# are matched rather than listed. The -wal/-shm sidecars are deliberately NOT
-# matched: sqlite creates them next to the real file on its own.
 SHARED_GLOBS = ("*.sqlite",)
 
 # Invocations that must reach the real binary untouched. Two kinds: things about

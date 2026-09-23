@@ -328,6 +328,9 @@ def command(provider, name, profile, argv, env):
         import glob as globmodule
 
         clones = {}
+        # Nobody may be registering a session out here while these are copied.
+        store_lock = _StoreLock(provider)
+        store_lock.__enter__()
         for base in [expand(getattr(provider, "CANONICAL_HOME", "~"))] + ([expand(in_use)] if in_use else []):
             for pattern in private:
                 for host in sorted(globmodule.glob(os.path.join(base, pattern))):
@@ -372,6 +375,9 @@ def command(provider, name, profile, argv, env):
                             continue
                         cmd += ["--mount", "type=bind,source=%s,target=%s"
                                 % (beside, host + side)]
+
+        # Copied; whoever wants to register a session may go ahead.
+        store_lock.__exit__()
 
     # Directories that every profile of this harness should reach, not only the
     # one this run uses: a harness can record a path through a profile it is no
@@ -664,6 +670,48 @@ def _session_from_store(provider, name, since):
     return max(touched, key=lambda r: r.get("updated") or 0).get("id")
 
 
+class _StoreLock:
+    """Held while a harness's databases are copied, and while one is written.
+
+    Registering a session out here takes two steps, and between them the
+    session is archived. A box starting in that instant copied a database that
+    said so, and then refused to reopen its own session — "Failed to unarchive
+    session" — over a thread this machine considered perfectly live. That is
+    the only reason folding back was switched off.
+
+    The two are not in the same process, or even the same run, so the lock is a
+    file: whoever copies waits for whoever registers, and the other way round.
+    """
+
+    def __init__(self, provider):
+        self.path = os.path.join(config.CONFIG_DIR, "box", "%s-store.lock" % provider.NAME)
+        self.handle = None
+
+    def __enter__(self):
+        import fcntl
+
+        try:
+            os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
+            self.handle = open(self.path, "a+")
+            fcntl.flock(self.handle, fcntl.LOCK_EX)
+        except OSError:
+            # Never fatal: without the lock this is what it was before.
+            self.handle = None
+        return self
+
+    def __exit__(self, *_exc):
+        if self.handle is not None:
+            try:
+                import fcntl
+
+                fcntl.flock(self.handle, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            self.handle.close()
+            self.handle = None
+        return False
+
+
 def _private_store(provider, name):
     """The directory holding this box's own copy of the harness's databases."""
     if not name:
@@ -741,6 +789,18 @@ def _sync_back(provider, session, env=None, name=None):
         # process is gone.
         if argvs is not None:
             script = " && ".join(" ".join(shlex.quote(a) for a in argv) for argv in argvs)
+
+        # Under the same lock the copying takes. These steps leave the session
+        # archived in between, and a box copying the database right then would
+        # carry that state into a container which then could not reopen its own
+        # work — which is why folding back was switched off before. The child
+        # holds the lock, because this process does not wait for it.
+        script = "%s %s %s %s" % (
+            shlex.quote(sys.executable),
+            shlex.quote(os.path.join(os.path.dirname(os.path.abspath(__file__)), "holdlock.py")),
+            shlex.quote(_StoreLock(provider).path),
+            script,
+        )
         subprocess.Popen(["/bin/sh", "-c", script], env={**os.environ, **(env or {})},
                          stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                          start_new_session=True)

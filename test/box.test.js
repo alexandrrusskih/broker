@@ -1064,3 +1064,50 @@ print(run._private_store(opencode, None))
   // Outside a box there is no such copy, and nothing to fold.
   assert.equal(missing, "None");
 });
+
+test("folding a session back and copying the databases never overlap", async (t) => {
+  const dir = await temp(t);
+  const log = path.join(dir, "sync.log");
+  const out = engine(`
+import json, os, time
+from broker.box import run
+
+class Provider:
+    NAME = "demo"
+    BIN = "demo"
+    BOX_SYNC = (("archive", "%(session)s"), ("unarchive", "%(session)s"))
+
+run.SYNC_LOG = ${JSON.stringify(log)}
+run.real_bin = lambda p: "/bin/echo"
+import broker.run
+broker.run.real_bin = lambda p: "/bin/echo"
+
+# Hold the lock the copying takes, then ask for the fold. It must wait: between
+# archive and unarchive the session is archived, and a box copying the database
+# in that instant carries that into a container which then cannot reopen its
+# own work. That is the race that switched this off in the first place.
+with run._StoreLock(Provider):
+    run._sync_back(Provider, "SID")
+    time.sleep(1.5)
+    held = open(${JSON.stringify(log)}).read() if os.path.exists(${JSON.stringify(log)}) else ""
+
+for _ in range(60):
+    time.sleep(0.1)
+    after = open(${JSON.stringify(log)}).read() if os.path.exists(${JSON.stringify(log)}) else ""
+    if "unarchive SID" in after:
+        break
+print(json.dumps({"held": held, "after": after}))
+`, { HOME: dir });
+
+  const { held, after } = JSON.parse(out);
+  // The log opens with the command it is about to run, so what proves a step
+  // RAN is its own output on a line of its own — /bin/echo stands in for the
+  // harness here.
+  const ran = (text, step) => new RegExp(`^${step} SID$`, "m").test(text);
+  assert.ok(!ran(held, "archive"),
+    "nothing is folded back while the databases are being copied");
+  assert.ok(ran(after, "archive") && ran(after, "unarchive"),
+    "and once the copying is done, both steps run");
+  assert.ok(after.indexOf("\narchive SID") < after.indexOf("\nunarchive SID"),
+    "in the order the provider listed them");
+});

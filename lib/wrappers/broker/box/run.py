@@ -703,6 +703,47 @@ def _sessions_are_shared(provider, env=None):
     return _session_root(provider, expand(config)) == _session_root(provider, canonical)
 
 
+def _session_path(provider, session, workdir, env=None):
+    """The file this session was written to, or None if it cannot be placed."""
+    pattern = getattr(provider, "SESSION_GLOB", None)
+    if not (pattern and session):
+        return None
+    import glob as globmodule
+
+    home_env = getattr(provider, "HOME_ENV", None)
+    config = (env or {}).get(home_env) if home_env and home_env != "HOME" else None
+    fields = {
+        "key": workdir.replace(os.sep, "-"),
+        "home": home_dir(),
+        "config": config or expand(getattr(provider, "CANONICAL_HOME", "~")),
+    }
+    for path in globmodule.glob(pattern % fields):
+        if _session_id(path) == session:
+            return path
+    return None
+
+
+def _exit_note(provider, session, workdir, env=None):
+    """Why the harness stopped, said again where it will still be readable.
+
+    A harness that draws a full-screen interface does it on the terminal's
+    alternate buffer: when it exits, the old screen comes back and everything
+    it had shown goes with it. Someone whose account ran out mid-run is left
+    facing a bare prompt, with no hint that anything was said at all — the
+    message was there, for as long as the program was.
+    """
+    read = getattr(provider, "session_error", None)
+    if not read:
+        return None
+    path = _session_path(provider, session, workdir, env)
+    if not path:
+        return None
+    try:
+        return read(path)
+    except Exception:  # never let a note about an error become an error
+        return None
+
+
 def _resume_hint(provider, name, workdir, env=None, since=0, account=None, session=None):
     """What to type to come back INTO this box, on the same account.
 
@@ -1091,6 +1132,9 @@ def exec_box(provider, name, argv, env, account=None):
         # looks through every session it has to find the one named — thirteen
         # thousand of them here, which is seconds of silence. The line is what
         # the person is waiting for; the bookkeeping can happen behind it.
+        note = _exit_note(provider, session, workdir, env)
+        if note:
+            warn("the harness stopped with: %s" % " ".join(note.split()))
         hint = _resume_hint(provider, name, workdir, env, started, account, session)
         if hint:
             sys.stdout.write(hint)

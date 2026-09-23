@@ -240,3 +240,41 @@ def login_env(env):
 
 def login_cmd(device):
     return [BIN, "login"] + (["--device-auth"] if device else [])
+
+# What this harness was left with when it stopped, taken out of the session it
+# just wrote.
+#
+# It draws its screen on the terminal's alternate buffer, so everything it ever
+# showed — including the line saying the account is out of room — is wiped the
+# moment it exits and the old screen comes back. What you are left looking at
+# is a bare prompt, as if it had quit for no reason and said nothing. The
+# account was spent an hour earlier and every turn since had been refused.
+#
+# The session file keeps what the screen did not, so it is read back and said
+# again in the ordinary terminal, where it stays.
+def session_error(path):
+    """The last failure this session recorded, or None if it ended cleanly."""
+    import json
+
+    try:
+        with open(path, "rb") as handle:
+            # The tail only: these run to tens of megabytes, and what is wanted
+            # is the final turn.
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - 262144))
+            lines = handle.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            payload = (json.loads(line) or {}).get("payload") or {}
+        except ValueError:
+            continue
+        if payload.get("type") != "task_complete":
+            continue
+        # A turn that ended normally carries no error at all, and once one has
+        # been found there is no point reading further back: older turns are
+        # not what the person is standing in front of.
+        message = ((payload.get("error") or {}).get("message") or "").strip()
+        return message or None
+    return None

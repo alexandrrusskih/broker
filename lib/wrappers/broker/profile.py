@@ -273,6 +273,9 @@ def prepare(provider, path):
     """Lay out a profile the way this provider needs it."""
     if getattr(provider, "MIRROR_HOME", False):
         return mirror(provider, path)
+    # Fresh containers have no canonical home: do not rely on a host login or
+    # an entrypoint creating it before promotion and directory enumeration.
+    os.makedirs(provider.CANONICAL_HOME, mode=0o700, exist_ok=True)
     # Before linking: anything the harness invented in here, which belongs to
     # everyone, goes to the shared home first — otherwise the link below has
     # nothing to point at and the file stays private for good.

@@ -99,7 +99,23 @@ test("Medulla overlay creation is explicit; an existing overlay still updates wi
   assert.match(shim, /exec \/usr\/local\/bin\/broker-cx/);
   assert.equal((await fs.stat(bundle)).mode & 0o777, 0o755);
   assert.equal(await readJson(path.join(overlay, "home", ".config", "broker", "config.json")), null);
-  const program = "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert '__main__.py' in z.namelist(); assert 'BROKER_CONFIG' in z.read('broker/config.py').decode(); assert 'fake-admin-key' not in str([z.read(n) for n in z.namelist() if not n.endswith('/')])";
+  const program = `
+import os, sys, tempfile, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+assert '__main__.py' in z.namelist()
+assert 'BROKER_CONFIG' in z.read('broker/config.py').decode()
+assert 'fake-admin-key' not in str([z.read(n) for n in z.namelist() if not n.endswith('/')])
+# Exercise the shipped artifact too: updating source alone must not leave the
+# Medulla bundle unable to prepare a profile in a fresh container.
+sys.path.insert(0, sys.argv[1])
+from broker import profile
+from broker.providers import codex
+with tempfile.TemporaryDirectory() as fresh:
+    codex.CANONICAL_HOME = os.path.join(fresh, '.codex')
+    profile.write_auth(codex, os.path.join(fresh, '.codex-main'), {'synthetic': True})
+    assert os.path.isdir(codex.CANONICAL_HOME)
+    assert not os.path.exists(os.path.join(codex.CANONICAL_HOME, 'auth.json'))
+`;
   execFileSync("python3", ["-c", program, bundle], { env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
   await fs.unlink(bundle);
   install("codex");

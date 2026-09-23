@@ -64,7 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
 ARG RTK_VERSION=0.49.0
-ARG AGY_VERSION=1.2.8
+ARG AGY_VERSION=1.2.9
 ARG GH_VERSION=2.101.0
 ARG GLAB_VERSION=1.118.0
 ARG GITLEAKS_VERSION=8.30.1

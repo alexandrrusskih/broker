@@ -1,5 +1,6 @@
 """Building the container command, and running it."""
 
+import json
 import os
 import re
 import shlex
@@ -631,7 +632,48 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None, sessi
 SYNC_LOG = os.path.join(config.CONFIG_DIR, "box", "sync.log")
 
 
-def _sync_back(provider, session, env=None):
+def _session_from_store(provider, name, since):
+    """Ask the harness which session it just wrote, when there are no files.
+
+    One database and no session files means nothing on disk changes name when a
+    conversation happens, so the only way to know what to fold back is to ask —
+    in the box's own copy, which by now has no writer left.
+    """
+    shell = getattr(provider, "BOX_SESSION_SHELL", None)
+    store = _private_store(provider, name) if shell else None
+    if not store:
+        return None
+    from ..run import real_bin
+
+    binary = real_bin(provider)
+    if not binary:
+        return None
+    try:
+        found = subprocess.run(
+            ["/bin/sh", "-c", shell % {"bin": shlex.quote(binary),
+                                       "store_parent": shlex.quote(os.path.dirname(store))}],
+            capture_output=True, text=True, timeout=60)
+        rows = json.loads(found.stdout or "[]")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    # Milliseconds there, seconds here.
+    touched = [r for r in rows if isinstance(r, dict)
+               and (r.get("updated") or 0) / 1000.0 >= since]
+    if not touched:
+        return None
+    return max(touched, key=lambda r: r.get("updated") or 0).get("id")
+
+
+def _private_store(provider, name):
+    """The directory holding this box's own copy of the harness's databases."""
+    if not name:
+        return None
+    root = os.path.join(config.CONFIG_DIR, "box", "private",
+                        name.replace("/", "_"), provider.NAME)
+    return root if os.path.isdir(root) else None
+
+
+def _sync_back(provider, session, env=None, name=None):
     """Put what the box wrote back into the history out here — in the background.
 
     A box works on its own clone of the harness's databases, because sharing one
@@ -657,10 +699,31 @@ def _sync_back(provider, session, env=None):
     # One command, or several to run in order — a harness may need more than a
     # single call to take a session into its history.
     steps = template if isinstance(template[0], (list, tuple)) else (template,)
-    argvs = [[binary] + [part % {"session": session} for part in step] for step in steps]
-    by_hand = " && ".join(
-        " ".join([provider.BIN] + [part % {"session": session} for part in step])
-        for step in steps)
+    # Where the box's own copy of this harness's state ended up. A harness
+    # whose sessions live in one database has nothing to fold back WITHOUT it:
+    # the record is in there, not in a file the host can already see.
+    store = _private_store(provider, name)
+    fields = {"session": session, "bin": shlex.quote(binary),
+              "store_parent": shlex.quote(os.path.dirname(store)) if store else ""}
+
+    # A harness whose sessions live in one database cannot be folded back by
+    # copying files: the whole history is in that one file, and the box's copy
+    # would overwrite everything done outside while it ran. Such a harness
+    # spells the fold as a shell line instead, reading its own copy and asking
+    # itself to import the session — see providers/opencode.py.
+    shell = getattr(provider, "BOX_SYNC_SHELL", None)
+    if shell:
+        if not store:
+            return
+        script = shell % fields
+        by_hand = script
+        argvs = None
+    else:
+        argvs = [[binary] + [part % fields for part in step] for step in steps]
+    if argvs is not None:
+        by_hand = " && ".join(
+            " ".join([provider.BIN] + [part % fields for part in step])
+            for step in steps)
     try:
         os.makedirs(os.path.dirname(SYNC_LOG), mode=0o700, exist_ok=True)
         log = open(SYNC_LOG, "a")
@@ -676,9 +739,8 @@ def _sync_back(provider, session, env=None):
         # Chained through a shell rather than started one by one, because
         # nothing here waits: the steps must still run in order after this
         # process is gone.
-        import shlex
-
-        script = " && ".join(" ".join(shlex.quote(a) for a in argv) for argv in argvs)
+        if argvs is not None:
+            script = " && ".join(" ".join(shlex.quote(a) for a in argv) for argv in argvs)
         subprocess.Popen(["/bin/sh", "-c", script], env={**os.environ, **(env or {})},
                          stdin=subprocess.DEVNULL, stdout=log, stderr=log,
                          start_new_session=True)
@@ -864,6 +926,8 @@ def exec_box(provider, name, argv, env, account=None):
         _restore_terminal(saved)
 
     session = pinned or _last_session(provider, workdir, env, started)
+    if session is None:
+        session = _session_from_store(provider, name, started)
     if session:
         # Printed BEFORE the session is folded back, and not only after a clean
         # exit. Folding asks the harness to re-read its own session, and it
@@ -874,5 +938,5 @@ def exec_box(provider, name, argv, env, account=None):
         if hint:
             sys.stdout.write(hint)
             sys.stdout.flush()
-        _sync_back(provider, session, env)
+        _sync_back(provider, session, env, name)
     sys.exit(status)

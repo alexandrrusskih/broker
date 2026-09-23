@@ -40,9 +40,32 @@ BOX_PRIVATE = (".local/share/opencode/opencode.db",)
 # above is mounted. Claim it first, so it belongs to the user who runs here.
 BOX_WRITABLE = ("~/.local", "~/.local/share/opencode")
 
-# Nothing is folded back on the way out. A session written in the box stays in
-# the box's own copy; the database outside is left as it was found.
-BOX_SYNC = ()
+# Folded back on the way out, and this is the only safe way to do it.
+#
+# The obvious way — copy the database over — cannot work: it is one file for
+# every session there has ever been, so copying the box's copy outward would
+# throw away everything done outside meanwhile, and merging two SQLite files by
+# hand means guessing at someone else's schema.
+#
+# So the harness is asked to do it, in its own words: export the one session
+# out of the box's copy, import it into the real one. Both commands are the
+# harness's own, both operate on one session, and the import is the only writer
+# touching the database outside.
+#
+# It runs AFTER the container is gone. That is what makes it safe: the box's
+# copy has no writer left, so there is nothing to race with — which is exactly
+# what went wrong the last time this was attempted, with a different harness,
+# while its box was still running.
+BOX_SYNC = ("shell",)  # the steps live in BOX_SYNC_SHELL below
+
+# The export above writes JSON to stdout and the import reads a file, so the
+# two are joined by one: a temporary file, and the store to read from. Spelled
+# here rather than in the engine, because only this harness works this way.
+BOX_SYNC_SHELL = (
+    'set -e; f="$(mktemp -t opencode-session)"; trap \'rm -f "$f"\' EXIT; '
+    'XDG_DATA_HOME=%(store_parent)s %(bin)s export %(session)s > "$f"; '
+    '%(bin)s import "$f"'
+)
 
 # Where the real harness is, once the shim has taken its name. The shim itself
 # lives in ~/.local/bin, so that one is listed last: finding it first would send
@@ -55,6 +78,14 @@ REAL_BINS = (
     os.path.expanduser("~/.local/bin/opencode"),
 )
 REAL_BIN = REAL_BINS[0]
+
+# Which session this run was. There are no session FILES to look at — it is all
+# in the database — so the harness is asked, in its own copy, for the sessions
+# it touched while the box ran. Anything older belongs to an earlier run and is
+# already folded back.
+BOX_SESSION_SHELL = (
+    'XDG_DATA_HOME=%(store_parent)s %(bin)s session list --format json'
+)
 
 SESSION_RESUME = "-s %s"
 SESSION_PICKERS = ("-s", "--session", "-c", "--continue")

@@ -1033,3 +1033,34 @@ print(json.dumps(box.command(opencode, "demo", {"rw": ["${project}"]}, ["run", "
   // own database.
   assert.match(line, new RegExp(`--tmpfs ${path.join(dir, ".local")}:uid=`), line);
 });
+
+test("a harness whose history is one database folds its session back by asking itself", async (t) => {
+  const dir = await temp(t);
+  const store = path.join(dir, ".config", "broker", "box", "private", "demo", "opencode");
+  await fs.mkdir(store, { recursive: true });
+  await fs.writeFile(path.join(store, "opencode.db"), "x");
+
+  const out = engine(`
+from broker import box
+from broker.box import run
+from broker.providers import opencode
+
+# What the fold would run, without running it.
+store = run._private_store(opencode, "demo")
+print(store)
+print(opencode.BOX_SYNC_SHELL % {"session": "ses_TEST", "bin": "/bin/oc",
+                                 "store_parent": "'" + store.rsplit("/", 1)[0] + "'"})
+print(run._private_store(opencode, None))
+`, { HOME: dir });
+
+  const [found, script, missing] = out.trim().split("\n");
+  assert.match(found, /box\/private\/demo\/opencode$/);
+  // Read from the box's OWN copy, write through the harness's own import —
+  // never by copying the database, which holds every session there has ever
+  // been and would overwrite whatever happened outside meanwhile.
+  assert.match(script, /XDG_DATA_HOME='.*box\/private\/demo' \/bin\/oc export ses_TEST/, script);
+  assert.match(script, /\/bin\/oc import "\$f"/, script);
+  assert.ok(!/cp |rsync|install -m/.test(script), "the database itself is never copied");
+  // Outside a box there is no such copy, and nothing to fold.
+  assert.equal(missing, "None");
+});

@@ -47,6 +47,9 @@ RUN npm install -g --no-fund --no-audit \
 # directly. Pinned: a test suite that pulls a different compose between runs is
 # a test suite whose failures you cannot reproduce.
 ARG COMPOSE_VERSION=v5.5.1
+# A project's own build may ask for buildx — and a box that has docker but not
+# buildx fails at the first `docker build` with a plugin that is simply absent.
+ARG BUILDX_VERSION=v0.37.1
 # docker.io is the daemon only on Debian 13; the client is its own package now,
 # and without it the box has a daemon nothing can talk to.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -55,7 +58,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && mkdir -p /usr/libexec/docker/cli-plugins \
  && curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \
       "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(dpkg --print-architecture | sed s/amd64/x86_64/ | sed s/arm64/aarch64/)" \
- && chmod 0755 /usr/libexec/docker/cli-plugins/docker-compose
+ && chmod 0755 /usr/libexec/docker/cli-plugins/docker-compose \
+ && curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-buildx \
+      "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-$(dpkg --print-architecture)" \
+ && chmod 0755 /usr/libexec/docker/cli-plugins/docker-buildx
 
 # agy ships platform archives rather than an npm package, so it comes from its
 # own release. gh and glab are here because work that ends in a pull or merge

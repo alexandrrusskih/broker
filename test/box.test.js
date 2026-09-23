@@ -1149,3 +1149,50 @@ print(json.dumps({
   // Everything else is shared the ordinary way.
   assert.equal(seen.conf_is_symlink, true);
 });
+
+test("how much room the machine has left for heavy work", async (t) => {
+  const dir = await temp(t);
+  const slots = path.join(dir, "slots");
+  await fs.mkdir(slots, { recursive: true });
+  await fs.writeFile(path.join(slots, "slot1"), "");
+  await fs.writeFile(path.join(slots, "slot2"), "");
+  await fs.writeFile(path.join(slots, "slot1.owner"), "p4 12:00");
+  // Whatever else people leave in there is not a slot.
+  await fs.writeFile(path.join(slots, "notes.json"), "{}");
+
+  const out = engine(`
+import json
+from broker.box import slots
+free, total, busy = slots.state(${JSON.stringify(slots)})
+print(json.dumps({"free": free, "total": total, "busy": busy}))
+`);
+  const idle = JSON.parse(out);
+  assert.deepEqual(idle, { free: 2, total: 2, busy: [] },
+    "two slots, nobody holding one — and the stray file is not counted");
+
+  // Now hold one the way a heavy run does, and ask again from another process.
+  const held = engine(`
+import fcntl, json, os, subprocess, sys
+handle = open(os.path.join(${JSON.stringify(slots)}, "slot1"), "a+")
+fcntl.flock(handle, fcntl.LOCK_EX)
+out = subprocess.run([sys.executable, "-c",
+    "import sys, json; sys.path.insert(0, sys.argv[1]);"
+    "from broker.box import slots;"
+    "f, t, b = slots.state(sys.argv[2]); print(json.dumps({'free': f, 'busy': b}))",
+    ${JSON.stringify(path.join(root, "lib", "wrappers"))}, ${JSON.stringify(slots)}],
+    capture_output=True, text=True)
+fcntl.flock(handle, fcntl.LOCK_UN)
+print(out.stdout.strip())
+`);
+  const seen = JSON.parse(held);
+  assert.equal(seen.free, 1, "one slot is taken, so one is left");
+  assert.deepEqual(seen.busy, ["slot1"]);
+  // Asking must not cost a slot: the lock is taken and released at once.
+  const after = JSON.parse(engine(`
+import json
+from broker.box import slots
+free, total, _ = slots.state(${JSON.stringify(slots)})
+print(json.dumps({"free": free}))
+`));
+  assert.equal(after.free, 2, "asking the question leaves nothing held");
+});

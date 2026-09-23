@@ -551,6 +551,33 @@ async function main() {
           const image = box.image || (box.dockerfile ? boxes.imageFor(name) : boxes.IMAGE);
           console.log(`\n${name}\n  image: ${image}${box.dockerfile ? `  ← ${box.dockerfile}` : ""}\n  rw: ${rw}${ro ? "\n" + ro : ""}`);
         }
+      } else if (action === "slots") {
+        // How much room this machine has left for heavy work. The ceiling is
+        // per MACHINE — thirteen boxes with two slots each would be no ceiling
+        // at all — so a person deciding what to start next cannot tell from
+        // inside their own box, and twelve agents queueing on two slots wait
+        // minutes without knowing why.
+        const { execFileSync } = require("child_process");
+        const osMod = require("os");
+        const pathMod = require("path");
+        const dir = positional[1] || pathMod.join(osMod.homedir(), ".cache", "broker-box", "slots");
+        const engine = pathMod.join(__dirname, "lib", "wrappers");
+        const out = execFileSync("python3", ["-c",
+          "import sys, json; sys.path.insert(0, sys.argv[1]);" +
+          "from broker.box import slots;" +
+          "free, total, busy = slots.state(sys.argv[2]);" +
+          "print(json.dumps({'free': free, 'total': total, 'busy': " +
+          "[{'slot': b, 'owner': slots.owner(sys.argv[2], b)} for b in busy]}))",
+          engine, dir], { encoding: "utf8" });
+        const seen = JSON.parse(out);
+        if (!seen.total) {
+          console.log(`no slot files in ${dir}`);
+        } else if (flags.json) {
+          console.log(JSON.stringify(seen));
+        } else {
+          console.log(`${seen.free} of ${seen.total} free`);
+          for (const b of seen.busy) console.log(`  ${b.slot} busy${b.owner ? ` — ${b.owner}` : ""}`);
+        }
       } else if (action === "repair") {
         // For a pane whose harness was killed outright: everything else is
         // handled where the box runs, this is the manual way back.

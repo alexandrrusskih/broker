@@ -190,6 +190,14 @@ def command(provider, name, profile, argv, env):
     # and refuses to run at all. Read-only mounts land on top of this.
     cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
             % (os.path.join(home, ".config"), os.getuid(), os.getgid())]
+    # ...and anywhere else this harness insists on writing. Mounting a file
+    # deep under $HOME makes the container create its parents as root, and the
+    # harness — which runs as you — then cannot make a sibling directory next
+    # to its own database: "EACCES: permission denied, mkdir". Naming the
+    # directory here gets it owned by you before anything is mounted into it.
+    for directory in getattr(provider, "BOX_WRITABLE", ()):
+        cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
+                % (expand(directory), os.getuid(), os.getgid())]
 
     mounted = []
     passwd = _passwd_file(binary, image)

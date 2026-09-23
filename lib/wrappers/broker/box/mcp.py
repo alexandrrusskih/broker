@@ -51,6 +51,12 @@ def mcp_servers(provider, env=None):
 
             with open(path, "rb") as fh:
                 data = tomllib.load(fh)
+        elif kind == "jsonc":
+            # JSON with comments. Written by hand, so it has them.
+            from .boxes import _strip_comments
+
+            with open(path) as fh:
+                data = json.loads(_strip_comments(fh.read()))
         else:
             with open(path) as fh:
                 data = json.load(fh)
@@ -64,9 +70,16 @@ def mcp_servers(provider, env=None):
         command = server.get("command")
         if not command:
             continue  # http/sse: the box reaches it over the network
+        # Some spell the command as a string plus arguments, others as one
+        # list. Both mean the same thing.
+        if isinstance(command, (list, tuple)):
+            argv = [str(part) for part in command]
+        else:
+            argv = [command] + list(server.get("args") or [])
         found[name] = {
-            "command": [command] + list(server.get("args") or []),
-            "env": dict(server.get("env") or {}),
+            "command": argv,
+            # "environment" is what opencode calls it; "env" everywhere else.
+            "env": dict(server.get("env") or server.get("environment") or {}),
             # codex declares which variables a server expects to inherit rather
             # than spelling out their values. Inside a box nothing is inherited,
             # so the server starts without them — and one that needs them to

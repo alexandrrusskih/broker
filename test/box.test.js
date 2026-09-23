@@ -1004,3 +1004,32 @@ print(json.dumps(box.run._over_ssh(cmd, machine, name)))
   assert.match(sent, new RegExp(`target=${project.replace(/[/\\]/g, "\\$&")}`), sent);
   assert.match(sent, new RegExp(`-w ${project.replace(/[/\\]/g, "\\$&")}`), sent);
 });
+
+test("a harness the broker holds no credentials for still gets a box", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(path.join(dir, ".local", "share", "opencode"), { recursive: true });
+  await fs.writeFile(path.join(dir, ".local", "share", "opencode", "opencode.db"), "x");
+  await fs.mkdir(project, { recursive: true });
+
+  const out = engine(`
+import json
+from broker import box
+from broker.box import boxes, mcp, run
+from broker.providers import opencode
+opencode.MCP_CONFIG = None
+print(json.dumps(box.command(opencode, "demo", {"rw": ["${project}"]}, ["run", "hi"], {})))
+`, { HOME: dir });
+
+  const line = JSON.parse(out).join(" ");
+  // Its database is one file for every session it has ever had, and the
+  // journal lives beside it: shared across the boundary it tears, which is how
+  // a day of another harness's history was lost. So the box gets a clone.
+  assert.ok(!/source=.*\.local\/share\/opencode\/opencode\.db,/.test(line.replace(/box\/private[^,]*/g, "")),
+    "the real database must not be mounted");
+  assert.match(line, /box\/private\/demo\/opencode\/opencode\.db/, line);
+  // Mounting a file deep under $HOME has the container create its parents as
+  // root, and the harness — which runs as you — then cannot write beside its
+  // own database.
+  assert.match(line, new RegExp(`--tmpfs ${path.join(dir, ".local")}:uid=`), line);
+});

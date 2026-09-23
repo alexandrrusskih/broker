@@ -72,6 +72,16 @@ def main(provider_name, argv=None):
     if argv and argv[0] in provider.PASSTHROUGH:
         return run.exec_passthrough(provider, argv)
 
+    # A harness the broker does not hold credentials for. It keeps its own
+    # subscription and its own login, and everything below this line — reading
+    # the config, choosing an account, refreshing a token — would be about
+    # credentials we were never given. So there are exactly two outcomes: into
+    # the box it asked for, or straight through to the harness as installed.
+    if getattr(provider, "CREDENTIALS", "file") is None:
+        if in_box:
+            return box.exec_box(provider, in_box, argv, os.environ)
+        return run.exec_passthrough(provider, argv)
+
     # OUR OWN subcommands come before the nested-call check. Inside a session
     # that already runs under the shim — a claude agent typing `broker-cl list`,
     # say — the marker is set, and treating that as a nested harness call sent

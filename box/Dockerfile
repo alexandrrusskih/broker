@@ -27,9 +27,14 @@ ARG CODEX_VERSION=0.155.1
 # "packageManager", and without it `bun install` and every script that shells out
 # to it fails inside the box while working fine outside.
 ARG BUN_VERSION=1.4.2
+# A fourth harness, kept at the same version as the machine outside. The broker
+# holds no credentials for this one and chooses no account for it — it is here
+# so that `opencode --box <name>` has something to run.
+ARG OPENCODE_VERSION=1.18.31
 RUN npm install -g --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
+      "opencode-ai@${OPENCODE_VERSION}" \
       "bun@${BUN_VERSION}" \
  && npm cache clean --force
 

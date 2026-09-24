@@ -325,45 +325,8 @@ def harness_env(env):
     base = SQLITE_BASE if os.path.isdir(os.path.dirname(SQLITE_BASE)) else \
         os.path.expanduser("~/.cache/broker/codex-db")
     own = os.path.join(base, window_key())
-    fresh = not os.path.isdir(own)
     try:
         os.makedirs(own, mode=0o700, exist_ok=True)
     except OSError:
         return  # the shared ones are worse, but they are better than no start
-    if fresh:
-        _seed_databases(own)
     env[SQLITE_ENV] = own
-
-
-def _seed_databases(own):
-    """Start a window's databases from the ones already built.
-
-    Left to itself a new set is filled from every rollout on disk — fourteen
-    thousand files here — and the window sits on "Waiting for startup" for
-    minutes while it happens, once per window. So it starts from a copy
-    instead, and only what is missing gets read.
-
-    The canonical directory is the source: now that every window has its own,
-    nothing writes there any more, which makes it the one copy that is never
-    half-written. A clone on APFS costs no space and no time — 600 MB in five
-    milliseconds, measured — and where the filesystem cannot clone, this is a
-    plain copy, still cheaper than reading every session.
-
-    Only the databases themselves: -wal and -shm belong to whoever had the file
-    open, and a journal that does not match its database is exactly how a fresh
-    start turns into "database disk image is malformed".
-    """
-    import glob as globmodule
-    import shutil
-    import subprocess
-
-    for source in sorted(globmodule.glob(os.path.join(CANONICAL_HOME, "*.sqlite"))):
-        target = os.path.join(own, os.path.basename(source))
-        if os.path.exists(target):
-            continue
-        try:
-            if subprocess.run(["cp", "-c", source, target],
-                              capture_output=True).returncode:
-                shutil.copy2(source, target)
-        except OSError:
-            return  # an empty set still works, it is only slower

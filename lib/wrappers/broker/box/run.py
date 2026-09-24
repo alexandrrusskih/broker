@@ -568,8 +568,6 @@ def command(provider, name, profile, argv, env):
             "-e", "GIT_CONFIG_KEY_0=safe.directory",
             "-e", "GIT_CONFIG_VALUE_0=*"]
 
-    for key, value in sorted((profile.get("env") or {}).items()):
-        cmd += ["-e", "%s=%s" % (key, value)]
     # The credentials for this run, and the marker that tells a harness spawning
     # itself inside the box that it is already brokered.
     carried = ["BROKER_ACTIVE"]
@@ -609,6 +607,12 @@ def command(provider, name, profile, argv, env):
             # Docker Desktop resolves this name already; Colima and plain Linux
             # need to be told, and saying it twice costs nothing.
             cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
+
+    # Docker uses the last -e for a repeated name. Put box settings after the
+    # harness credentials and MCP inheritance so the box always wins over the
+    # launch environment, including variables an MCP server asks to inherit.
+    for key, value in sorted((profile.get("env") or {}).items()):
+        cmd += ["-e", "%s=%s" % (key, value)]
 
     cmd.append(image)
     cmd.append("broker-box-entry")

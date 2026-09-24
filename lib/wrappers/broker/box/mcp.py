@@ -99,6 +99,7 @@ def _bridge_env(name, server, profile, projects):
     would let one box ask about code it cannot even see.
     """
     env = dict(os.environ)
+    env.update(profile.get("env") or {})
     env.update(server.get("env") or {})
     override = ((profile.get("mcp") or {}).get(name) or {}).get("env") or {}
     for key, value in override.items():
@@ -134,10 +135,14 @@ def _start_bridge(name, server, profile, projects):
     #
     # So the values of the variables this server actually receives from the
     # environment are part of its identity. Change one, get your own listener.
+    bridge_env = _bridge_env(name, server, profile, projects)
     matters = list(((profile.get("mcp") or {}).get(name) or {}).get("identity_env") or ())
+    matters += [v for v in (profile.get("env") or {}) if v not in matters]
     matters += [v for v in (server.get("inherit") or []) if v not in matters]
     matters += [v for v in (server.get("env") or {}) if v not in matters]
-    key = mcpbridge.identity_key(extra=tuple(matters))
+    matters += [v for v in (((profile.get("mcp") or {}).get(name) or {}).get("env") or {})
+                if v not in matters]
+    key = mcpbridge.identity_key(env=bridge_env, extra=tuple(matters))
     live = mcpbridge.running(name, key)
     if live and live.get("command") == server["command"]:
         return live
@@ -151,7 +156,7 @@ def _start_bridge(name, server, profile, projects):
             # starting — "the bridge did not come up", with every MCP server
             # missing inside the box.
             cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            env=_bridge_env(name, server, profile, projects),
+            env=bridge_env,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True,  # it outlives this process: the box is its client
         )
@@ -243,5 +248,4 @@ def _write_shim(provider, name, live):
     os.chmod(tmp, 0o700)  # it carries the connection secret
     os.replace(tmp, path)
     return path
-
 

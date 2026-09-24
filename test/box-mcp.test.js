@@ -215,6 +215,37 @@ print(json.dumps([
   assert.deepEqual(JSON.parse(env), [project, "/explicit"]);
 });
 
+test("box env overrides launch env for the harness and host-side MCP bridge", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+  await fs.writeFile(path.join(dir, ".claude.json"), JSON.stringify({
+    mcpServers: { probe: { command: "/opt/tool/mcp", env_vars: ["Q"] } }
+  }));
+  const inspect = (launchQ) => JSON.parse(engine(`
+import json
+from broker import box, mcpbridge
+from broker.box import mcp
+from broker.providers import claude
+claude.MCP_CONFIG = ("${dir}/.claude.json", "json", "mcpServers")
+profile = {"rw": ["${project}"], "env": {"Q": "2"},
+           "mcp": {"probe": {"identity_env": ["Q"]}}}
+mcp._start_bridge = lambda *a: {"port": 41234, "token": "fake", "command": ["x"]}
+cmd = box.command(claude, "demo", profile, [], {})
+values = [cmd[i + 1] for i, value in enumerate(cmd[:-1]) if value == "-e" and cmd[i + 1].startswith("Q=")]
+server = mcp.mcp_servers(claude)["probe"]
+env = mcp._bridge_env("probe", server, profile, ["${project}"])
+print(json.dumps([values, env["Q"], mcpbridge.identity_key(env=env, extra=["Q"])]))
+`, { HOME: dir, Q: launchQ }));
+  const first = inspect("1");
+  const second = inspect("9");
+  assert.deepEqual(first[0], ["Q=1", "Q=1", "Q=2"]);
+  assert.equal(first[1], "2");
+  assert.deepEqual(second[0], ["Q=9", "Q=9", "Q=2"]);
+  assert.equal(second[1], "2");
+  assert.equal(second[2], first[2], "the effective box env also identifies the MCP listener");
+});
+
 test("an explicit path in a box resolves symlinks too, so it cannot key a second database", async (t) => {
   const dir = await temp(t);
   const physical = path.join(dir, "elsewhere", "project");

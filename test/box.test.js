@@ -132,6 +132,34 @@ print(json.dumps(cmd))
   assert.ok(!line.includes(`target=${tokens},readonly`), "a box may write its own");
 });
 
+test("two hosts may share one key without the box refusing to start", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const key = path.join(dir, "id_shared");
+  await fs.mkdir(project);
+  await fs.writeFile(key, "private key");
+  await fs.writeFile(path.join(dir, "boxes.json"), JSON.stringify({
+    demo: {
+      rw: [project],
+      ssh: { hosts: { "github.com": key, "git.example.com": key } },
+    },
+  }));
+
+  const out = engine(`
+import json
+from broker import box
+from broker.box import boxes
+from broker.providers import claude
+box.boxes.PATH = ${JSON.stringify(path.join(dir, "boxes.json"))}
+cmd = box.command(claude, "demo", boxes.profiles()["demo"], [], {})
+print(json.dumps([m for m in cmd if ${JSON.stringify(key)} in m]))
+`, { BROKER_CONFIG_DIR: dir, HOME: dir });
+
+  // Mounted once, however many hosts name it. Twice and docker refuses the
+  // whole run — "Duplicate mount point" — so the box does not start at all.
+  assert.equal(JSON.parse(out).length, 1, "one key, one mount");
+});
+
 test("an undefined box names what is defined instead of failing blankly", async (t) => {
   const dir = await temp(t);
   const file = path.join(dir, "boxes.json");

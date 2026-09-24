@@ -52,7 +52,13 @@ def _ssh_config(name, profile):
             hosts[host] = (expand(entry.get("key") or ""), settings)
         else:
             hosts[host] = (expand(entry), {})
-    keys += [k for k, _ in hosts.values() if k and k not in keys]
+    # One pass, and the check has to see what this pass has already added: the
+    # comprehension that did this read the OLD list, so two hosts sharing one
+    # key — the same id_ed25519 for github and for the company GitLab — named
+    # it twice, and docker refused the box outright: "Duplicate mount point".
+    for key, _ in hosts.values():
+        if key and key not in keys:
+            keys.append(key)
     missing = [k for k in keys if k and not os.path.exists(k)]
     if missing:
         die("the '%s' box names ssh keys that do not exist: %s" % (name, ", ".join(missing)))

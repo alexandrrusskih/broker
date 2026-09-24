@@ -37,8 +37,9 @@ BOX_PRIVATE = (".local/share/opencode/opencode.db",)
 
 # It writes beside that database — caches, checked-out repositories, logs — and
 # the directory holding it is created by the container as root when the clone
-# above is mounted. Claim it first, so it belongs to the user who runs here.
-BOX_WRITABLE = ("~/.local", "~/.local/share/opencode")
+# above is mounted. Cluster mounts below ~/.cache create that parent as root
+# too. Claim both parents first, so they belong to the user who runs here.
+BOX_WRITABLE = ("~/.local", "~/.local/share/opencode", "~/.cache")
 
 # Folded back on the way out, and this is the only safe way to do it.
 #

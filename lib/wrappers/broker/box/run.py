@@ -839,6 +839,19 @@ def _through_terminal(cmd):
                 if typed:
                     os.write(master, typed)
             if child.poll() is not None and master not in readable:
+                # It is gone, but the terminal may still hold the last of what
+                # it wrote — the id among it. Drain to the end rather than stop
+                # here: stopping here worked about one time in three, which is
+                # the worst way for a thing to work.
+                while True:
+                    try:
+                        rest = os.read(master, 65536)
+                    except OSError:
+                        break
+                    if not rest:
+                        break
+                    os.write(sys.stdout.fileno(), rest)
+                    tail = (tail + rest)[-65536:]
                 break
     finally:
         try:

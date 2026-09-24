@@ -894,6 +894,42 @@ def _session_from_argv(provider, argv):
     return None
 
 
+def _last_words(printed, keep=220):
+    """The last of what the harness wrote, shown again where it will stay.
+
+    It says its piece on the way out — the session id among it — and a
+    full-screen interface writes that on the alternate screen. Putting the old
+    screen back takes those words with it, so the person is left at a bare
+    prompt assuming the box ate them. It did not: they were read, which is how
+    the id is known at all.
+
+    No attempt to understand them: the last couple of hundred characters, with
+    the drawing stripped out. Whatever it said, it is said again.
+    """
+    if not printed:
+        return None
+    text = re.sub(rb"\x1b[\[\]][0-9;?=<>]*[a-zA-Z\\]?|\x1b[()][B0]|[\x00-\x08\x0b-\x1f\x7f]",
+                  b" ", printed).decode("utf-8", "replace")
+    # A drawn screen is mostly padding and animation. The spinner is the worst
+    # of it: braille frames redrawn twenty times a second, so the last two
+    # hundred characters of a live screen are "spinner, name, spinner, name"
+    # and nothing else. Out it goes, along with what it was spinning beside.
+    text = re.sub(r"[\u2800-\u28ff]", " ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    # The spinner sat beside a word — the box name, usually — and stripping the
+    # braille leaves that word repeated across the whole line. Collapse a word
+    # said twice in a row into one.
+    text = re.sub(r"\b(\S+)( \1\b)+", r"\1", text)
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        # Redrawn frames arrive as the same line over and over.
+        if line and line != (lines[-1] if lines else None):
+            lines.append(line)
+    words = "\n".join(lines)
+    return words[-keep:].strip() or None
+
+
 SAID_ID = re.compile(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -1387,6 +1423,19 @@ def exec_box(provider, name, argv, env, account=None):
                 sys.stdout.flush()
             except (OSError, ValueError):
                 pass
+
+    # What the harness said last, shown again where it will stay.
+    #
+    # It says its piece on the way out — the session id among it — and on a
+    # full-screen interface that piece is written on the alternate screen. The
+    # reset below puts the old screen back and takes those words with it, so
+    # the person sees a bare prompt and assumes the box ate them. It did not:
+    # they were read, which is how the id is known at all. So they are printed
+    # again, in the ordinary terminal, above the line about coming back.
+    said = _last_words(printed)
+    if said:
+        sys.stdout.write("\n" + said + "\n")
+        sys.stdout.flush()
 
     note = _exit_note(provider, session, workdir, env)
     if note:

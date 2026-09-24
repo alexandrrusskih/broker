@@ -670,60 +670,6 @@ def _pin_session(provider, argv):
     return chosen, [flag[0], flag[1] % chosen, *argv]
 
 
-def _last_session(provider, workdir, env=None, since=0):
-    """The session just written, as this harness records them.
-
-    `since` is when the box started. Only claude files its sessions under the
-    working directory; codex and agy keep one pile each, so without it the
-    newest file could belong to a run in another window entirely.
-    """
-    pattern = getattr(provider, "SESSION_GLOB", None)
-    if not pattern:
-        return None
-    import glob as globmodule
-
-    home_env = getattr(provider, "HOME_ENV", None)
-    fields = {
-        "key": workdir.replace(os.sep, "-"),
-        "home": home_dir(),
-        # Where this run's own settings live: a per-account profile, or the
-        # harness's usual directory when nothing was pointed elsewhere.
-        "config": (env or {}).get(home_env) if home_env and home_env != "HOME" else None,
-    }
-    if fields["config"] is None:
-        fields["config"] = expand(getattr(provider, "CANONICAL_HOME", "~"))
-
-    every = globmodule.glob(pattern % fields)
-    # Born during this run, rather than merely touched by it. A session file is
-    # created once and written to for as long as the conversation lasts, so on a
-    # machine where a dozen windows share one directory, "created since the box
-    # started" identifies this box's own session and "modified" identifies
-    # whoever typed last. One harness keeps five hundred of these in a single
-    # directory, with nothing separating projects at all.
-    born = [f for f in every if _created(f) >= since]
-    if len(born) == 1:
-        return _session_id(born[0])
-    # Several, which is the ordinary case here: a run spawns helpers and each
-    # files its own. Name them ALL, newest first — the id is the only way back
-    # into a conversation, the harness prints it on a screen that is wiped the
-    # moment it exits, and Ctrl-C takes even that. A list to pick from is worth
-    # a great deal more than the silence this used to keep.
-    if len(born) > 1:
-        return [_session_id(f) for f in sorted(born, key=os.path.getmtime, reverse=True)]
-    found = [f for f in every if os.path.getmtime(f) >= since]
-    if not found:
-        return None
-    # More than one session was written while this box ran, so the newest is
-    # only a guess — and on this machine a wrong guess is the normal case:
-    # every window open on the same project files its sessions in the same
-    # directory, and they all write constantly. A line that names a stranger's
-    # conversation is worse than no line: it looks exactly like the right
-    # answer. Say nothing instead, and let the harness's own line stand.
-    if len(found) > 1:
-        return [_session_id(f) for f in sorted(found, key=os.path.getmtime, reverse=True)]
-    return _session_id(max(found, key=lambda f: os.path.getmtime(f)))
-
-
 def _created(path):
     """When this file came into being, where the filesystem records it."""
     stat = os.stat(path)
@@ -960,11 +906,14 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None, sessi
     all reach one pile of sessions — which is the normal arrangement — the
     broker picks an account by itself and the line stays clean.
     """
-    session = session or _last_session(provider, workdir, env, since)
-    # Not knowing which session this was is not a reason to leave someone
-    # without the box. The harness prints its own id as it exits, one line
-    # above this one; point at that rather than invent one.
     form = getattr(provider, "SESSION_RESUME", "--resume %s")
+    if not session:
+        # It did not say — killed before it could, most likely. The way back is
+        # the harness's own picker, which knows; an id made up out here would
+        # look exactly like an answer and be a stranger's conversation.
+        return ("\nThis run did not name its session. To come back into this box:"
+                "\n  %s %s --box %s\n"
+                % (provider.BIN, getattr(provider, "SESSION_PICK", "resume"), name))
     if isinstance(session, (list, tuple)):
         # More than one was written. Every id, newest first — a guess would be
         # worse than a list, and no list at all is worst of them all: the only
@@ -1347,9 +1296,13 @@ def exec_box(provider, name, argv, env, account=None):
     # another window's — better than any guess made from file times.
     # What the harness said, in its own words, beats anything worked out from
     # file times in a directory every window writes into.
-    session = (pinned
-               or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None))
-               or _last_session(provider, workdir, env, started))
+    # Only what the harness itself named. There used to be a fallback that
+    # worked the id out from file times, and it was worse than nothing: every
+    # window on this machine writes its sessions into one directory, so the
+    # "newest file" belongs to whoever typed last. Two boxes started together
+    # were handed the same id, and it belonged to neither. A printed id has to
+    # mean something; when there is none, say so.
+    session = pinned or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None))
     _remember(provider, name, workdir, session, account, status)
     if session is None:
         session = _session_from_store(provider, name, started)

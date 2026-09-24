@@ -67,6 +67,9 @@ SESSION_ID_FLAG = ("--session-id", "%s")
 # choose then, not ours. `-r` and `--continue` may also come with nothing at
 # all, which opens a picker — the id is unknowable until it closes, and the box
 # falls back to reading the directory.
+# Without an id it opens the picker.
+SESSION_PICK = "--resume"
+
 SESSION_PICKERS = ("--resume", "-r", "--continue", "-c", "--session-id", "--from-pr")
 
 # An API key in the environment outranks the OAuth token, so a stray one would

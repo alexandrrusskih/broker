@@ -240,6 +240,48 @@ print(json.dumps([a for a in cmd if "glab" in a]))
   assert.deepEqual(JSON.parse(bare), [], "no key to that host, no credential");
 });
 
+test("the way back names the session the harness itself named", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project, { recursive: true });
+
+  const out = engine(`
+from broker import box
+from broker.box import run
+from broker.providers import codex
+print(run._resume_hint(codex, "demo", "${project}", {}, 0, None,
+                       "019efe7b-889a-72d3-8a7c-bfae7be3dacd"))
+`, { HOME: dir });
+
+  // Its own verb, and the id it printed — the line differs from the harness's
+  // own only by the box on the end, so that suffix can be typed onto it.
+  assert.match(out, /codex resume 019efe7b-889a-72d3-8a7c-bfae7be3dacd --box demo/);
+});
+
+test("a run that named no session says so, rather than inventing one", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const sessions = path.join(dir, ".claude", "projects", project.replace(/\//g, "-"));
+  await fs.mkdir(project, { recursive: true });
+  await fs.mkdir(sessions, { recursive: true });
+  // Somebody else's conversation, sitting in the same directory and newer than
+  // this run — which is the ordinary case: every window on a machine files its
+  // sessions here. This used to be picked up and printed as yours.
+  await fs.writeFile(path.join(sessions, "a-stranger.jsonl"), "{}\n");
+
+  const out = engine(`
+from broker import box
+from broker.box import run
+from broker.providers import claude
+claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
+print(run._resume_hint(claude, "demo", "${project}"))
+`, { HOME: dir });
+
+  assert.match(out, /did not name its session/);
+  assert.match(out, /claude --resume --box demo/);
+  assert.ok(!/a-stranger/.test(out), "no id is invented from whatever file is newest");
+});
+
 test("an undefined box names what is defined instead of failing blankly", async (t) => {
   const dir = await temp(t);
   const file = path.join(dir, "boxes.json");
@@ -546,93 +588,6 @@ print(json.dumps(box.command(claude, "demo",
     "a flag already typed is not added twice");
 });
 
-test("leaving a box says how to come back into it", async (t) => {
-  const dir = await temp(t);
-  const project = path.join(dir, "project");
-  const sessions = path.join(dir, ".claude", "projects", project.replace(/\//g, "-"));
-  await fs.mkdir(project, { recursive: true });
-  await fs.mkdir(sessions, { recursive: true });
-  await fs.writeFile(path.join(sessions, "only.jsonl"), "{}\n");
-
-  const out = engine(`
-from broker import box
-from broker.box import boxes, mcp, run
-from broker.providers import claude
-claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
-print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
-`, { HOME: dir });
-
-  // The harness prints its own resume line, and that one reopens the session on
-  // the HOST — a different world, which is not obvious until something behaves
-  // oddly. This one names the box.
-  assert.match(out, /claude --resume only --box demo/);
-
-  // With a second session written in the same window there is no way to tell
-  // which one was this box's — and this is the ORDINARY case here, because a
-  // run spawns helpers and each files its own. Naming one would be a coin
-  // toss; naming none leaves nothing at all, and the id is the only way back
-  // into a conversation: the harness prints it on a screen that is wiped as it
-  // exits, and Ctrl-C takes even that. So: all of them, newest first.
-  await fs.writeFile(path.join(sessions, "another.jsonl"), "{}\n");
-  const ambiguous = engine(`
-from broker import box
-from broker.box import boxes, mcp, run
-from broker.providers import claude
-claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
-print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
-`, { HOME: dir });
-  assert.match(ambiguous, /Sessions written by this run, newest first:/);
-  assert.match(ambiguous, /claude --resume another --box demo/);
-  assert.match(ambiguous, /claude --resume only --box demo/);
-});
-
-test("each harness is told to resume the way it spells it", async (t) => {
-  const dir = await temp(t);
-  const project = path.join(dir, "project");
-  await fs.mkdir(project, { recursive: true });
-  // codex keeps one pile per config directory, named by when the session
-  // started, with the id at the end.
-  const codexSessions = path.join(dir, "cfg", "sessions", "2026", "09", "20");
-  await fs.mkdir(codexSessions, { recursive: true });
-  await fs.writeFile(path.join(codexSessions,
-    "rollout-2026-09-20T10-00-00-019efe7b-889a-72d3-8a7c-bfae7be3dacd.jsonl"), "{}\n");
-
-  const out = engine(`
-from broker import box
-from broker.providers import codex
-codex.SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl"
-codex.SESSION_RESUME = "resume %s"
-print(box.run._resume_hint(codex, "demo", "${project}", {"CODEX_HOME": "${path.join(dir, "cfg")}"}) or "NONE")
-`, { HOME: dir });
-
-  // Its own verb, and the id taken off the end of a timestamped name.
-  assert.match(out, /codex resume 019efe7b-889a-72d3-8a7c-bfae7be3dacd --box demo/);
-});
-
-test("a session written before the box started is not mistaken for this one", async (t) => {
-  const dir = await temp(t);
-  const project = path.join(dir, "project");
-  const sessions = path.join(dir, ".claude", "projects", project.split(path.sep).join("-"));
-  await fs.mkdir(project, { recursive: true });
-  await fs.mkdir(sessions, { recursive: true });
-  await fs.writeFile(path.join(sessions, "earlier.jsonl"), "{}\n");
-
-  // Harnesses that keep one pile for every project would otherwise offer the
-  // newest file on the machine, which may belong to another window entirely.
-  const out = engine(`
-import time
-from broker import box
-from broker.providers import claude
-claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
-print(box.run._resume_hint(claude, "demo", "${project}", {}, time.time() + 60) or "NONE")
-`, { HOME: dir });
-  // The way back into the box is still worth saying; the id is not ours to
-  // guess, and the harness printed its own one line above.
-  assert.match(out, /claude --resume <the id printed above> --box demo/);
-  assert.ok(!/earlier/.test(out), "a session from before the box started is not offered");
-});
-
-
 test("the session a box offers to resume is its own, not the newest on the machine", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");
@@ -712,50 +667,6 @@ print(json.dumps(box.command(claude, "demo", {
   const stub = await fs.readFile(path.join(dir, ".config", "broker", "box", "stubs", "demo", "thing"), "utf8");
   assert.match(stub, /not in a box; use its MCP tools/);
   assert.match(stub, /exit 127/, "it fails like a missing command, but says why");
-});
-
-test("the resume line names an account only when the session would be lost without it", async (t) => {
-  const dir = await temp(t);
-  const project = path.join(dir, "project");
-  const sessions = path.join(dir, "cfg", "sessions", "2026", "09", "20");
-  await fs.mkdir(project, { recursive: true });
-  await fs.mkdir(sessions, { recursive: true });
-  // A profile that reaches the canonical pile through a link — the normal
-  // arrangement once the profiles share one set of databases and sessions.
-  await fs.mkdir(path.join(dir, "profile"), { recursive: true });
-  await fs.symlink(path.join(dir, "cfg", "sessions"), path.join(dir, "profile", "sessions"));
-  await fs.writeFile(path.join(sessions,
-    "rollout-2026-09-20T10-00-00-019efe7b-889a-72d3-8a7c-bfae7be3dacd.jsonl"), "{}\n");
-
-  const hint = (provider, account) => engine(`
-from broker import box
-from broker.providers import ${provider}
-${provider}.SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl" if "${provider}" == "codex" else "%(home)s/.claude/projects/%(key)s/*.jsonl"
-print(box.run._resume_hint(${provider}, "demo", "${project}", {"CODEX_HOME": "${path.join(dir, "cfg")}"}, 0, ${JSON.stringify(account)}) or "NONE")
-`, { HOME: dir });
-
-  // Sessions inside the profile: the broker moves to another account when one
-  // runs out of room, and an id recorded under the first is then not found.
-  assert.match(hint("codex", "sk"), /CODEX_ACCOUNT=sk codex resume .* --box demo/);
-
-  // Sessions reached through a link instead. Naming an account here says
-  // nothing that the line does not already say, and picking one is the
-  // broker's job to begin with.
-  const shared = engine(`
-from broker import box
-from broker.providers import codex
-codex.SESSION_GLOB = "%(config)s/sessions/*/*/*/rollout-*.jsonl"
-codex.CANONICAL_HOME = ${JSON.stringify(path.join(dir, "cfg"))}
-print(box.run._resume_hint(codex, "demo", ${JSON.stringify(project)},
-      {"CODEX_HOME": ${JSON.stringify(path.join(dir, "profile"))}}, 0, "sk") or "NONE")
-`, { HOME: dir });
-  assert.doesNotMatch(shared, /CODEX_ACCOUNT/);
-  assert.match(shared, /codex resume .* --box demo/);
-  // claude keeps its sessions outside any profile, so naming an account there
-  // would only be noise.
-  await fs.mkdir(path.join(dir, ".claude", "projects", project.split(path.sep).join("-")), { recursive: true });
-  await fs.writeFile(path.join(dir, ".claude", "projects", project.split(path.sep).join("-"), "s.jsonl"), "{}\n");
-  assert.doesNotMatch(hint("claude", "sk"), /CLAUDE_ACCOUNT/);
 });
 
 test("a box reaches shared directories through every profile, not just this run's", async (t) => {
@@ -1058,43 +969,6 @@ print(json.dumps({
   assert.equal(got.key_not_empty, true, "an empty key would rebuild the shared path");
   assert.equal(got.no_braces_left, true);
   assert.ok(got.plain.endsWith("/.cache/box/state"), "paths without the placeholder are untouched");
-});
-
-test("the session a box names is the one born while it ran", async (t) => {
-  const dir = await temp(t);
-  const project = path.join(dir, "project");
-  const sessions = path.join(dir, ".claude", "projects", project.replace(/\//g, "-"));
-  await fs.mkdir(project, { recursive: true });
-  await fs.mkdir(sessions, { recursive: true });
-
-  // A neighbour's conversation, started long ago and still being written —
-  // which is the normal state of a directory shared by a dozen windows. One
-  // harness keeps five hundred of these with nothing separating projects.
-  const theirs = path.join(sessions, "aaaaaaaa-1111-2222-3333-444444444444.jsonl");
-  await fs.writeFile(theirs, "{}\n");
-  await new Promise((r) => setTimeout(r, 1100));
-
-  // Ours: created after the box started. Theirs is touched a moment later, so
-  // by modification time it would win.
-  const ours = path.join(sessions, "bbbbbbbb-1111-2222-3333-444444444444.jsonl");
-  await fs.writeFile(ours, "{}\n");
-  // Taken from the filesystem rather than the clock: under a parallel test run
-  // the two drift apart, and this test is about which side of `started` each
-  // file was born on.
-  const born = await fs.stat(ours);
-  const started = (born.birthtimeMs || born.ctimeMs) / 1000 - 0.05;
-  await new Promise((r) => setTimeout(r, 50));
-  await fs.appendFile(theirs, "{}\n");
-
-  const out = engine(`
-from broker import box
-from broker.providers import claude
-claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
-print(box.run._resume_hint(claude, "demo", "${project}", {}, ${started}) or "NONE")
-`, { HOME: dir });
-
-  assert.match(out, /--resume bbbbbbbb-1111-2222-3333-444444444444 --box demo/);
-  assert.ok(!/aaaaaaaa/.test(out), "the neighbour typed last; that does not make it ours");
 });
 
 test("a box can run on another machine, and only its sources move", async (t) => {

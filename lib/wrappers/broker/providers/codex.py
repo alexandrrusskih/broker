@@ -89,6 +89,9 @@ BOX_SYNC = ()
 
 SESSION_RESUME = "resume %s"
 
+# And how to be shown the list, when this run did not name its own.
+SESSION_PICK = "resume"
+
 REAL_BINS = (
     os.path.expanduser("~/.codex/packages/standalone/current/bin/codex"),
     "/usr/local/lib/node_modules/@openai/codex/bin/codex.js",

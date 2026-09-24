@@ -88,6 +88,9 @@ BOX_SESSION_SHELL = (
 )
 
 SESSION_RESUME = "-s %s"
+# Continue, which is where its list lives.
+SESSION_PICK = "-c"
+
 SESSION_PICKERS = ("-s", "--session", "-c", "--continue")
 
 # Its own installation commands, which must reach the harness untouched.

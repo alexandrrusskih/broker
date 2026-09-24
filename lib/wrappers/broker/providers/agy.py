@@ -74,6 +74,9 @@ BOX_BLANK = ((os.path.join("~", ".gemini", "antigravity-cli", "mcp_oauth_tokens.
 # then, not ours to guess. This harness keeps every conversation it has ever
 # had in one directory — five hundred of them here, with nothing separating
 # projects — so guessing is the last resort, not the first.
+# Its own word for "show me the conversations".
+SESSION_PICK = "--continue"
+
 SESSION_PICKERS = ("--conversation", "--continue")
 MIRROR_HOME = True
 

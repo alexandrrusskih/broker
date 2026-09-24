@@ -876,6 +876,24 @@ def _through_terminal(cmd):
     return child.wait(), tail
 
 
+def _session_from_argv(provider, argv):
+    """The session named on the command line, when one was.
+
+    Resuming and then typing nothing leaves the harness with nothing to save,
+    so it names no session on the way out — correctly, it started none. But the
+    id is right there in what was typed, and coming back to it is exactly what
+    the person was in the middle of doing.
+    """
+    pickers = set(getattr(provider, "SESSION_PICKERS", ()) or ())
+    pickers.add(getattr(provider, "SESSION_PICK", "resume"))
+    wanted = False
+    for word in argv or ():
+        if wanted and SAID_ID.fullmatch(word.encode()):
+            return word
+        wanted = word in pickers
+    return None
+
+
 SAID_ID = re.compile(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -1330,7 +1348,9 @@ def exec_box(provider, name, argv, env, account=None):
     # "newest file" belongs to whoever typed last. Two boxes started together
     # were handed the same id, and it belonged to neither. A printed id has to
     # mean something; when there is none, say so.
-    session = pinned or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None))
+    session = (pinned
+               or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None))
+               or _session_from_argv(provider, argv))
     _remember(provider, name, workdir, session, account, status)
     if session is None:
         session = _session_from_store(provider, name, started)

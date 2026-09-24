@@ -282,6 +282,24 @@ print(run._resume_hint(claude, "demo", "${project}"))
   assert.ok(!/a-stranger/.test(out), "no id is invented from whatever file is newest");
 });
 
+test("resuming and typing nothing still gets you back to the same session", async (t) => {
+  const dir = await temp(t);
+  const out = engine(`
+from broker.box import run
+from broker.providers import codex, claude
+# The harness names no session on its way out — correctly, it started none:
+# nothing was typed, so there was nothing to save. The id was in the command.
+print(run._session_from_argv(codex, ["resume", "019efe7b-889a-72d3-8a7c-bfae7be3dacd"]))
+print(run._session_from_argv(claude, ["--resume", "019efe7b-889a-72d3-8a7c-bfae7be3dacd"]))
+print(run._session_from_argv(codex, ["exec", "hello"]))
+`, { HOME: dir });
+
+  const [fromCodex, fromClaude, fromPlainRun] = out.trim().split("\n");
+  assert.equal(fromCodex, "019efe7b-889a-72d3-8a7c-bfae7be3dacd");
+  assert.equal(fromClaude, "019efe7b-889a-72d3-8a7c-bfae7be3dacd");
+  assert.equal(fromPlainRun, "None", "a fresh run has no id to take from the command");
+});
+
 test("an undefined box names what is defined instead of failing blankly", async (t) => {
   const dir = await temp(t);
   const file = path.join(dir, "boxes.json");

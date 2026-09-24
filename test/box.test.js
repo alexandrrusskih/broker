@@ -160,6 +160,37 @@ print(json.dumps([m for m in cmd if ${JSON.stringify(key)} in m]))
   assert.equal(JSON.parse(out).length, 1, "one key, one mount");
 });
 
+test("the links to the machine's databases are taken out of a profile", async (t) => {
+  const dir = await temp(t);
+  const shared = path.join(dir, ".codex");
+  const profile = path.join(dir, ".codex-ar");
+  const databases = path.join(dir, "db", "w1");
+  await fs.mkdir(shared, { recursive: true });
+  await fs.mkdir(profile, { recursive: true });
+  await fs.writeFile(path.join(shared, "logs_2.sqlite"), "the machine's own");
+  // What the harness leaves behind on every start.
+  await fs.symlink(path.join(shared, "logs_2.sqlite"), path.join(profile, "logs_2.sqlite"));
+  // And something real, which is nobody's business to remove.
+  await fs.writeFile(path.join(profile, "state_5.sqlite"), "real file");
+
+  const out = engine(`
+import json, os
+from broker.providers import codex
+codex.CANONICAL_HOME = ${JSON.stringify(shared)}
+env = {"CODEX_HOME": ${JSON.stringify(profile)},
+       "CODEX_SQLITE_HOME": ${JSON.stringify(databases)}}
+codex.harness_env(env)
+print(json.dumps(sorted(os.listdir(${JSON.stringify(profile)}))))
+`, { BROKER_CONFIG_DIR: dir, HOME: dir });
+
+  // The link goes: it points at the database every other process on this
+  // machine has open, and a start is refused while any of them holds it.
+  // The real file stays: it is data, not a pointer at someone else's.
+  assert.deepEqual(JSON.parse(out), ["state_5.sqlite"]);
+  assert.equal(await fs.readFile(path.join(shared, "logs_2.sqlite"), "utf8"),
+    "the machine's own", "and the machine's own database is untouched");
+});
+
 test("an undefined box names what is defined instead of failing blankly", async (t) => {
   const dir = await temp(t);
   const file = path.join(dir, "boxes.json");
@@ -488,9 +519,11 @@ print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
   assert.match(out, /claude --resume only --box demo/);
 
   // With a second session written in the same window there is no way to tell
-  // which one was this box's, and the newest is a coin toss — on this machine
-  // a losing one, since every window open on a project writes here. Point at
-  // the id the harness itself just printed instead of naming a stranger's.
+  // which one was this box's — and this is the ORDINARY case here, because a
+  // run spawns helpers and each files its own. Naming one would be a coin
+  // toss; naming none leaves nothing at all, and the id is the only way back
+  // into a conversation: the harness prints it on a screen that is wiped as it
+  // exits, and Ctrl-C takes even that. So: all of them, newest first.
   await fs.writeFile(path.join(sessions, "another.jsonl"), "{}\n");
   const ambiguous = engine(`
 from broker import box
@@ -499,8 +532,9 @@ from broker.providers import claude
 claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
 print(box.run._resume_hint(claude, "demo", "${project}") or "NONE")
 `, { HOME: dir });
-  assert.match(ambiguous, /claude --resume <the id printed above> --box demo/);
-  assert.ok(!/only|another/.test(ambiguous), "no session is named when it cannot be known");
+  assert.match(ambiguous, /Sessions written by this run, newest first:/);
+  assert.match(ambiguous, /claude --resume another --box demo/);
+  assert.match(ambiguous, /claude --resume only --box demo/);
 });
 
 test("each harness is told to resume the way it spells it", async (t) => {

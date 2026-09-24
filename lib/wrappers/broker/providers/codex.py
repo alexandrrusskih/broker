@@ -317,6 +317,9 @@ SQLITE_BASE = "/Volumes/hdd/broker-box/codex-db"
 
 def harness_env(env):
     """Point this window's harness at its own databases."""
+    # The stale links go whatever else happens here: they are what stops a box
+    # from starting at all.
+    _unlink_shared_databases(env.get(HOME_ENV))
     # Not forced: someone who set it meant it.
     if env.get(SQLITE_ENV):
         return
@@ -333,6 +336,37 @@ def harness_env(env):
     if fresh:
         _seed_databases(own)
     env[SQLITE_ENV] = own
+
+
+def _unlink_shared_databases(home):
+    """Take the links to the machine-wide databases out of this profile.
+
+    The harness puts them there itself, every start: whatever CODEX_HOME says,
+    each database in it becomes a link back into the canonical directory. With
+    CODEX_SQLITE_HOME set the real files go elsewhere and the links are merely
+    stale — except they are not merely anything. One of them is the telemetry
+    database, and a start is REFUSED while another process holds a write lock
+    on it. On a machine with seven of these open, a box would sit at "model:
+    loading" until something let go, which is to say it would not start at all
+    — while a plain run on the host, already holding the file, started fine.
+    That reads as "the box is broken".
+
+    Only links, and only inside a profile: a real database here is someone's
+    data, and the canonical directory is not ours to prune.
+    """
+    import glob as globmodule
+
+    if not home:
+        return
+    home = os.path.realpath(os.path.expanduser(home))
+    if home == os.path.realpath(CANONICAL_HOME):
+        return
+    for path in globmodule.glob(os.path.join(home, "*.sqlite*")):
+        if os.path.islink(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 def _seed_databases(own):

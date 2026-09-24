@@ -665,6 +665,13 @@ def _last_session(provider, workdir, env=None, since=0):
     born = [f for f in every if _created(f) >= since]
     if len(born) == 1:
         return _session_id(born[0])
+    # Several, which is the ordinary case here: a run spawns helpers and each
+    # files its own. Name them ALL, newest first — the id is the only way back
+    # into a conversation, the harness prints it on a screen that is wiped the
+    # moment it exits, and Ctrl-C takes even that. A list to pick from is worth
+    # a great deal more than the silence this used to keep.
+    if len(born) > 1:
+        return [_session_id(f) for f in sorted(born, key=os.path.getmtime, reverse=True)]
     found = [f for f in every if os.path.getmtime(f) >= since]
     if not found:
         return None
@@ -675,7 +682,7 @@ def _last_session(provider, workdir, env=None, since=0):
     # conversation is worse than no line: it looks exactly like the right
     # answer. Say nothing instead, and let the harness's own line stand.
     if len(found) > 1:
-        return None
+        return [_session_id(f) for f in sorted(found, key=os.path.getmtime, reverse=True)]
     return _session_id(max(found, key=lambda f: os.path.getmtime(f)))
 
 
@@ -761,6 +768,33 @@ def _exit_note(provider, session, workdir, env=None):
         return None
 
 
+LOG = "sessions.log"
+
+
+def _remember(provider, name, workdir, session, account, status):
+    """Write down what was just run, so the way back survives anything.
+
+    The line a box prints on its way out is the only place the session id
+    appears — and it is printed by a program that has just been interrupted.
+    Ctrl-C, a killed container, a terminal closed by accident: the run ends,
+    the id goes with it, and what is left is a file among fourteen thousand
+    whose name nobody knows.
+
+    So it is also written here, one line per run, every run. Nothing clever:
+    the point is that it is on disk before anyone needs it.
+    """
+    line = "%s\t%s\t%s\t%s\t%s\texit %s\n" % (
+        time.strftime("%Y-%m-%d %H:%M:%S"), provider.NAME, name or "-",
+        workdir, session or "-", status)
+    path = os.path.join(config.CONFIG_DIR, LOG)
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with open(path, "a") as handle:
+            handle.write(line)
+    except OSError:
+        pass  # a missing note is not a reason to fail the run
+
+
 def _resume_hint(provider, name, workdir, env=None, since=0, account=None, session=None):
     """What to type to come back INTO this box, on the same account.
 
@@ -778,8 +812,20 @@ def _resume_hint(provider, name, workdir, env=None, since=0, account=None, sessi
     # Not knowing which session this was is not a reason to leave someone
     # without the box. The harness prints its own id as it exits, one line
     # above this one; point at that rather than invent one.
-    resume = (getattr(provider, "SESSION_RESUME", "--resume %s")
-              % (session or "<the id printed above>"))
+    form = getattr(provider, "SESSION_RESUME", "--resume %s")
+    if isinstance(session, (list, tuple)):
+        # More than one was written. Every id, newest first — a guess would be
+        # worse than a list, and no list at all is worst of them all: the only
+        # other copy is on a screen the harness has already wiped.
+        pin = ""
+        if (account and getattr(provider, "CREDENTIALS", "file") != "env"
+                and not _sessions_are_shared(provider, env)):
+            pin = "%s_ACCOUNT=%s " % (provider.NAME.upper(), account)
+        lines = ["\nSessions written by this run, newest first:"]
+        lines += ["  %s%s %s --box %s" % (pin, provider.BIN, form % one, name)
+                  for one in session]
+        return "\n".join(lines) + "\n"
+    resume = form % (session or "<the id printed above>")
     pin = ""
     if (account and getattr(provider, "CREDENTIALS", "file") != "env"
             and not _sessions_are_shared(provider, env)):
@@ -1141,6 +1187,7 @@ def exec_box(provider, name, argv, env, account=None):
         _restore_terminal(saved)
 
     session = pinned or _last_session(provider, workdir, env, started)
+    _remember(provider, name, workdir, session, account, status)
     if session is None:
         session = _session_from_store(provider, name, started)
     if session:

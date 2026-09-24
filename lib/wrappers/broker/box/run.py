@@ -1340,12 +1340,27 @@ def exec_box(provider, name, argv, env, account=None):
         # looks through every session it has to find the one named — thirteen
         # thousand of them here, which is seconds of silence. The line is what
         # the person is waiting for; the bookkeeping can happen behind it.
+        # Registered, not just printed: whatever finishes this process — a
+        # signal that got through, an error on the way out — the line still
+        # goes. It is the only place the id exists once the screen is gone.
+        import atexit
+
+        printed_once = []
+
+        def say(text):
+            if text and text not in printed_once:
+                printed_once.append(text)
+                try:
+                    sys.stdout.write(text)
+                    sys.stdout.flush()
+                except (OSError, ValueError):
+                    pass
+
         note = _exit_note(provider, session, workdir, env)
         if note:
             warn("the harness stopped with: %s" % " ".join(note.split()))
         hint = _resume_hint(provider, name, workdir, env, started, account, session)
-        if hint:
-            sys.stdout.write(hint)
-            sys.stdout.flush()
+        atexit.register(say, hint)
+        say(hint)
         _sync_back(provider, session, env, name)
     sys.exit(status)

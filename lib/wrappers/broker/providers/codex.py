@@ -405,37 +405,3 @@ def _seed_databases(own):
         except OSError:
             return  # an empty set still works, it is only slower
 
-
-def session_of_run(env, since):
-    """The id of the conversation THIS run had, from its own log database.
-
-    Every window on this machine files its sessions in one directory, so
-    "the newest file" names whoever typed last, not this box — which is why
-    the box used to print a list, or nothing. The log database is different:
-    since each window has its own, the last thread mentioned in it is this
-    window's, with nobody else writing there to confuse it.
-
-    `since` is when the run started: an id from before it belongs to an
-    earlier conversation in the same window, and naming that one would be the
-    same wrong answer in a smarter disguise.
-    """
-    import sqlite3
-
-    base = (env or {}).get(SQLITE_ENV)
-    if not base:
-        return None
-    path = os.path.join(base, "logs_2.sqlite")
-    if not os.path.exists(path):
-        return None
-    try:
-        db = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=2)
-        row = db.execute(
-            "select substr(feedback_log_body,"
-            "  instr(feedback_log_body, 'thread_id=') + 10, 36) "
-            "from logs where feedback_log_body like '%thread_id=%' and ts >= ? "
-            "order by id desc limit 1", (int(since),)).fetchone()
-        db.close()
-    except Exception:
-        return None
-    found = (row or [None])[0]
-    return found if found and len(found) == 36 else None

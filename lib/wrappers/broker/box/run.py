@@ -1348,6 +1348,11 @@ def exec_box(provider, name, argv, env, account=None):
     # "newest file" belongs to whoever typed last. Two boxes started together
     # were handed the same id, and it belonged to neither. A printed id has to
     # mean something; when there is none, say so.
+    # Two sources, both of them plain fact: what the harness printed about
+    # itself, and what was typed to start it. A third was tried — digging the
+    # thread id out of the harness's own log — and it came back with the middle
+    # of a sentence. Anything that has to be checked for being nonsense before
+    # it can be printed is not a source, it is a guess with paperwork.
     session = (pinned
                or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None))
                or _session_from_argv(provider, argv))

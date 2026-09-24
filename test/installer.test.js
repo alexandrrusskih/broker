@@ -39,11 +39,12 @@ test("upgrade changes the server only with --server; --all keeps its harness-upd
   const source = (await fs.readFile(path.join(root, "cli.js"), "utf8")).replace("main().catch", "globalThis.done = main().catch");
   for (const flags of [[], ["--all"], ["--server"], ["--all", "--server"]]) {
     const calls = [];
+    const output = [];
     const pkg = "/test/new checkout";
-    const cfg = { shims: ["codex"] };
+    const cfg = { shims: ["codex", "opencode"] };
     const context = {
       process: { argv: ["node", "cli.js", "upgrade", ...flags, "--from", pkg], execPath: "/test/node", stdout: { write() {} }, stderr: { write(s) { throw new Error(s); } }, exit() { assert.fail("unexpected exit"); } },
-      console: { log() {} },
+      console: { log(s) { output.push(s); }, error(s) { output.push(s); } },
       require(name) {
         if (name === "./lib/config") return { read: () => cfg };
         // DROP AFTER 2026-12 along with the module itself.
@@ -51,13 +52,16 @@ test("upgrade changes the server only with --server; --all keeps its harness-upd
         if (name === "./package.json") return { version: "test" };
         if (name === "child_process") return {
           execSync: (cmd) => calls.push([cmd]),
-          execFileSync: (cmd, args) => calls.push([cmd, ...args])
+          execFileSync: (cmd, args) => { calls.push([cmd, ...args]); return args[0] === "--version" ? Buffer.from(`${cmd} 1.2.3\n`) : undefined; }
         };
         if (name === "os") return { homedir: () => "/test/user" };
         if (name === "path") return path;
         if (name === "fs") return { existsSync: (p) => p === path.join(pkg, "lib", "service.js") };
         if (name === "./lib/source") return { sourcePackage: (_cfg, from) => { assert.equal(from, pkg); return pkg; } };
-        if (name === "./lib/wrap") return { WRAP: { codex: { cmd: "broker-cx", bin: "codex" } } };
+        if (name === "./lib/wrap") return { WRAP: {
+          codex: { cmd: "broker-cx", bin: "codex" },
+          opencode: { cmd: "broker-oc", bin: "opencode", updateCommand: "upgrade" }
+        } };
         if (name === "./lib/service") return { createServiceManager: () => ({ requireInstalled: async () => calls.push(["check-server-installed"]) }) };
         throw new Error(`unexpected module ${name}`);
       }
@@ -68,8 +72,14 @@ test("upgrade changes the server only with --server; --all keeps its harness-upd
     assert.equal(calls.some((c) => c[0] === "check-server-installed"), hasServer);
     assert.equal(calls.some((c) => c[0] === "/test/node"), hasServer);
     assert.equal(calls.some((c) => c[0] === "broker-cx" && c[1] === "update"), flags.includes("--all"));
+    assert.equal(calls.some((c) => c[0] === "broker-oc" && c[1] === "upgrade"), flags.includes("--all"));
+    assert.equal(calls.some((c) => c[0] === "broker-oc" && c[1] === "update"), false);
     if (hasServer) assert.deepEqual(calls.at(-1), ["/test/node", path.join(pkg, "cli.js"), "server", "install", "--no-ask", "--from", pkg]);
     assert.ok(calls.some((c) => c[0] === "bun" && c[1] === "install" && c[3] === pkg));
-    assert.ok(calls.some((c) => c[0] === "broker" && c[1] === "codex" && c[2] === "install"));
+    for (const name of ["codex", "opencode"]) {
+      assert.ok(calls.some((c) => c[0] === "broker" && c[1] === "install" && c[2] === name && c.includes("--quiet")));
+    }
+    assert.equal(output.some((line) => line.includes("undo the shim")), false);
+    if (flags.includes("--all")) assert.ok(output.some((line) => line.startsWith("opencode: broker-oc 1.2.3 →")));
   }
 });

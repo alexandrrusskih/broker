@@ -407,6 +407,12 @@ async function main() {
       const os = require("os");
       const pathMod = require("path");
       const fs = require("fs");
+      const conciseError = (error) => {
+        const lines = String(error.stderr || error.stdout || error.message || error)
+          .trim().split(/\r?\n/).filter(Boolean);
+        return lines.slice(-2).join(" | ") || `exit ${error.status ?? "unknown"}`;
+      };
+      let failures = 0;
       // git is the only source: the npm registry copy trails this repo, and
       // installing from it downgrades a working setup.
       const cfg = config.read();
@@ -431,12 +437,16 @@ async function main() {
         } catch (_e) {
           // not installed yet
         }
-        execFileSync(tool, ["install", "-g", pkg], { stdio: "inherit" });
+        try {
+          execFileSync(tool, ["install", "-g", pkg], { stdio: ["ignore", "pipe", "pipe"] });
+        } catch (error) {
+          throw new Error(`broker install via ${tool} failed: ${conciseError(error)}`);
+        }
         installed = true;
+        console.log(`broker: installed via ${tool} from ${pkg}`);
         break;
       }
       if (!installed) throw new Error("need bun or npm to install");
-      console.log(`installed from ${pkg}`);
 
       // The wrappers on disk carry a COPY of the engine, so a new CLI alone
       // changes nothing about what runs when you type `codex`. This used to be a
@@ -454,9 +464,11 @@ async function main() {
       );
       for (const name of installedProviders) {
         try {
-          execFileSync("broker", [name, "install", "--no-ask"], { stdio: "inherit" });
-        } catch (_e) {
-          console.log(`  could not refresh the ${name} wrapper — run 'broker ${name} install'`);
+          execFileSync("broker", ["install", name, "--no-ask", "--quiet"], { stdio: ["ignore", "pipe", "pipe"] });
+          if (!flags.all && !flags.harnesses) console.log(`${name} wrapper: ready`);
+        } catch (error) {
+          failures++;
+          console.error(`${name} wrapper: FAILED — ${conciseError(error)}`);
         }
       }
       if (!installedProviders.length) {
@@ -469,26 +481,47 @@ async function main() {
       if (flags.all || flags.harnesses) {
         for (const name of installedProviders) {
           const w = wrapTable[name];
-          console.log(`\n→ updating ${w.bin}...`);
-          try {
-            // Through the wrapper, so `update` reaches the real binary; then the
-            // shim goes back, because the updater writes its own launcher over it.
-            execFileSync(w.cmd, ["update"], { stdio: "inherit" });
-          } catch (_e) {
-            console.log(`  ${w.bin} update failed — run '${w.cmd} upgrade' to see why`);
+          const version = () => {
+            try {
+              return String(execFileSync(w.cmd, ["--version"], { stdio: ["ignore", "pipe", "pipe"] }) || "")
+                .trim().split(/\r?\n/)[0] || null;
+            } catch (_e) {
+              return null;
+            }
+          };
+          const before = version();
+          const native = shimCfg.shim_previous?.[name] || "";
+          const standaloneCodex = name === "codex" &&
+            native.startsWith(pathMod.join(os.homedir(), ".codex", "packages", "standalone") + pathMod.sep) &&
+            fs.existsSync(pathMod.join(os.homedir(), ".codex", "packages", "standalone", "auto-update-version"));
+          let updateFailed = false;
+          if (!standaloneCodex) {
+            try {
+              // Through the wrapper, so the update reaches the real binary; then the
+              // shim goes back, because the updater writes its own launcher over it.
+              execFileSync(w.cmd, [w.updateCommand || "update"], { stdio: ["ignore", "pipe", "pipe"] });
+            } catch (error) {
+              updateFailed = true;
+              failures++;
+              console.error(`${w.bin}: FAILED — ${conciseError(error)}`);
+            }
           }
           // An updater installs beside the old version and leaves the launcher
           // alone, so without this the update lands on disk and never runs.
           try {
-            const moved = require("./lib/shim").adoptNewestVersion(name);
-            if (moved) console.log(`  now running ${moved.version}`);
+            require("./lib/shim").adoptNewestVersion(name);
           } catch (_e) {
             // nothing to adopt, or not a harness that versions itself this way
           }
           try {
-            execFileSync("broker", [name, "install", "--no-ask"], { stdio: "inherit" });
-          } catch (_e) {
-            console.log(`  could not restore the ${name} shim — run 'broker ${name} install'`);
+            execFileSync("broker", ["install", name, "--no-ask", "--quiet"], { stdio: ["ignore", "pipe", "pipe"] });
+          } catch (error) {
+            failures++;
+            console.error(`${w.bin} shim: FAILED — ${conciseError(error)}`);
+          }
+          if (!updateFailed) {
+            const after = version();
+            console.log(`${w.bin}: ${standaloneCodex ? `${after || before || "installed"} (standalone auto-update)` : before && after ? `${before} → ${after}` : after || "updated"}`);
           }
         }
       }
@@ -520,6 +553,7 @@ async function main() {
         // Use the new source, not modules already loaded by this old CLI.
         execFileSync(process.execPath, [pathMod.join(pkg, "cli.js"), "server", "install", "--no-ask", "--from", pkg], { stdio: "inherit" });
       }
+      if (failures) process.exitCode = 1;
       break;
     }
     case "box": {

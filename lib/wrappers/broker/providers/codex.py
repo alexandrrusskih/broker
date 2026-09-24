@@ -60,13 +60,7 @@ BOX_SHARED = ("sessions",)
 # Nothing is lost by working on a clone, because the work itself is in the
 # session files, which stay shared. What the box adds is put back on the way
 # out by the harness's own command — see BOX_SYNC.
-# Nothing here any more: the databases are no longer shared to begin with —
-# each window has its own set, by way of CODEX_SQLITE_HOME below — so there is
-# nothing for a box to clone. Cloning them was the old answer to the same
-# problem and it cost what clones cost: a box's work went into a copy that died
-# with the container, and a file mounted over could not be renamed, so the
-# harness could not put a damaged one aside and refused to start at all.
-BOX_PRIVATE = ()
+BOX_PRIVATE = ("*.sqlite",)
 
 # Nothing is folded back on the way out, and that is deliberate.
 #
@@ -284,49 +278,3 @@ def session_error(path):
         message = ((payload.get("error") or {}).get("message") or "").strip()
         return message or None
     return None
-
-# Where the databases go: one set per WINDOW, rather than one set for the
-# machine.
-#
-# They are SQLite, and this harness has no BUSY retry: the log writer flushes
-# every two seconds holding the write lock, and a second process arriving in
-# that moment either hangs or is told the database is locked. Worse, a start
-# is REFUSED outright when anything holds a write lock on the log database —
-# the telemetry file gates the boot. Eight windows open on this machine and a
-# day of it ends the way this one did: "database disk image is malformed", a
-# state file that is no longer a database at all, and every session in the
-# picker gone.
-#
-# It is not ours to fix and it is known upstream (openai/codex #20213, #35555,
-# #30105, #44772); what everyone is told to do is give each instance its own.
-# CODEX_HOME alone does not: the harness symlinks every database back into the
-# canonical ~/.codex whatever that variable says — measured here, by putting
-# real empty files there and watching one run replace them with links again.
-# CODEX_SQLITE_HOME is the one it honours.
-#
-# What stays shared is what matters: the sessions themselves, the settings, the
-# accounts. The databases are an index over those files — a fresh one filled
-# itself from all 13,774 rollouts on first start, so nothing is lost by a
-# window starting with none.
-#
-# On the big disk, not in the home: a filled index is some 600 MB, and there
-# are a dozen windows.
-SQLITE_ENV = "CODEX_SQLITE_HOME"
-SQLITE_BASE = "/Volumes/hdd/broker-box/codex-db"
-
-
-def harness_env(env):
-    """Point this window's harness at its own databases."""
-    # Not forced: someone who set it meant it.
-    if env.get(SQLITE_ENV):
-        return
-    from ..box.paths import window_key
-
-    base = SQLITE_BASE if os.path.isdir(os.path.dirname(SQLITE_BASE)) else \
-        os.path.expanduser("~/.cache/broker/codex-db")
-    own = os.path.join(base, window_key())
-    try:
-        os.makedirs(own, mode=0o700, exist_ok=True)
-    except OSError:
-        return  # the shared ones are worse, but they are better than no start
-    env[SQLITE_ENV] = own

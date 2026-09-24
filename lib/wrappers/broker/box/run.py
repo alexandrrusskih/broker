@@ -307,23 +307,6 @@ def command(provider, name, profile, argv, env):
             blank = blank or _empty_file()
             cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (blank, host)]
 
-    # This window's own databases, at the same path inside as outside. The
-    # harness is pointed at them by its own variable (see the provider), so a
-    # box needs nothing else — no clone of each file, no mount per file. That
-    # matters beyond tidiness: a database mounted AS A FILE cannot be renamed,
-    # and this harness recovers from a damaged one by moving it aside. In a box
-    # that move failed with "Resource busy" and the start was refused outright,
-    # over a file it was perfectly willing to rebuild.
-    sqlite_env = getattr(provider, "SQLITE_ENV", None)
-    own_databases = (env or {}).get(sqlite_env) if sqlite_env else None
-    if own_databases:
-        try:
-            os.makedirs(own_databases, mode=0o700, exist_ok=True)
-        except OSError as exc:
-            warn("could not make %s for the box (%s)" % (own_databases, exc))
-        else:
-            cmd += _mount(own_databases, "rw")
-
     # Files a box gets EMPTY and keeps to itself: it may write them, and what
     # it writes stays inside. Not a secret it must not see (that is above, and
     # is read-only) — a file this harness rewrites WHOLE, dropping whatever it

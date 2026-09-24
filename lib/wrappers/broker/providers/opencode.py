@@ -89,6 +89,9 @@ BOX_SESSION_SHELL = (
 
 SESSION_RESUME = "-s %s"
 # Continue, which is where its list lives.
+# Not a uuid: its own prefix, then letters and digits.
+SESSION_ID_RE = r"ses_[A-Za-z0-9]{10,}"
+
 SESSION_PICK = "-c"
 
 SESSION_PICKERS = ("-s", "--session", "-c", "--continue")

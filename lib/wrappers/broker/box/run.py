@@ -888,7 +888,7 @@ def _session_from_argv(provider, argv):
     pickers.add(getattr(provider, "SESSION_PICK", "resume"))
     wanted = False
     for word in argv or ():
-        if wanted and SAID_ID.fullmatch(word.encode()):
+        if wanted and _id_shape(provider).fullmatch(word.encode()):
             return word
         wanted = word in pickers
     return None
@@ -930,10 +930,21 @@ def _last_words(printed, keep=220):
     return words[-keep:].strip() or None
 
 
+# How a session id looks. Most harnesses use a uuid; opencode spells its own
+# "ses_" and then letters and digits, so the shape is asked of the provider
+# rather than assumed — an id that does not match is an id that is never found,
+# and the person is told their session has no name.
 SAID_ID = re.compile(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
-def _session_it_named(printed, pattern=None):
+def _id_shape(provider):
+    own = getattr(provider, "SESSION_ID_RE", None)
+    if not own:
+        return SAID_ID
+    return re.compile(own.encode() if isinstance(own, str) else own)
+
+
+def _session_it_named(printed, pattern=None, provider=None):
     """The session id the harness itself printed, if it did.
 
     Its own resume line is what is wanted, so that is looked for first; a bare
@@ -947,7 +958,7 @@ def _session_it_named(printed, pattern=None):
         named = re.findall(pattern.encode() if isinstance(pattern, str) else pattern, text)
         if named:
             return named[-1].decode()
-    found = SAID_ID.findall(text)
+    found = _id_shape(provider).findall(text) if provider else SAID_ID.findall(text)
     return found[-1].decode() if found else None
 
 
@@ -1390,7 +1401,7 @@ def exec_box(provider, name, argv, env, account=None):
     # of a sentence. Anything that has to be checked for being nonsense before
     # it can be printed is not a source, it is a guess with paperwork.
     session = (pinned
-               or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None))
+               or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None), provider)
                or _session_from_argv(provider, argv))
     _remember(provider, name, workdir, session, account, status)
     if session is None:

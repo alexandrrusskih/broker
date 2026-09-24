@@ -1334,33 +1334,41 @@ def exec_box(provider, name, argv, env, account=None):
     _remember(provider, name, workdir, session, account, status)
     if session is None:
         session = _session_from_store(provider, name, started)
+    # Said whatever happened, including when there is no id to say: a box that
+    # goes quiet leaves someone staring at a prompt wondering what became of an
+    # hour's conversation. Without an id the line points at the harness's own
+    # picker, which is a poorer answer than the id and a far better one than
+    # silence. This used to sit behind "if we know the session", so the very
+    # case that needed saying out loud was the one that said nothing.
+    #
+    # Printed BEFORE the session is folded back: folding asks the harness to
+    # re-read its own session, and it looks through every session it has to
+    # find the one named — thirteen thousand of them here, which is seconds of
+    # silence. The line is what the person is waiting for; the bookkeeping can
+    # happen behind it.
+    #
+    # Registered as well as printed: whatever finishes this process — a signal
+    # that got through, an error on the way out — the line still goes. It is
+    # the only place the id exists once the screen has been restored.
+    import atexit
+
+    printed_once = []
+
+    def say(text):
+        if text and text not in printed_once:
+            printed_once.append(text)
+            try:
+                sys.stdout.write(text)
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
+
+    note = _exit_note(provider, session, workdir, env)
+    if note:
+        warn("the harness stopped with: %s" % " ".join(note.split()))
+    hint = _resume_hint(provider, name, workdir, env, started, account, session)
+    atexit.register(say, hint)
+    say(hint)
     if session:
-        # Printed BEFORE the session is folded back, and not only after a clean
-        # exit. Folding asks the harness to re-read its own session, and it
-        # looks through every session it has to find the one named — thirteen
-        # thousand of them here, which is seconds of silence. The line is what
-        # the person is waiting for; the bookkeeping can happen behind it.
-        # Registered, not just printed: whatever finishes this process — a
-        # signal that got through, an error on the way out — the line still
-        # goes. It is the only place the id exists once the screen is gone.
-        import atexit
-
-        printed_once = []
-
-        def say(text):
-            if text and text not in printed_once:
-                printed_once.append(text)
-                try:
-                    sys.stdout.write(text)
-                    sys.stdout.flush()
-                except (OSError, ValueError):
-                    pass
-
-        note = _exit_note(provider, session, workdir, env)
-        if note:
-            warn("the harness stopped with: %s" % " ".join(note.split()))
-        hint = _resume_hint(provider, name, workdir, env, started, account, session)
-        atexit.register(say, hint)
-        say(hint)
         _sync_back(provider, session, env, name)
     sys.exit(status)

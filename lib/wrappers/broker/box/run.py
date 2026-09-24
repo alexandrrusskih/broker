@@ -1186,7 +1186,10 @@ def exec_box(provider, name, argv, env, account=None):
         # another window — the pane is usable again from this line on.
         _restore_terminal(saved)
 
-    session = pinned or _last_session(provider, workdir, env, started)
+    # What the harness itself recorded, where it could not be confused with
+    # another window's — better than any guess made from file times.
+    own = getattr(provider, "session_of_run", None)
+    session = pinned or (own and own(env, started)) or _last_session(provider, workdir, env, started)
     _remember(provider, name, workdir, session, account, status)
     if session is None:
         session = _session_from_store(provider, name, started)

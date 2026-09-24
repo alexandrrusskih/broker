@@ -4,6 +4,8 @@ import json
 import os
 import re
 import shlex
+import pty
+import select
 import shutil
 import signal
 import subprocess
@@ -771,6 +773,120 @@ def _exit_note(provider, session, workdir, env=None):
 LOG = "sessions.log"
 
 
+def _through_terminal(cmd):
+    """Run the box with its terminal intact, and read what goes past.
+
+    The harness names the session itself as it exits — that line is the one
+    true answer to "which conversation was this", and everything else the box
+    has tried was a guess about file times in a directory every window writes
+    to. So the line is read rather than reconstructed.
+
+    Reading it must cost the terminal nothing: a full-screen interface needs a
+    real tty on the other side, with its size, its signals and its resizes. So
+    this is a pty in the middle, copying bytes both ways and keeping only the
+    tail to search afterwards.
+
+    Returns (exit status, what the harness printed).
+    """
+    import fcntl
+    import signal
+    import struct
+    import termios
+    import tty
+
+    master, slave = pty.openpty()
+    try:
+        size = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, size)
+    except (OSError, ValueError):
+        pass
+    saved = None
+    try:
+        saved = termios.tcgetattr(sys.stdin.fileno())
+        tty.setraw(sys.stdin.fileno())
+    except (termios.error, ValueError, OSError):
+        saved = None
+
+    def resized(*_):
+        try:
+            fcntl.ioctl(slave, termios.TIOCSWINSZ,
+                        fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8))
+        except (OSError, ValueError):
+            pass
+
+    try:
+        previous = signal.signal(signal.SIGWINCH, resized)
+    except ValueError:
+        previous = None
+
+    child = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave,
+                             close_fds=True)
+    os.close(slave)
+    tail = b""
+    try:
+        while True:
+            try:
+                readable, _, _ = select.select([master, sys.stdin], [], [], 0.2)
+            except (OSError, ValueError):
+                break
+            if master in readable:
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                os.write(sys.stdout.fileno(), chunk)
+                # Enough to hold the last screen, not enough to hold a session.
+                tail = (tail + chunk)[-65536:]
+            if sys.stdin in readable:
+                try:
+                    typed = os.read(sys.stdin.fileno(), 65536)
+                except OSError:
+                    typed = b""
+                if typed:
+                    os.write(master, typed)
+            if child.poll() is not None and master not in readable:
+                break
+    finally:
+        try:
+            os.close(master)
+        except OSError:
+            pass
+        if saved is not None:
+            try:
+                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)
+            except (termios.error, ValueError, OSError):
+                pass
+        if previous is not None:
+            try:
+                signal.signal(signal.SIGWINCH, previous)
+            except ValueError:
+                pass
+    return child.wait(), tail
+
+
+SAID_ID = re.compile(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _session_it_named(printed, pattern=None):
+    """The session id the harness itself printed, if it did.
+
+    Its own resume line is what is wanted, so that is looked for first; a bare
+    id anywhere in the last screen is the fallback. The LAST one: a screen can
+    carry older ids in the scrollback of what it was doing.
+    """
+    if not printed:
+        return None
+    text = re.sub(rb"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*(\x07|\x1b\\)", b"", printed)
+    if pattern:
+        named = re.findall(pattern.encode() if isinstance(pattern, str) else pattern, text)
+        if named:
+            return named[-1].decode()
+    found = SAID_ID.findall(text)
+    return found[-1].decode() if found else None
+
+
 def _remember(provider, name, workdir, session, account, status):
     """Write down what was just run, so the way back survives anything.
 
@@ -1170,9 +1286,14 @@ def exec_box(provider, name, argv, env, account=None):
     saved = _terminal_state()
     _guard_terminal(saved)
     status = 0
+    printed = b""
     try:
-        finished = subprocess.run(cmd)
-        status = finished.returncode
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            # Watched, so the id the harness names on its way out can be read
+            # rather than guessed at afterwards.
+            status, printed = _through_terminal(cmd)
+        else:
+            status = subprocess.run(cmd).returncode
     except KeyboardInterrupt:
         # Ctrl-C reaches this process as well as the container. The harness
         # inside still exits properly and its session file is complete, so the
@@ -1188,8 +1309,11 @@ def exec_box(provider, name, argv, env, account=None):
 
     # What the harness itself recorded, where it could not be confused with
     # another window's — better than any guess made from file times.
-    own = getattr(provider, "session_of_run", None)
-    session = pinned or (own and own(env, started)) or _last_session(provider, workdir, env, started)
+    # What the harness said, in its own words, beats anything worked out from
+    # file times in a directory every window writes into.
+    session = (pinned
+               or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None))
+               or _last_session(provider, workdir, env, started))
     _remember(provider, name, workdir, session, account, status)
     if session is None:
         session = _session_from_store(provider, name, started)

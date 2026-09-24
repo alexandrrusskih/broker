@@ -195,7 +195,11 @@ test("a box that is given a GitLab token can prove it is logged in", async (t) =
   const dir = await temp(t);
   const project = path.join(dir, "project");
   await fs.mkdir(project);
-  await fs.writeFile(path.join(dir, "boxes.json"), JSON.stringify({ demo: { rw: [project] } }));
+  await fs.writeFile(path.join(dir, "key"), "private key");
+  await fs.writeFile(path.join(dir, "boxes.json"), JSON.stringify({
+    demo: { rw: [project], ssh: { hosts: { "git.example.com": path.join(dir, "key") } } },
+    plain: { rw: [project] },
+  }));
 
   const out = engine(`
 import json
@@ -219,6 +223,21 @@ print(json.dumps({"mount": found[0] if found else None,
   assert.ok(got.mount, "the box is told which host it is logged in to");
   assert.match(got.content, /git\.example\.com/);
   assert.match(got.content, /token: glpat-secret/);
+
+  // And a box that was NOT given a key to that host gets nothing, however the
+  // token happens to be sitting in the environment — it reaches every box,
+  // because the environment does.
+  const bare = engine(`
+import json
+from broker import box
+from broker.box import boxes
+from broker.providers import claude
+box.boxes.PATH = ${JSON.stringify(path.join(dir, "boxes.json"))}
+cmd = box.command(claude, "plain", boxes.profiles()["plain"], [],
+                  {"GITLAB_TOKEN": "glpat-secret", "GITLAB_HOST": "git.example.com"})
+print(json.dumps([a for a in cmd if "glab" in a]))
+`, { BROKER_CONFIG_DIR: dir, HOME: dir });
+  assert.deepEqual(JSON.parse(bare), [], "no key to that host, no credential");
 });
 
 test("an undefined box names what is defined instead of failing blankly", async (t) => {

@@ -339,9 +339,14 @@ def command(provider, name, profile, argv, env):
     # The file says what the Keychain would have said. Written per box, 0600,
     # from the token already in this environment — nothing new is stored that
     # was not being passed in anyway.
+    # ...and only for a box that was given the key to that host. A token in the
+    # environment reaches every box, because the environment does; the boxes
+    # that are meant to push there are the ones this file names. Saying it any
+    # other way would hand a credential to boxes that were never asked to have
+    # one.
     token = (env or {}).get("GITLAB_TOKEN")
     host = (env or {}).get("GITLAB_HOST")
-    if token and host:
+    if token and host and host in ((profile.get("ssh") or {}).get("hosts") or {}):
         where = os.path.join(config.CONFIG_DIR, "box", "glab",
                              re.sub(r"[^A-Za-z0-9_.-]", "-", name), "config.yml")
         try:

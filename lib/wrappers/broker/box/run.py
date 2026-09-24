@@ -801,6 +801,16 @@ def _through_terminal(cmd):
     except ValueError:
         previous = None
 
+    # Ctrl-C belongs to whatever is inside: the terminal is raw, so it travels
+    # as a byte down the pty and the harness decides what to do with it. This
+    # process must not also die of it — someone holding the key down sends
+    # several, and the ones after the first would kill the very thing that is
+    # about to print how to come back. Seen exactly that: the harness named its
+    # session, and nothing was left on the screen to say so.
+    try:
+        interrupt = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except ValueError:
+        interrupt = None
     child = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave,
                              close_fds=True)
     os.close(slave)
@@ -843,6 +853,11 @@ def _through_terminal(cmd):
         if previous is not None:
             try:
                 signal.signal(signal.SIGWINCH, previous)
+            except ValueError:
+                pass
+        if interrupt is not None:
+            try:
+                signal.signal(signal.SIGINT, interrupt)
             except ValueError:
                 pass
     return child.wait(), tail

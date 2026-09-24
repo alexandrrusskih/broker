@@ -326,6 +326,37 @@ def command(provider, name, profile, argv, env):
         else:
             cmd += _mount(own_databases, "rw")
 
+    # GitLab, which is authenticated by a variable everywhere except in its own
+    # status command.
+    #
+    # The tool reads GITLAB_TOKEN happily — an API call from inside a box works
+    # — but `glab auth status` answers "has not been authenticated", because it
+    # looks for a host it knows, and on this machine that knowledge lives in
+    # the Keychain, which does not cross into a container. So anything that
+    # checks before it acts stops there and says to log in, over a login that
+    # is already good.
+    #
+    # The file says what the Keychain would have said. Written per box, 0600,
+    # from the token already in this environment — nothing new is stored that
+    # was not being passed in anyway.
+    token = (env or {}).get("GITLAB_TOKEN")
+    host = (env or {}).get("GITLAB_HOST")
+    if token and host:
+        where = os.path.join(config.CONFIG_DIR, "box", "glab",
+                             re.sub(r"[^A-Za-z0-9_.-]", "-", name), "config.yml")
+        try:
+            os.makedirs(os.path.dirname(where), mode=0o700, exist_ok=True)
+            with open(where, "w") as handle:
+                handle.write("hosts:\n  %s:\n    token: %s\n"
+                             "    api_protocol: https\n    git_protocol: ssh\n"
+                             % (host, token))
+            os.chmod(where, 0o600)
+        except OSError as exc:
+            warn("could not write the glab config for the box (%s)" % exc)
+        else:
+            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly"
+                    % (where, os.path.join(home, ".config", "glab-cli", "config.yml"))]
+
     # Files a box gets EMPTY and keeps to itself: it may write them, and what
     # it writes stays inside. Not a secret it must not see (that is above, and
     # is read-only) — a file this harness rewrites WHOLE, dropping whatever it

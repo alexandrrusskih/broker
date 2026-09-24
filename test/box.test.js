@@ -191,6 +191,36 @@ print(json.dumps(sorted(os.listdir(${JSON.stringify(profile)}))))
     "the machine's own", "and the machine's own database is untouched");
 });
 
+test("a box that is given a GitLab token can prove it is logged in", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+  await fs.writeFile(path.join(dir, "boxes.json"), JSON.stringify({ demo: { rw: [project] } }));
+
+  const out = engine(`
+import json
+from broker import box
+from broker.box import boxes
+from broker.providers import claude
+box.boxes.PATH = ${JSON.stringify(path.join(dir, "boxes.json"))}
+cmd = box.command(claude, "demo", boxes.profiles()["demo"], [],
+                  {"GITLAB_TOKEN": "glpat-secret", "GITLAB_HOST": "git.example.com"})
+mounts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--mount"]
+found = [m for m in mounts if "glab-cli/config.yml" in m]
+print(json.dumps({"mount": found[0] if found else None,
+                  "content": open(found[0].split("source=")[1].split(",")[0]).read() if found else ""}))
+`, { BROKER_CONFIG_DIR: dir, HOME: dir });
+
+  const got = JSON.parse(out);
+  // The tool reads the token from the environment and works — but its own
+  // status command looks for a known host, which on this machine is in the
+  // Keychain and does not cross into a container. Anything that checks before
+  // it acts stops on "has not been authenticated" over a login that is fine.
+  assert.ok(got.mount, "the box is told which host it is logged in to");
+  assert.match(got.content, /git\.example\.com/);
+  assert.match(got.content, /token: glpat-secret/);
+});
+
 test("an undefined box names what is defined instead of failing blankly", async (t) => {
   const dir = await temp(t);
   const file = path.join(dir, "boxes.json");

@@ -234,6 +234,13 @@ def command(provider, name, profile, argv, env):
     # and refuses to run at all. Read-only mounts land on top of this.
     cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
             % (os.path.join(home, ".config"), os.getuid(), os.getgid())]
+    # Bun's shared cache is mounted at ~/.bun/install/cache. Without these
+    # parent tmpfs mounts Docker creates ~/.bun and ~/.bun/install as root,
+    # leaving `bun link` unable to create install/global as the box user.
+    for directory in ("~/.bun", "~/.bun/install"):
+        cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
+                % (expand(directory), os.getuid(), os.getgid())]
+
     # ...and anywhere else this harness insists on writing. Mounting a file
     # deep under $HOME makes the container create its parents as root, and the
     # harness — which runs as you — then cannot make a sibling directory next

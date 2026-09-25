@@ -304,7 +304,7 @@ test("the harness's parting words are shown again after the screen is restored",
   const dir = await temp(t);
   const out = engine(`
 from broker.box.run import _last_words
-screen = (b"\\x1b[?1049h  \\xe2\\xa0\\xbc finik  \\xe2\\xa0\\xb4 finik  \\xe2\\xa0\\xa6 finik\\r\\n"
+screen = (b"\\x1b[?1049h  \\xe2\\xa0\\xbc project  \\xe2\\xa0\\xb4 project  \\xe2\\xa0\\xa6 project\\r\\n"
           b"\\x1b[<u\\x1b[=0;1uSession ID: 019efe7b-889a-72d3-8a7c-bfae7be3dacd\\r\\n"
           b"To continue this session, run:\\r\\n  codex resume 019efe7b-889a-72d3-8a7c-bfae7be3dacd\\r\\n")
 print(_last_words(screen))
@@ -315,7 +315,7 @@ print(_last_words(screen))
   assert.match(out, /To continue this session/);
   // And not the spinner it was drawing beside them, twenty frames a second.
   assert.ok(!/⠼|⠴|⠦/.test(out), "the animation is not words");
-  assert.ok(!/finik finik/.test(out), "nor is the name it span beside, repeated");
+  assert.ok(!/project project/.test(out), "nor is the name it span beside, repeated");
 });
 
 test("an undefined box names what is defined instead of failing blankly", async (t) => {

@@ -1,12 +1,41 @@
-// Boxes: what `claude --box <name>` may touch. Copy to ~/.config/broker/boxes.json
-// and edit — the broker only ever reads this file, it never rewrites it.
+// All supported box settings. Copy to ~/.config/broker/boxes.json and edit.
+// The broker creates that file only when absent; it never rewrites your edits.
 {
   // Each path is mounted at the SAME path inside the container, so session
   // history and --resume keep working. A symlinked path comes in under both
-  // its own name and the physical one.
+  // its own name and the physical one. An object can mount a private host
+  // directory at the path a tool expects inside the box. {window} gives each
+  // terminal window its own source directory (created if missing).
   "app": {
     "rw": ["~/Projects/app"],
     "ro": ["~/Projects/shared-lib"],
+    // "rw": ["~/Projects/app", {"source": "~/.cache/app/{window}", "target": "~/app-state"}],
+    // "ro": [{"source": "~/Projects/shared-lib", "target": "~/reference"}],
+
+    // The box's environment wins over variables set before the launch.
+    // "env": {"NODE_ENV": "development"},
+    // "unset": ["AWS_PROFILE", "OLD_TOOL_*"], // names or prefix*
+
+    // A separate writable copy of a host directory, kept for this box.
+    // "private": ["~/.config/example-tool"],
+    // Replace a host-only executable with an explanatory message in the box.
+    // "stubs": {"~/bin/host-only": "Use the tool's MCP server instead"},
+
+    // Only named SSH keys enter the box; hosts may be a key path or settings.
+    // "ssh": {
+    //   "keys": ["~/.ssh/example_key"],
+    //   "hosts": {
+    //     "git.example.org": "~/.ssh/example_key",
+    //     "build": {"key": "~/.ssh/example_key", "hostname": "build.example.org", "user": "me", "port": 22}
+    //   }
+    // },
+
+    // Use a private Docker daemon for commands run inside the box.
+    // "docker": true,
+    // "runtime": "docker", // container CLI for this box; default: docker
+    // "dockerfile": "~/Projects/app/.box/Dockerfile", // extends broker-box
+    // "image": "broker-box-app", // image to run; build tag if dockerfile is set
+    // "imageArchive": "~/Images/broker-box-app.tar", // save built image here
 
     // What the harness starts with. This is where a box says how much it trusts
     // what runs inside it — the broker decides nothing about that, and a box
@@ -15,7 +44,8 @@
     // only stops work that was authorised by writing the box.
     //
     // Per harness, because each spells the same idea its own way; a plain list
-    // applies to all of them. Flags you type yourself still win.
+    // applies to all of them: "args": ["--some-common-flag"]. Flags you type
+    // yourself still win.
     "args": {
       "claude": ["--dangerously-skip-permissions"],
       "codex": ["--dangerously-bypass-approvals-and-sandbox"],
@@ -40,10 +70,22 @@
         "env": {
           "CBM_ALLOWED_ROOT": "~/Projects/service",
           "CBM_CACHE_DIR": "~/.cache/codebase-memory/service"
-        }
+        },
+        // Reuse a host-side MCP listener only when these values also match.
+        "identity_env": ["CBM_ALLOWED_ROOT"]
       }
     }
   },
+
+  // Run a box on another machine with `claude --box app --remote build`.
+  // The harness, image and project all run there; SSH carries the terminal.
+  // Map host paths only when the two machines use different locations.
+  // "machines": {
+  //   "build": {
+  //     "ssh": "me@build.example.org",
+  //     "paths": {"~/Projects": "/home/me/Projects"}
+  //   }
+  // },
 
   // "mcp": false bridges nothing at all.
   "scratch": {

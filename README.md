@@ -152,6 +152,9 @@ rewritten by the broker (comments are fine):
 }
 ```
 
+The [complete box example](box/boxes.example.jsonc) lists every supported
+profile setting, including Docker, SSH, MCP, path mapping and remote machines.
+
 A box that needs more than the base image brings its own Dockerfile:
 
 ```jsonc

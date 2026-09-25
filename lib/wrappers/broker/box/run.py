@@ -781,24 +781,30 @@ def _through_terminal(cmd):
     import tty
 
     master, slave = pty.openpty()
-    try:
-        size = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
-        fcntl.ioctl(slave, termios.TIOCSWINSZ, size)
-    except (OSError, ValueError):
-        pass
+    child = None
+    last_size = None
+
+    def resized(*_):
+        nonlocal last_size
+        try:
+            size = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+            if size == last_size:
+                return
+            # The slave is closed after Popen; the master remains open for the run.
+            fcntl.ioctl(master, termios.TIOCSWINSZ, size)
+            last_size = size
+            if child is not None:
+                child.send_signal(signal.SIGWINCH)
+        except (OSError, ValueError):
+            pass
+
+    resized()
     saved = None
     try:
         saved = termios.tcgetattr(sys.stdin.fileno())
         tty.setraw(sys.stdin.fileno())
     except (termios.error, ValueError, OSError):
         saved = None
-
-    def resized(*_):
-        try:
-            fcntl.ioctl(slave, termios.TIOCSWINSZ,
-                        fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8))
-        except (OSError, ValueError):
-            pass
 
     try:
         previous = signal.signal(signal.SIGWINCH, resized)
@@ -821,6 +827,8 @@ def _through_terminal(cmd):
     tail = b""
     try:
         while True:
+            # Some terminal managers update the PTY size without SIGWINCH.
+            resized()
             try:
                 readable, _, _ = select.select([master, sys.stdin], [], [], 0.2)
             except (OSError, ValueError):

@@ -74,3 +74,40 @@ print('ok')
 `;
   assert.equal(execFileSync("python3", ["-B", "-c", program], { cwd: root, encoding: "utf8" }).trim(), "ok");
 });
+
+test("Codex resume repairs dead indexed paths without changing missing sessions", () => {
+  const program = `
+import os, sqlite3, sys, tempfile
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, 'lib/wrappers')
+from broker.providers import codex
+
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory)
+    canonical = root / '.codex'
+    sessions = canonical / 'sessions' / '2026' / '09' / '07'
+    sessions.mkdir(parents=True)
+    db_dir = root / 'db'
+    db_dir.mkdir()
+    good = '01a07c48-6313-7db1-864d-75dedd239405'
+    missing = '01a07c49-6313-7db1-864d-75dedd239405'
+    filename = 'rollout-2026-09-07T16-31-53-' + good + '.jsonl'
+    current = sessions / filename
+    current.write_text('session')
+    old = root / 'deleted-probe' / 'sessions' / '2026' / '09' / '07' / filename
+    absent = root / 'deleted-probe' / 'sessions' / '2026' / '09' / '07' / ('rollout-2026-09-07T16-32-53-' + missing + '.jsonl')
+    connection = sqlite3.connect(db_dir / 'state_5.sqlite')
+    connection.execute('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT)')
+    connection.executemany('INSERT INTO threads VALUES (?, ?)', [(good, str(old)), (missing, str(absent))])
+    connection.commit()
+    connection.close()
+    with patch.object(codex, 'CANONICAL_HOME', str(canonical)):
+        codex.harness_env({'CODEX_SQLITE_HOME': str(db_dir)})
+    connection = sqlite3.connect(db_dir / 'state_5.sqlite')
+    rows = dict(connection.execute('SELECT id, rollout_path FROM threads'))
+    assert rows == {good: str(current), missing: str(absent)}
+print('ok')
+`;
+  assert.equal(execFileSync("python3", ["-B", "-c", program], { cwd: root, encoding: "utf8" }).trim(), "ok");
+});

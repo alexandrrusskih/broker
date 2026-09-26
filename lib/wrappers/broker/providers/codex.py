@@ -325,6 +325,7 @@ def harness_env(env):
     _unlink_shared_databases(env.get(HOME_ENV))
     # Not forced: someone who set it meant it.
     if env.get(SQLITE_ENV):
+        _repair_rollout_paths(env[SQLITE_ENV])
         return
     from ..box.paths import window_key
 
@@ -339,6 +340,58 @@ def harness_env(env):
     if fresh:
         _seed_databases(own)
     env[SQLITE_ENV] = own
+    _repair_rollout_paths(own)
+
+
+def _repair_rollout_paths(directory):
+    """Replace dead session paths in this window's index with shared files.
+
+    An old database seed indexed the shared sessions while CODEX_HOME pointed
+    at a temporary probe. The files survived in ~/.codex/sessions, but its
+    rollout_path rows still name the deleted probe, so Codex cannot resume by
+    ID. Repair only rows whose old path is gone and whose exact session file
+    exists under the canonical shared directory.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    database = Path(directory) / "state_5.sqlite"
+    sessions = Path(CANONICAL_HOME) / "sessions"
+    if not database.is_file() or not sessions.is_dir():
+        return
+    try:
+        with sqlite3.connect(database, timeout=2) as connection:
+            fixes = []
+            for session_id, old in connection.execute(
+                "SELECT id, rollout_path FROM threads WHERE rollout_path IS NOT NULL"
+            ):
+                if not old or os.path.isfile(old):
+                    continue
+                parts = Path(old).parts
+                if "sessions" not in parts:
+                    continue
+                suffix = parts[max(i for i, part in enumerate(parts)
+                                   if part == "sessions") + 1:]
+                if (len(suffix) != 4
+                        or not re.fullmatch(r"\d{4}", suffix[0])
+                        or not re.fullmatch(r"\d{2}", suffix[1])
+                        or not re.fullmatch(r"\d{2}", suffix[2])):
+                    continue
+                if not re.fullmatch(
+                    r"rollout-[^/]*-" + re.escape(session_id) + r"\.jsonl", suffix[3]
+                ):
+                    continue
+                current = sessions.joinpath(*suffix)
+                if current.is_file():
+                    fixes.append((str(current), session_id, old))
+            if fixes:
+                connection.executemany(
+                    "UPDATE threads SET rollout_path = ? WHERE id = ? AND rollout_path = ?",
+                    fixes,
+                )
+    except (OSError, sqlite3.Error) as exc:
+        from ..out import warn
+        warn("could not repair Codex session paths (%s)" % exc)
 
 
 def _unlink_shared_databases(home):
@@ -404,4 +457,3 @@ def _seed_databases(own):
                 shutil.copy2(source, target)
         except OSError:
             return  # an empty set still works, it is only slower
-

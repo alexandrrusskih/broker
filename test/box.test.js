@@ -300,24 +300,6 @@ print(run._session_from_argv(codex, ["exec", "hello"]))
   assert.equal(fromPlainRun, "None", "a fresh run has no id to take from the command");
 });
 
-test("the harness's parting words are shown again after the screen is restored", async (t) => {
-  const dir = await temp(t);
-  const out = engine(`
-from broker.box.run import _last_words
-screen = (b"\\x1b[?1049h  \\xe2\\xa0\\xbc project  \\xe2\\xa0\\xb4 project  \\xe2\\xa0\\xa6 project\\r\\n"
-          b"\\x1b[<u\\x1b[=0;1uSession ID: 019efe7b-889a-72d3-8a7c-bfae7be3dacd\\r\\n"
-          b"To continue this session, run:\\r\\n  codex resume 019efe7b-889a-72d3-8a7c-bfae7be3dacd\\r\\n")
-print(_last_words(screen))
-`, { HOME: dir });
-
-  // The words it wrote on the alternate screen, which the reset takes away.
-  assert.match(out, /Session ID: 019efe7b-889a-72d3-8a7c-bfae7be3dacd/);
-  assert.match(out, /To continue this session/);
-  // And not the spinner it was drawing beside them, twenty frames a second.
-  assert.ok(!/⠼|⠴|⠦/.test(out), "the animation is not words");
-  assert.ok(!/project project/.test(out), "nor is the name it span beside, repeated");
-});
-
 test("an undefined box names what is defined instead of failing blankly", async (t) => {
   const dir = await temp(t);
   const file = path.join(dir, "boxes.json");

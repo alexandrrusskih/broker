@@ -480,6 +480,47 @@ flow when it sees an SSH session, since a localhost redirect cannot reach a
 browser on the other end), seeds the refresh token to the broker and reports
 what the account has left. `--device` / `--browser` force either flow.
 
+### codex's shared daemon is off on purpose
+
+`features.daemon_auto_start = false` sits in `config.toml`, and moving it back
+undoes the account pick.
+
+codex 0.159 added a shared background app-server and turned it on by default.
+It is a singleton: the first window to want one starts it, and it keeps THAT
+window's environment for as long as it lives — `CODEX_HOME`, `CODEX_SQLITE_HOME`
+and the refresh overrides, all of them pinned to whichever account happened to
+go first. Every window afterwards attaches to it.
+
+Which means the pick above stops meaning anything. `broker-cx` reads the limits,
+chooses the account with room and points the run at its profile — and the run
+then attaches to a daemon still holding the previous account's home and token
+overrides. Seen here as a daemon running under `~/.codex-fsun` while the
+account with room was a different one: the work billed to fsun regardless. The
+per-window database split goes the same way, collapsing back onto whichever
+`CODEX_SQLITE_HOME` the first window had.
+
+In a box it does not degrade, it fails outright. The daemon is resolved from
+`$CODEX_HOME/packages/app-server-daemon/current/bin/codex`, and inside a box
+that path is the host's — a `Mach-O 64-bit executable arm64` handed to a Linux
+container, which cannot exec it:
+
+```
+Error: failed to spawn detached app-server process using
+/Users/you/.codex-<account>/packages/app-server-daemon/current/bin/codex: ENOEXEC (8)
+```
+
+One line in `config.toml` covers both, because every profile symlinks to that
+one file — host and box alike, with nothing to remember per invocation and no
+flag threaded through the wrapper. `codex --no-daemon <command>` is the
+per-invocation version if you ever need it for one run.
+
+What the daemon buys is several front-ends on one set of sessions: `codex
+agents`, the desktop app, `remote-control` pairing, `--remote ws://…`. None of
+that applies to a box, which is one container running one session; on the host
+it is a real feature, and the price is that the account the broker picked is no
+longer the account you run on. Re-enable it with `codex features enable
+daemon_auto_start` only if you have stopped caring about the pick.
+
 ## broker-agy: the same, for agy
 
 agy has no config-dir variable — it reads `$HOME/.gemini` and nothing else — so a

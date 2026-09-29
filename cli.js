@@ -490,21 +490,23 @@ async function main() {
             }
           };
           const before = version();
-          const native = shimCfg.shim_previous?.[name] || "";
-          const standaloneCodex = name === "codex" &&
-            native.startsWith(pathMod.join(os.homedir(), ".codex", "packages", "standalone") + pathMod.sep) &&
-            fs.existsSync(pathMod.join(os.homedir(), ".codex", "packages", "standalone", "auto-update-version"));
           let updateFailed = false;
-          if (!standaloneCodex) {
-            try {
-              // Through the wrapper, so the update reaches the real binary; then the
-              // shim goes back, because the updater writes its own launcher over it.
-              execFileSync(w.cmd, [w.updateCommand || "update"], { stdio: ["ignore", "pipe", "pipe"] });
-            } catch (error) {
-              updateFailed = true;
-              failures++;
-              console.error(`${w.bin}: FAILED — ${conciseError(error)}`);
-            }
+          // Every harness gets its updater run, standalone codex included. It used
+          // to be skipped here, on the reasoning that a standalone install keeps
+          // itself current — and it does not: `check_for_update_on_startup` is off
+          // in ~/.codex/config.toml on purpose, because codex's own updater writes
+          // its launcher over ~/.local/bin/codex and takes codex off the broker.
+          // So nobody updated it and `--all` still printed a version, which read as
+          // success; codex sat three minors behind for a week. The reason for the
+          // skip is already handled two statements down, where the shim goes back.
+          try {
+            // Through the wrapper, so the update reaches the real binary; then the
+            // shim goes back, because the updater writes its own launcher over it.
+            execFileSync(w.cmd, [w.updateCommand || "update"], { stdio: ["ignore", "pipe", "pipe"] });
+          } catch (error) {
+            updateFailed = true;
+            failures++;
+            console.error(`${w.bin}: FAILED — ${conciseError(error)}`);
           }
           // An updater installs beside the old version and leaves the launcher
           // alone, so without this the update lands on disk and never runs.
@@ -521,7 +523,7 @@ async function main() {
           }
           if (!updateFailed) {
             const after = version();
-            console.log(`${w.bin}: ${standaloneCodex ? `${after || before || "installed"} (standalone auto-update)` : before && after ? `${before} → ${after}` : after || "updated"}`);
+            console.log(`${w.bin}: ${before && after ? `${before} → ${after}` : after || "updated"}`);
           }
         }
       }

@@ -38,6 +38,35 @@ def window_label(seconds):
     return "%dh" % (seconds // 3600)
 
 
+def credits_label(row):
+    """What to print in the CREDITS column.
+
+    A balance the plan will not spend is marked rather than hidden: it is real
+    money on the account and worth seeing, but reading it as a way past a spent
+    window is exactly the mistake. `*` is taken already — it marks the account a
+    bare run would pick — so the flag is `!`.
+    """
+    balance = row.get("credits_balance")
+    if not balance:
+        return "—"
+    return "%d" % balance if row.get("credits_spendable") else "%d!" % balance
+
+
+def resets_label(row):
+    """What to print in the RESETS column.
+
+    Two different numbers: how many banked resets the account holds, and how many
+    it could redeem right now — which is none until it is actually out of room.
+    A parenthesised count is "banked, not yet usable", so a full column of them
+    does not read as a way out of a machine-wide limit.
+    """
+    held = row.get("resets_held")
+    if not held:
+        return "—"
+    applicable = row.get("resets_applicable") or 0
+    return "%d" % applicable if applicable else "(%d)" % held
+
+
 def status_of(row):
     if row["error"]:
         return row["error"]
@@ -48,21 +77,31 @@ def render(cfg, provider, rows):
     picked = accounts.would_pick(cfg, provider, rows)
     home = config.home_account(cfg, provider.NAME)
 
-    head = ("", "ACCOUNT", "EMAIL", "PLAN", "USED", "WINDOW", "RESETS IN", "STATUS")
-    table = [head]
+    # Only providers that report them get the columns: a table of dashes says
+    # "this account has none" where the truth is "this harness never says".
+    extra = any(
+        row.get("credits_balance") is not None or row.get("resets_held") is not None
+        for row in rows
+    )
+    head = ["", "ACCOUNT", "EMAIL", "PLAN", "USED", "WINDOW", "RESETS IN"]
+    if extra:
+        head += ["CREDITS", "RESETS"]
+    head += ["STATUS"]
+    table = [tuple(head)]
     for row in rows:
-        table.append(
-            (
-                "*" if row["account"] == picked else "",
-                row["account"] + (" (yours)" if row["account"] == home else ""),
-                row["email"],
-                row["plan"],
-                used_label(row),
-                window_label(row["window"]),
-                human(row["resets_in"]),
-                status_of(row),
-            )
-        )
+        cells = [
+            "*" if row["account"] == picked else "",
+            row["account"] + (" (yours)" if row["account"] == home else ""),
+            row["email"],
+            row["plan"],
+            used_label(row),
+            window_label(row["window"]),
+            human(row["resets_in"]),
+        ]
+        if extra:
+            cells += [credits_label(row), resets_label(row)]
+        cells.append(status_of(row))
+        table.append(tuple(cells))
 
     widths = [max(len(r[c]) for r in table) for c in range(len(head))]
     for row in table:
@@ -79,3 +118,19 @@ def render(cfg, provider, rows):
             % provider.CMD
         )
     print("Pin one run with `%s account <name>`." % provider.CMD)
+
+    # Said only when the table actually shows one, so the ordinary case stays
+    # three lines rather than five.
+    if extra:
+        if any(credits_label(row).endswith("!") for row in rows):
+            print(
+                "! = a balance this plan will not spend on the model in use — money on "
+                "the account, not room to run."
+            )
+        if any(resets_label(row).startswith("(") for row in rows):
+            print(
+                "(n) = banked rate-limit resets, not redeemable yet: one applies only "
+                "once that account is out of room."
+            )
+        print("Neither is used to pick an account — `%s` still goes by the window alone."
+              % provider.CMD)

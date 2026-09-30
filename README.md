@@ -450,10 +450,35 @@ broker-cx upgrade            # pull the newest broker + wrapper from git, then u
 ```
 
 ```
-   ACCOUNT  EMAIL             PLAN  USED  WINDOW  RESETS IN  STATUS
-*  account-a  user-a@example.com  pro   98%   7d      18h 05m    ok
-   account-b  user-b@example.com  pro   100%  7d      13h 27m    limit reached
+   ACCOUNT    EMAIL               PLAN  USED  WINDOW  RESETS IN  CREDITS  RESETS  STATUS
+*  account-a  user-a@example.com  pro   98%   7d      18h 05m    —        (1)     ok
+   account-b  user-b@example.com  pro   100%  7d      13h 27m    62500!   1       limit reached
+
+! = a balance this plan will not spend on the model in use — money on the account, not room to run.
+(n) = banked rate-limit resets, not redeemable yet: one applies only once that account is out of room.
+Neither is used to pick an account — `broker-cx` still goes by the window alone.
 ```
+
+`CREDITS` and `RESETS` are reported, not acted on, and both are easy to read as
+more room than they are.
+
+A credit balance is not permission to spend it. Whether credits unlock a model
+is a property of the PLAN: on one that already includes the model the answer is
+no, however much money is on the account. Measured here with two `pro` accounts
+holding 62500 each and `credits_would_enable: false` on every model, beside a
+`prolite` account with a zero balance and the same field true. A balance the
+plan will not take is flagged `!` rather than hidden — it is real money, it is
+just not a way past a spent window.
+
+A banked reset ("Full reset") clears both windows and moves the weekly date
+about seven days out, and each account gets very few. The snapshot reports two
+different numbers: how many are banked, and how many could be redeemed right
+now — which is none until that account is actually out of room. A parenthesised
+count is the first kind, so a column of them does not read as a way out.
+
+Only providers that report these get the columns at all. A table of dashes says
+"this account has none" where the truth is "this harness never says" — so for
+`broker-agy` and `broker-cl` the table is the seven columns it always was.
 
 The limits come from the same account snapshot codex shows under `/status`, and
 reading them costs no quota — so every run reads them fresh, in parallel. That

@@ -22,6 +22,13 @@ def stub(account):
         "resets_in": None,
         "blocked": False,
         "error": None,
+        # None, not 0: a provider that reports neither must not be shown as an
+        # account with nothing left. The table leaves both columns out entirely
+        # when no row carries them.
+        "credits_balance": None,
+        "credits_spendable": None,
+        "resets_held": None,
+        "resets_applicable": None,
     }
 
 

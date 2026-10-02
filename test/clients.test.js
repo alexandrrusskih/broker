@@ -145,3 +145,51 @@ with patch.object(accounts, 'probe', side_effect=[good, bad, bad]), patch.object
 `;
   execFileSync("python3", ["-c", program], { cwd: root, env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }, stdio: "pipe" });
 });
+
+test("a resumed session starts from the account it ran on, and a new session is given an id to find it by", async (t) => {
+  const home = await temp(t);
+  const program = `
+import os, stat, sys
+from unittest.mock import patch
+sys.path.insert(0, 'lib/wrappers')
+from broker import select, accounts, api, profile, sessions, config
+from broker.providers import claude, codex
+
+# which session a run names
+assert sessions.session_id(claude, ['--resume=abc']) == 'abc'
+assert sessions.session_id(claude, ['--resume', 'abc']) == 'abc'
+assert sessions.session_id(claude, ['-r', 'abc', '--model', 'opus']) == 'abc'
+assert sessions.session_id(claude, ['--session-id', 'abc']) == 'abc'
+assert sessions.session_id(claude, ['-r']) is None
+assert sessions.session_id(claude, ['--continue']) is None
+assert sessions.session_id(codex, ['--resume=abc']) is None
+
+# a new interactive session gets an id; everything else is left as typed
+sid, argv = sessions.assign(claude, [])
+assert argv == ['--session-id', sid] and len(sid) == 36
+sid, argv = sessions.assign(claude, ['--model', 'opus'])
+assert argv[:2] == ['--session-id', sid] and argv[2:] == ['--model', 'opus']
+for typed in (['mcp', 'list'], ['-p', 'hi'], ['--print'], ['--resume=x'], ['-c'], ['--fork-session'], ['doctor']):
+    assert sessions.assign(claude, list(typed)) == (None, typed), typed
+assert sessions.assign(codex, []) == (None, [])
+
+# written down privately, read back per session
+sessions.remember(claude, 'sess-1', 'backup')
+assert sessions.recall(claude, 'sess-1') == 'backup'
+assert sessions.recall(claude, 'sess-2') is None
+assert stat.S_IMODE(os.stat(sessions._file(claude)).st_mode) == 0o600
+
+# the session's account replaces the default as the one tried first...
+cfg = {'account': 'main'}
+roomy = dict(accounts.stub('backup'), auth={'token': 'fake'}, used=10)
+with patch.object(accounts, 'probe', return_value=roomy) as probe, patch.object(profile, 'ensure'), patch.object(select, 'warn'):
+    assert select.resolve(cfg, claude, None, 'backup')[0] == 'backup'
+    assert probe.call_args[0][2] == 'backup'
+# ...but a session whose account ran dry still moves elsewhere
+dry = dict(accounts.stub('backup'), auth={'token': 'fake'}, used=100, blocked=True)
+other = dict(accounts.stub('main'), auth={'token': 'fake-main'}, used=5)
+with patch.object(accounts, 'probe', return_value=dry), patch.object(api, 'list_accounts', return_value=['main', 'backup']), patch.object(accounts, 'probe_all', return_value=[other, dry]), patch.object(profile, 'ensure'), patch.object(select, 'warn'), patch.object(select, '_announce'):
+    assert select.resolve(cfg, claude, None, 'backup')[0] == 'main'
+`;
+  execFileSync("python3", ["-c", program], { cwd: root, env: { ...process.env, HOME: home, PYTHONDONTWRITEBYTECODE: "1" }, stdio: "pipe" });
+});

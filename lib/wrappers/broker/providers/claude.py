@@ -165,6 +165,17 @@ PASSTHROUGH = (
     "help",
 )
 
+# Sessions are written down per account so a resume lands on the account the
+# session ran on (see sessions.py). claude takes `--session-id <uuid>`, so a new
+# interactive session gets its id from the broker; a subcommand must not.
+SESSION_IDS = True
+SUBCOMMANDS = (
+    "agents", "attach", "auth", "auto-mode", "doctor", "gateway", "import",
+    "install", "logs", "mcp", "plugin", "plugins", "project", "respawn", "rm",
+    "setup-token", "stop", "kill", "ultrareview", "update", "upgrade",
+    "migrate-installer", "help", "config",
+)
+
 
 def env_token(auth):
     """The token to hand the harness, whichever shape the broker answered in."""

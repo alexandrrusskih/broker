@@ -17,7 +17,7 @@ import importlib
 import os
 import sys
 
-from . import api, box, config, out, run, select
+from . import api, box, config, out, run, select, sessions
 
 COMMANDS = {
     "list": ("commands", "cmd_list"),
@@ -127,7 +127,16 @@ def main(provider_name, argv=None):
     # argument still wins, being the more explicit of the two.
     explicit = explicit or _account_from_env(provider)
 
-    account, auth = select.resolve(cfg, provider, explicit)
+    # A resumed session starts from the account it last ran on, not from the
+    # default: restoring a terminal full of sessions must not move them all back
+    # onto the account they had been moved off. A new interactive session gets
+    # its id here so that later resume can find its account too.
+    sid = sessions.session_id(provider, argv)
+    preferred = None if explicit else sessions.recall(provider, sid)
+    account, auth = select.resolve(cfg, provider, explicit, preferred)
+    if not sid:
+        sid, argv = sessions.assign(provider, argv)
+    sessions.remember(provider, sid, account)
 
     # The startup line goes in front of what you typed, so your own flags still
     # win: a later flag overrides an earlier one on every harness we wrap.

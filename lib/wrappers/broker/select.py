@@ -69,12 +69,19 @@ def _announce(row):
     )
 
 
-def resolve(cfg, provider, explicit):
-    """(account, auth) for this run."""
+def resolve(cfg, provider, explicit, preferred=None):
+    """(account, auth) for this run.
+
+    `preferred` is the account a resumed session last ran on. It takes the
+    default's place as the account to try first — with the same room check, so
+    a session whose account has since run dry still moves elsewhere.
+    """
     if explicit:
         return _named(cfg, provider, explicit)
 
-    home = config.home_account(cfg, provider.NAME)
+    home = preferred or config.home_account(cfg, provider.NAME)
+    if preferred and preferred != config.home_account(cfg, provider.NAME):
+        warn("resuming on %s, the account this session ran on" % preferred)
     if home:
         try:
             row = accounts.probe(cfg, provider, home)

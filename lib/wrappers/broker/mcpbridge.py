@@ -125,17 +125,44 @@ def _session(conn, command, token):
                 child.kill()
 
 
+def _bind_address():
+    """Where a box can reach this listener, and nothing beyond this machine can.
+
+    A box dials host.docker.internal. Docker Desktop forwards that name to the
+    host's loopback, so 127.0.0.1 is enough there. Docker Engine on Linux maps
+    it to the docker0 gateway instead, and a listener on 127.0.0.1 refuses the
+    connection — the lane died with 'Connection refused' on WSL. The gateway
+    address is a local interface: the host and its containers reach it, the
+    network does not.
+    """
+    override = os.environ.get("BROKER_BRIDGE_BIND")
+    if override:
+        return override
+    if sys.platform.startswith("linux"):
+        try:
+            import fcntl
+            import struct
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                packed = fcntl.ioctl(probe.fileno(), 0x8915,  # SIOCGIFADDR
+                                     struct.pack("256s", b"docker0"))
+            return socket.inet_ntoa(packed[20:24])
+        except OSError:
+            pass
+    return "127.0.0.1"
+
+
 def serve(name, command, key=""):
     """Run the listener for one server, for one caller identity, then block."""
     token = secrets.token_hex(16)
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", 0))
+    host = _bind_address()
+    listener.bind((host, 0))
     listener.listen(16)
     port = listener.getsockname()[1]
 
     os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
-    state = {"port": port, "token": token, "command": command,
+    state = {"host": host, "port": port, "token": token, "command": command,
              "pid": os.getpid(), "identity": key}
     path = _state_file(name, key)
     tmp = path + ".new"

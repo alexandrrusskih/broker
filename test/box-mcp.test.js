@@ -63,7 +63,7 @@ test("the bridge carries stdio both ways and refuses a connection without the se
   assert.equal((await fs.stat(statePath)).mode & 0o777, 0o600, "the secret is not world-readable");
 
   const talk = (secret, line) => new Promise((resolve, reject) => {
-    const sock = net.connect(state.port, "127.0.0.1");
+    const sock = net.connect(state.port, state.host || "127.0.0.1");
     let seen = "";
     sock.on("connect", () => sock.write(`${secret}\n${line}\n`));
     sock.on("data", (d) => { seen += d; if (seen.includes("\n")) { sock.end(); resolve(seen.trim()); } });
@@ -98,7 +98,7 @@ test("a client that is still connected keeps the bridge alive", async (t) => {
   // A harness opens its MCP server once and holds that connection for the whole
   // session. The idle timeout used to be measured between CONNECTIONS, so a
   // conversation that outlasted it lost its server mid-sentence.
-  const held = net.connect(state.port, "127.0.0.1");
+  const held = net.connect(state.port, state.host || "127.0.0.1");
   t.after(() => held.destroy());
   await new Promise((resolve, reject) => {
     held.on("connect", () => { held.write(`${state.token}\nfirst\n`); resolve(); });

@@ -3,7 +3,6 @@
 import json
 import os
 import tempfile
-import tomllib
 from urllib.parse import urlsplit, urlunsplit
 
 from .. import config
@@ -57,6 +56,14 @@ def stage(provider, env, box):
             text = handle.read()
         original = text
         if kind == "toml":
+            # Imported here and not at the top, as box/mcp.py does it: tomllib
+            # arrived in 3.11, and this module is reached from box/run.py, which
+            # every wrapper imports. At the top, one import made the WHOLE broker
+            # need 3.11 — on a PATH where python3 is the system 3.9, all four
+            # wrappers died with "cannot find the broker engine (No module named
+            # 'tomllib')", including paths that read no TOML at all.
+            import tomllib
+
             data = tomllib.loads(text)
         elif kind == "jsonc":
             data = json.loads(_strip_comments(text))

@@ -33,9 +33,9 @@ try:
     from broker.cli import main
 except ImportError as exc:  # noqa: BLE001 — the message is the whole point
     sys.exit(
-        "broker-agy: cannot find the broker engine (%s).\n"
+        "broker-oc: cannot find the broker engine (%s).\n"
         "    looked in: %s\n"
-        "    fix with: broker wrap agy   (or set $BROKER_ENGINE)"
+        "    fix with: broker wrap opencode   (or set $BROKER_ENGINE)"
         % (exc, ", ".join(d for d in CANDIDATES if d))
     )
 

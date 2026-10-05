@@ -85,3 +85,57 @@ test("upgrade changes the server only with --server; --all keeps its harness-upd
     if (flags.includes("--all")) assert.ok(output.some((line) => line.startsWith("opencode: broker-oc 1.2.3 →")));
   }
 });
+
+// `#!/usr/bin/env python3` resolves against whatever PATH the caller has, and a
+// prepared subprocess with PATH=/usr/bin:/bin gets macOS's own 3.9. The engine
+// needs 3.11 for TOML, so every wrapper died there with "cannot find the broker
+// engine (No module named 'tomllib')" — a message that names neither the real
+// problem nor a fix that works.
+test("a host wrapper names an interpreter that can actually run the engine", async (t) => {
+  const { WRAP, pythonForLauncher } = require("../lib/wrap");
+
+  // What the install writes into the shebang. Tested by import, not by version
+  // string: the import is the thing that was failing.
+  const chosen = pythonForLauncher();
+  assert.ok(chosen, "this machine should have some python3 with tomllib");
+  assert.ok(path.isAbsolute(chosen), "the shebang needs an absolute path, not a name");
+  execFileSync(chosen, ["-c", "import tomllib"], { stdio: "ignore" });
+
+  // Every python launcher must say its OWN name. A copied prefix sends people to
+  // the wrong `broker wrap`, which fixes nothing — broker-oc reported itself as
+  // broker-agy and told you to re-wrap agy.
+  for (const provider of Object.keys(WRAP).filter((n) => WRAP[n].template)) {
+    const template = await fs.readFile(
+      path.join(root, "lib", "wrappers", WRAP[provider].template), "utf8");
+    assert.ok(template.includes(`${WRAP[provider].cmd}: cannot find the broker engine`),
+      `${provider}: launcher reports itself as something else`);
+    assert.ok(template.includes(`broker wrap ${provider}`),
+      `${provider}: launcher points at the wrong wrap command`);
+  }
+
+  // An image build keeps env lookup: a host path means nothing in a container.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "broker-wrap-test-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const built = require("../lib/wrap").install("codex", null, dir);
+  const shebang = (await fs.readFile(built.path, "utf8")).split("\n")[0];
+  assert.equal(shebang, "#!/usr/bin/env python3", "a container launcher stays portable");
+});
+
+// Loading the engine must not need 3.11 on paths that read no TOML. One
+// module-level `import tomllib` in box/http_mcp.py made the whole broker need it,
+// because box/run.py imports that module and every wrapper imports box.
+test("the engine loads on a python without tomllib", () => {
+  const old = ["/usr/bin/python3", "/usr/local/bin/python3"].find((p) => {
+    try {
+      execFileSync(p, ["-c", "import tomllib"], { stdio: "ignore" });
+      return false;
+    } catch (error) {
+      return require("node:fs").existsSync(p);
+    }
+  });
+  if (!old) return; // every python here is new enough; nothing to prove
+  execFileSync(old, ["-c",
+    "import sys; sys.path.insert(0, 'lib/wrappers')\n" +
+    "from broker.cli import main\n" +
+    "from broker.box import http_mcp, run\n"], { cwd: root, stdio: "pipe" });
+});

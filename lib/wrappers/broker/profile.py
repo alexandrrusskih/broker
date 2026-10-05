@@ -61,7 +61,83 @@ def shared_names(provider):
     return names
 
 
-def shared_entries(provider, path):
+# A run that must start with none of your MCP servers, while keeping the login.
+#
+# Only the mirrored layout needs this. codex hands its profile a variable of its
+# own and already owns its config.toml; claude has no profile at all, by design
+# (see run.py); and for opencode the broker is not on the host path — cli.py
+# sends a provider with no credentials straight to exec_passthrough, so there is
+# nothing here to ask. agy is the one left: its profile mirrors your home, and
+# the mirror shares .gemini/config whole, so the MCP file in a profile IS yours.
+ISOLATE_MCP_ENV = "BROKER_ISOLATE_MCP"
+
+
+def _mcp_relative(provider):
+    """Where this provider's MCP file sits inside the canonical home, or None."""
+    declared = getattr(provider, "MCP_CONFIG", None)
+    if not declared:
+        return None
+    absolute = os.path.realpath(os.path.expanduser(declared[0]))
+    canonical = os.path.realpath(provider.CANONICAL_HOME)
+    relative = os.path.relpath(absolute, canonical)
+    # Outside the home it is not the mirror's to split.
+    if relative.startswith(os.pardir) or os.path.isabs(relative):
+        return None
+    return relative
+
+
+def private_paths(provider, isolate_mcp=None):
+    """Which paths this profile owns rather than shares, deepest-first order.
+
+    The credentials always. The MCP file only when this run asked for it — the
+    default is every byte of the previous behaviour.
+    """
+    paths = [provider.AUTH_NAME]
+    if isolate_mcp is None:
+        isolate_mcp = bool(os.environ.get(ISOLATE_MCP_ENV))
+    if isolate_mcp:
+        relative = _mcp_relative(provider)
+        if relative:
+            paths.append(relative)
+    return paths
+
+
+def _private_tree(paths):
+    """The private paths as a prefix tree. A leaf — an empty dict — is the file.
+
+    A tree and not a single list of components because there can now be two of
+    them, and they diverge: .gemini/antigravity-cli/<token> and
+    .gemini/config/mcp_config.json share one level and then part. Walking each
+    separately would share .gemini/config while splitting it.
+    """
+    tree = {}
+    for path in paths:
+        node = tree
+        for part in path.split(os.sep):
+            if not part or part == os.curdir:
+                continue
+            node = node.setdefault(part, {})
+    return tree
+
+
+def _walk_mirror(canonical, dst, tree, visit):
+    """Call visit(src, dst) for every shared entry, descending the private ones.
+
+    With one private path this produces exactly the sequence the single-path
+    loop produced before it, which is what keeps the default untouched.
+    """
+    for name in _entries(canonical):
+        if name in tree:
+            continue
+        visit(os.path.join(canonical, name), os.path.join(dst, name))
+    for name, below in tree.items():
+        if not below:
+            continue  # the private file itself: nothing under it to share
+        _walk_mirror(os.path.join(canonical, name),
+                     os.path.join(dst, name), below, visit)
+
+
+def shared_entries(provider, path, isolate_mcp=None):
     """(canonical source, place in this profile) for everything meant to be shared.
 
     The two profile layouts answer this differently — a list of names for codex,
@@ -75,17 +151,9 @@ def shared_entries(provider, path):
         ]
 
     pairs = []
-    canonical, dst = provider.CANONICAL_HOME, path
-    parts = provider.AUTH_NAME.split(os.sep)
-    for depth, private in enumerate(parts):
-        for name in _entries(canonical):
-            if name == private:
-                continue
-            pairs.append((os.path.join(canonical, name), os.path.join(dst, name)))
-        if depth == len(parts) - 1:
-            break
-        canonical = os.path.join(canonical, private)
-        dst = os.path.join(dst, private)
+    _walk_mirror(provider.CANONICAL_HOME, path,
+                 _private_tree(private_paths(provider, isolate_mcp)),
+                 lambda src, dst: pairs.append((src, dst)))
     return pairs
 
 
@@ -155,7 +223,7 @@ def link_shared(provider, path):
                 warn("could not unlink %s: %s" % (name, exc))
 
 
-def mirror(provider, path):
+def mirror(provider, path, isolate_mcp=None):
     """Make `path` a copy of the canonical home in which one file is private.
 
     codex hands its profile a dedicated variable, so a profile is a small
@@ -169,25 +237,42 @@ def mirror(provider, path):
     same way, one level deeper. The result is a home that differs from yours in
     exactly one file.
     """
-    parts = provider.AUTH_NAME.split(os.sep)
-    canonical = provider.CANONICAL_HOME
-    for depth, private in enumerate(parts):
+    _mirror_level(provider.CANONICAL_HOME, path,
+                  _private_tree(private_paths(provider, isolate_mcp)))
+
+
+def _mirror_level(canonical, path, tree):
+    """One directory of the mirror, then the private directories under it."""
+    # A directory we are about to split may already be a link to the canonical
+    # one — that is what it was before this run asked for the split. Dropping it
+    # turns it into a real directory whose contents are linked one by one, which
+    # is the whole point. Only a link INTO the directory being mirrored goes: a
+    # real directory is left alone, and so is a link the user aimed elsewhere.
+    if os.path.islink(path):
+        if os.path.realpath(path) != os.path.realpath(canonical):
+            return  # someone pointed this somewhere deliberately
         try:
-            os.makedirs(path, mode=0o700, exist_ok=True)
+            os.unlink(path)
         except OSError as exc:
-            warn("cannot create %s: %s" % (path, exc))
+            warn("cannot split %s: %s" % (path, exc))
             return
-        for name in _entries(canonical):
-            if name == private:
-                continue
-            _link(os.path.join(canonical, name), os.path.join(path, name))
-        _drop_dead_links(path, canonical, private)
-        # `private` is the credentials file itself on the last turn: nothing to
-        # descend into, and write_auth is about to put the real one there.
-        if depth == len(parts) - 1:
-            return
-        canonical = os.path.join(canonical, private)
-        path = os.path.join(path, private)
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+    except OSError as exc:
+        warn("cannot create %s: %s" % (path, exc))
+        return
+    for name in _entries(canonical):
+        if name in tree:
+            continue
+        _link(os.path.join(canonical, name), os.path.join(path, name))
+    _drop_dead_links(path, canonical, tree)
+    for name, below in tree.items():
+        # A leaf is the private file itself: nothing to descend into, and
+        # write_auth is about to put the real credentials there.
+        if not below:
+            continue
+        _mirror_level(os.path.join(canonical, name),
+                      os.path.join(path, name), below)
 
 
 def _drop_dead_links(path, canonical, private):
@@ -197,9 +282,13 @@ def _drop_dead_links(path, canonical, private):
     since leave dangling links behind — dozens of them in a profile that has been
     around a while. Only links pointing into the mirrored directory are touched:
     a real file, or a link the user aimed elsewhere, is left alone.
+
+    `private` is every name this level keeps for itself — one when only the
+    credentials are split, more when this run also owns its MCP file.
     """
+    keep = set(private) if isinstance(private, (set, dict, list, tuple)) else {private}
     for name in _entries(path):
-        if name == private:
+        if name in keep:
             continue
         dst = os.path.join(path, name)
         if not os.path.islink(dst) or os.path.exists(dst):

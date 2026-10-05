@@ -368,3 +368,51 @@ print(json.dumps(box.command(codex, "demo", {"rw": ["${project}"]}, [], {})))
   assert.ok(line.includes("PROBE_ACTOR=reader"));
   assert.ok(!line.includes("PROBE_ABSENT"), "a variable that is not set is not invented");
 });
+
+// The host and the box must agree: a run that owns its MCP file sees none of the
+// user's servers in either place. The box needs no separate switch for it —
+// mcp_servers() already reads the path through HOME_ENV, so the profile the run
+// uses decides what gets bridged.
+test("a run that owns its MCP file bridges nothing of yours, and leaves the shared file alone", () => {
+  const program = `
+import json, sys, tempfile
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0, 'lib/wrappers')
+from broker import profile
+from broker.box import mcp as boxmcp
+from broker.providers import agy
+
+with tempfile.TemporaryDirectory() as d:
+    home = Path(d) / 'home'
+    (home / '.gemini' / 'config').mkdir(parents=True)
+    (home / '.gemini' / 'antigravity-cli').mkdir(parents=True)
+    shared = home / '.gemini' / 'config' / 'mcp_config.json'
+    yours = {"mcpServers": {"srv-a": {"command": "/bin/a"},
+                            "srv-b": {"command": "/bin/b"}}}
+    shared.write_text(json.dumps(yours))
+
+    with patch.object(agy, 'CANONICAL_HOME', str(home)), \
+         patch.object(agy, 'MCP_CONFIG', (str(shared), 'json', 'mcpServers')):
+        plain, iso = Path(d) / 'p-plain', Path(d) / 'p-iso'
+        profile.mirror(agy, str(plain))
+        profile.mirror(agy, str(iso), isolate_mcp=True)
+
+        # An ordinary profile keeps bridging what you declared.
+        assert sorted(boxmcp.mcp_servers(agy, {'HOME': str(home)})) == ['srv-a', 'srv-b']
+        assert sorted(boxmcp.mcp_servers(agy, {'HOME': str(plain)})) == ['srv-a', 'srv-b']
+
+        # The isolated one bridges nothing, and needs no file to say so: the
+        # profile owns the path, and an absent file is already zero servers.
+        target = iso / '.gemini' / 'config' / 'mcp_config.json'
+        assert not target.exists()
+        assert boxmcp.mcp_servers(agy, {'HOME': str(iso)}) == {}
+        # Still nothing once the launcher writes an empty map there.
+        target.write_text('{"mcpServers":{}}')
+        assert boxmcp.mcp_servers(agy, {'HOME': str(iso)}) == {}
+        # And the file everyone else reads was never touched.
+        assert json.loads(shared.read_text()) == yours
+print('ok')
+`;
+  assert.equal(execFileSync("python3", ["-B", "-c", program], { cwd: root, encoding: "utf8" }).trim(), "ok");
+});

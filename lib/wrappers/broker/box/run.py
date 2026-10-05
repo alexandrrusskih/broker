@@ -1454,8 +1454,18 @@ def exec_box(provider, name, argv, env, account=None):
         if text and text not in printed_once:
             printed_once.append(text)
             try:
-                sys.stdout.write(text)
+                # stderr, like every other message to the operator — out.py says
+                # why in its first line: stdout belongs to the harness. This one
+                # line broke that rule, and it is the line that shows it. The pty
+                # loop above writes the harness's bytes straight to fd 1 with
+                # os.write, unbuffered, while this wrote through the buffered
+                # sys.stdout layer on the SAME descriptor; the two arrived spliced
+                # mid-word, the harness's own resume line tangled into ours.
+                # fd 1 is flushed first so what the harness said still lands
+                # before what we say about it.
                 sys.stdout.flush()
+                sys.stderr.write(text)
+                sys.stderr.flush()
             except (OSError, ValueError):
                 pass
 

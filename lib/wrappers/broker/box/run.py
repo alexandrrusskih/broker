@@ -18,7 +18,7 @@ from .. import config, mcpbridge
 from ..out import die, warn
 # Imported as modules, not as names: a test that replaces one of these replaces
 # it where it lives, and a bound name here would keep pointing at the original.
-from . import boxes, mcp, ssh
+from . import boxes, http_mcp, mcp, ssh
 from .mcp import HOST_GATEWAY
 from .paths import _empty_file, _mount, _passwd_file, _paths, expand, home_dir, window_key
 
@@ -310,9 +310,15 @@ def command(provider, name, profile, argv, env):
     # points at an inode nothing links to any more, and inside the box the file
     # has simply vanished: claude reported ~/.claude.json missing and started
     # offering to restore it from a backup, while the host's copy was fine.
+    http_config = None if profile.get("mcp") is False else http_mcp.stage(provider, env, name)
+    http_config_mounted = False
     for entry in getattr(provider, "BOX_HOME", ()):
         host = expand(entry)
         if not os.path.exists(host):
+            continue
+        if http_config and host == http_config[1]:
+            cmd += ["--mount", "type=bind,source=%s,target=%s" % (http_config[0], host)]
+            http_config_mounted = True
             continue
         if os.path.isdir(host):
             cmd += _mount(host)
@@ -582,6 +588,9 @@ def command(provider, name, profile, argv, env):
         if os.path.isdir(host) and host not in mounted:
             cmd += _mount(host)
             cmd += ["-e", "%s=%s" % (home_env, host)]
+    if http_config and not http_config_mounted:
+        cmd += ["--mount", "type=bind,source=%s,target=%s"
+                % (http_config[0], http_config[2])]
 
     # git refuses to touch a repository it thinks belongs to someone else, and
     # inside a box it always thinks so: Docker Desktop's file sharing does not

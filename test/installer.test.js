@@ -114,11 +114,14 @@ test("a host wrapper names an interpreter that can actually run the engine", asy
   }
 
   // An image build keeps env lookup: a host path means nothing in a container.
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "broker-wrap-test-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  const built = require("../lib/wrap").install("codex", null, dir);
-  const shebang = (await fs.readFile(built.path, "utf8")).split("\n")[0];
-  assert.equal(shebang, "#!/usr/bin/env python3", "a container launcher stays portable");
+  // Not exercised through install() here on purpose — install(.., binDirOverride)
+  // REMEMBERS that directory in the broker config, and a test that did so pointed
+  // every later install at its own temporary directory, which it had deleted.
+  // The template itself is what a container gets, so assert on the template.
+  const template = await fs.readFile(
+    path.join(root, "lib", "wrappers", WRAP.codex.template), "utf8");
+  assert.equal(template.split("\n")[0], "#!/usr/bin/env python3",
+    "the shipped template stays portable; only a host install rewrites it");
 });
 
 // Loading the engine must not need 3.11 on paths that read no TOML. One

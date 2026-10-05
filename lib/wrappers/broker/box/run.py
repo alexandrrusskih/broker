@@ -112,11 +112,30 @@ def _ensure_registry_cache(binary):
              "-e", "REGISTRY_PROXY_REMOTEURL=https://registry-1.docker.io",
              "registry:2"], capture_output=True, text=True, timeout=180)
         if started.returncode:
+            # One line of prose, not a list: `% a[-1:] or ""` binds as
+            # `("…%s" % a[-1:]) or ""`, so this printed the repr of a one-item
+            # list — brackets, quotes and all — around the daemon's own words.
+            last = (started.stderr or "").strip().splitlines()
             warn("the image cache did not start, images will come from the internet: %s"
-                 % started.stderr.strip().splitlines()[-1:] or "")
+                 % (last[-1].strip() if last else "no reason given"))
         return started.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def _daemon_is_up(binary):
+    """Whether this runtime's daemon answers at all.
+
+    `version` and not `info`: it is the one call that talks to the server and
+    returns before anything is enumerated — 56ms here against a live daemon,
+    and a non-zero exit the moment the socket is dead.
+    """
+    try:
+        probe = subprocess.run([binary, "version", "--format", "{{.Server.Version}}"],
+                               capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0 and bool(probe.stdout.strip())
 
 
 def command(provider, name, profile, argv, env):
@@ -1327,6 +1346,20 @@ def exec_box(provider, name, argv, env, account=None):
         os.environ["HERDR_AGENT"] = provider.NAME
 
     remote, machine, argv = boxes.take_remote(argv)
+    # Asked for before anything is built on the assumption it is there. Without
+    # this, a stopped Docker produced three messages and no answer: the registry
+    # cache warned (it is never allowed to be fatal), `docker run` printed the
+    # daemon's own "Cannot connect" line, and then this function said "Resume it
+    # in this box with: …" — the command that had just failed, offered as the way
+    # back into a box that never came up.
+    #
+    # Only for a local run: a remote box's daemon is on the far machine, and the
+    # one here may well be stopped and irrelevant.
+    if not remote:
+        runtime = defined[name].get("runtime") or "docker"
+        binary = shutil.which(runtime)
+        if binary and not _daemon_is_up(binary):
+            die("the %s daemon is not running — start it, then try again" % runtime)
     pinned, argv = _pin_session(provider, argv)
     cmd = command(provider, name, defined[name], argv, env)
     if remote:
@@ -1367,6 +1400,14 @@ def exec_box(provider, name, argv, env, account=None):
         # Whatever happened in there — a clean exit, a crash, `docker stop` from
         # another window — the pane is usable again from this line on.
         _restore_terminal(saved)
+
+    # 125 is the one exit code docker keeps for itself: the CLI could not run the
+    # container at all. Nothing ran in there, so there is no session to fold back
+    # and nothing to resume — and everything below this line is about a box that
+    # held a conversation. Said as a failure instead, which is what it is.
+    if status == 125 and not printed.strip():
+        _remember(provider, name, workdir, None, account, status)
+        die("the '%s' box did not start — the reason is above" % name, status)
 
     # What the harness itself recorded, where it could not be confused with
     # another window's — better than any guess made from file times.

@@ -322,6 +322,39 @@ except SystemExit as exc:
   assert.match(out, /exit 1/);
 });
 
+// A stopped Docker used to produce three messages and no answer: the registry
+// cache warned, `docker run` printed the daemon's own "Cannot connect" line, and
+// then the box offered "Resume it in this box with: <the command that just
+// failed>". The runtime here is `false`, which exists and answers nothing — the
+// same shape as a daemon that is not running.
+test("a stopped container daemon says so, instead of offering a line to resume", async (t) => {
+  const dir = await temp(t);
+  const file = path.join(dir, "boxes.json");
+  await fs.writeFile(file, `{ "work": { "rw": ["~"], "runtime": "false" } }`);
+  const out = engine(`
+import contextlib, io
+from broker import box
+from broker.box import boxes, mcp, run
+from broker.providers import codex
+box.boxes.PATH = ${JSON.stringify(file)}
+said, code = io.StringIO(), None
+with contextlib.redirect_stderr(said):
+    try:
+        box.exec_box(codex, "work", ["resume", "019efe7b-889a-72d3-8a7c-bfae7be3dacd"], {})
+    except SystemExit as exc:
+        code = exc.code
+print("exit", code)
+print(said.getvalue())
+`, { HOME: dir });
+
+  assert.match(out, /exit 1/, "a box that cannot start is a failure, not a success");
+  assert.match(out, /false daemon is not running/, "it names the thing that is down");
+  assert.doesNotMatch(out, /Resume it in this box/,
+    "nothing ran in there, so there is nothing to resume");
+  assert.doesNotMatch(out, /Cannot connect|image cache/,
+    "the preflight happens before anything tries the daemon and warns about it");
+});
+
 test("only a box that runs containers gets a daemon, root and privileges", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");

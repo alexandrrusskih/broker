@@ -354,7 +354,11 @@ def _measure(account, auth, lock):
         env.pop(name, None)
     try:
         done = subprocess.run(
-            [binary, "-p", PROBE_PROMPT, "--output-format", "stream-json", "--verbose"],
+            # The probe needs the account, nothing else: no user MCP servers (each
+            # would register a fresh client, e.g. an agntbus guest per probe), no
+            # hooks, no user or project settings.
+            [binary, "-p", PROBE_PROMPT, "--output-format", "stream-json", "--verbose",
+             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources="],
             env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL
         )
     except (OSError, subprocess.SubprocessError):

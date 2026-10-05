@@ -11,8 +11,15 @@ FROM node:24-trixie-slim
 
 # What a coding harness actually reaches for. ripgrep is not optional: claude
 # uses it for search and falls back to something much slower without it.
+#
+# poppler-utils is here for the same reason, and it is two binaries rather than
+# one. `pdftotext` is what an agent reaches for to read a PDF in a shell, and
+# `pdftoppm` is what claude's own file reader requires to render PDF pages — it
+# refuses with "pdftoppm is not installed. Install poppler-utils" and the PDF is
+# simply unreadable. Policies that live as PDFs outside git, on a mounted drive,
+# were being checked against code alone because of it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl git jq less openssh-client procps ripgrep \
+      ca-certificates curl git jq less openssh-client poppler-utils procps ripgrep \
       python3 python3-venv unzip \
  && rm -rf /var/lib/apt/lists/*
 
@@ -21,8 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `broker box build --claude <v> --codex <v>` overrides these.
 # Pinned rather than floating: an image whose harness version changes between
 # builds is an image you cannot reproduce a bug in. Raise them deliberately.
-ARG CLAUDE_VERSION=2.1.280
-ARG CODEX_VERSION=0.159.1
+ARG CLAUDE_VERSION=2.1.285
+ARG CODEX_VERSION=0.160.0
 # bun is a project dependency, not a harness one: repositories pin it in
 # "packageManager", and without it `bun install` and every script that shells out
 # to it fails inside the box while working fine outside.
@@ -30,7 +37,7 @@ ARG BUN_VERSION=1.4.2
 # A fourth harness, kept at the same version as the machine outside. The broker
 # holds no credentials for this one and chooses no account for it — it is here
 # so that `opencode --box <name>` has something to run.
-ARG OPENCODE_VERSION=1.18.31
+ARG OPENCODE_VERSION=1.18.34
 RUN npm install -g --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
@@ -49,7 +56,7 @@ RUN npm install -g --no-fund --no-audit \
 ARG COMPOSE_VERSION=v5.5.1
 # A project's own build may ask for buildx — and a box that has docker but not
 # buildx fails at the first `docker build` with a plugin that is simply absent.
-ARG BUILDX_VERSION=v0.37.1
+ARG BUILDX_VERSION=v0.37.2
 # docker.io is the daemon only on Debian 13; the client is its own package now,
 # and without it the box has a daemon nothing can talk to.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -69,10 +76,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # rtk trims command output before it reaches the model. It hooks every tool use,
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
-ARG RTK_VERSION=0.49.0
-ARG AGY_VERSION=1.2.13
-ARG GH_VERSION=2.101.0
-ARG GLAB_VERSION=1.118.0
+ARG RTK_VERSION=0.50.0
+ARG AGY_VERSION=1.2.16
+ARG GH_VERSION=2.102.0
+ARG GLAB_VERSION=1.120.0
 ARG GITLEAKS_VERSION=8.30.1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \

@@ -70,14 +70,16 @@ test("upgrade changes the server only with --server; --all keeps its harness-upd
     await context.done;
     const hasServer = flags.includes("--server");
     assert.equal(calls.some((c) => c[0] === "check-server-installed"), hasServer);
-    assert.equal(calls.some((c) => c[0] === "/test/node"), hasServer);
+    assert.equal(calls.some((c) => c[0] === "/test/node" && c[2] === "server"), hasServer);
     assert.equal(calls.some((c) => c[0] === "broker-cx" && c[1] === "update"), flags.includes("--all"));
     assert.equal(calls.some((c) => c[0] === "broker-oc" && c[1] === "upgrade"), flags.includes("--all"));
     assert.equal(calls.some((c) => c[0] === "broker-oc" && c[1] === "update"), false);
     if (hasServer) assert.deepEqual(calls.at(-1), ["/test/node", path.join(pkg, "cli.js"), "server", "install", "--no-ask", "--from", pkg]);
     assert.ok(calls.some((c) => c[0] === "bun" && c[1] === "install" && c[3] === pkg));
     for (const name of ["codex", "opencode"]) {
-      assert.ok(calls.some((c) => c[0] === "broker" && c[1] === "install" && c[2] === name && c.includes("--quiet")));
+      assert.ok(calls.some((c) => c[0] === "/test/node" &&
+        c[1] === path.join(pkg, "cli.js") && c[2] === "install" &&
+        c[3] === name && c.includes("--quiet")));
     }
     assert.equal(output.some((line) => line.includes("undo the shim")), false);
     if (flags.includes("--all")) assert.ok(output.some((line) => line.startsWith("opencode: broker-oc 1.2.3 →")));

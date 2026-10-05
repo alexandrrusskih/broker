@@ -453,8 +453,8 @@ async function main() {
       // hint telling people to go run another command; the hint named `cx`, which
       // no longer exists, and `broker wrap`, which installs the wrapper without
       // the shim — leaving the bare harness outside the broker. So do it here
-      // instead, for whatever is already installed, through the CLI we just put
-      // down (this process is still the old code).
+      // instead, for whatever is already installed, through the source CLI.
+      // PATH may still resolve an older broker from another package manager.
       const { WRAP: wrapTable } = require("./lib/wrap");
       const shimCfg = config.read();
       const installedProviders = Object.keys(wrapTable).filter(
@@ -464,7 +464,9 @@ async function main() {
       );
       for (const name of installedProviders) {
         try {
-          execFileSync("broker", ["install", name, "--no-ask", "--quiet"], { stdio: ["ignore", "pipe", "pipe"] });
+          execFileSync(process.execPath,
+            [pathMod.join(pkg, "cli.js"), "install", name, "--no-ask", "--quiet"],
+            { stdio: ["ignore", "pipe", "pipe"] });
           if (!flags.all && !flags.harnesses) console.log(`${name} wrapper: ready`);
         } catch (error) {
           failures++;

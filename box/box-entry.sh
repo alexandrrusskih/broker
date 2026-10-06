@@ -78,6 +78,20 @@ fi
 PATH="$HOME/bin:$HOME/.local/bin:$PATH"
 export PATH
 
+# The image binary stays visible; $HOME is a tmpfs that hides image files there.
+# Codex's shared hook config calls this path for every box.
+if [ -x /usr/local/bin/agntbus ]; then
+  if [ -n "${BROKER_BOX_UID:-}" ] && [ "$(id -u)" = "0" ]; then
+    [ -d "$HOME/.cargo" ] || install -d -o "$BROKER_BOX_UID" -g "${BROKER_BOX_GID:-0}" "$HOME/.cargo"
+    [ -d "$HOME/.cargo/bin" ] || install -d -o "$BROKER_BOX_UID" -g "${BROKER_BOX_GID:-0}" "$HOME/.cargo/bin"
+  else
+    mkdir -p "$HOME/.cargo/bin"
+  fi
+  if [ ! -e "$HOME/.cargo/bin/agntbus" ] && [ ! -L "$HOME/.cargo/bin/agntbus" ]; then
+    ln -s /usr/local/bin/agntbus "$HOME/.cargo/bin/agntbus"
+  fi
+fi
+
 if [ -n "${BROKER_BOX_UID:-}" ] && [ "$(id -u)" = "0" ]; then
   exec setpriv --reuid "$BROKER_BOX_UID" --regid "${BROKER_BOX_GID:-0}" --clear-groups "$@"
 fi

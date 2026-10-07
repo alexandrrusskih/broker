@@ -161,9 +161,9 @@ RUN git config --system core.checkStat minimal \
 # Codex runs the chat-identity hook in every box. The versioned files on the
 # public download host keep rebuilds stable when agntbus gets a new release.
 # As with the tools above, that host must be online while this image builds.
-ARG AGNTBUS_BUILD=1446cda
-ARG AGNTBUS_ARM64_SHA=0879c64eade3fad29cbc1e243a35e73416219e8fba26ba062334b482fd918d43
-ARG AGNTBUS_AMD64_SHA=cb8570bc988af9dc6eb0a482bfe19ee2094a0185598b91684b1695787f9b60f3
+ARG AGNTBUS_BUILD=7ace447
+ARG AGNTBUS_ARM64_SHA=3d8b1e9e1adfde02937528ce0ea777d181b97942339027ac17fcf06c58182bd3
+ARG AGNTBUS_AMD64_SHA=3d15f1e66c17b8b4290cbcd03de7d4a2c3a428d65fa6b63b33e93262ff40ceda
 RUN set -eu; \
     case "$(dpkg --print-architecture)" in \
       arm64) artifact=agntbus-linux-arm64; digest="$AGNTBUS_ARM64_SHA" ;; \

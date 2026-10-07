@@ -18,12 +18,12 @@ USAGE_AGENT = "antigravity/%s/%s" % (os.uname().sysname.lower(), os.uname().mach
 RANKED_PREFIXES = ("gemini-3", "claude-")
 
 
-def usage_request(auth):
-    """A request for this account's remaining quota per model."""
+def _post(url, auth, body=b"{}"):
+    """One signed POST to Antigravity's own API. Both calls are shaped alike."""
     token = (auth or {}).get("token") or {}
     return urllib.request.Request(
-        USAGE_URL,
-        data=b"{}",
+        url,
+        data=body,
         method="POST",
         headers={
             "Authorization": "Bearer " + (token.get("access_token") or ""),
@@ -31,6 +31,11 @@ def usage_request(auth):
             "User-Agent": USAGE_AGENT,
         },
     )
+
+
+def usage_request(auth):
+    """A request for this account's remaining quota per model."""
+    return _post(USAGE_URL, auth)
 
 
 def _reset_seconds(when):
@@ -99,20 +104,10 @@ PRODUCT_TIER = "free-tier"
 
 def check_eligibility(auth):
     """Why this account cannot be used, or None if it can."""
-    token = (auth or {}).get("token") or {}
     body = json.dumps(
         {"metadata": {"ideType": "IDE_UNSPECIFIED", "platform": "DARWIN_ARM64", "pluginType": "GEMINI"}}
     ).encode()
-    request = urllib.request.Request(
-        ELIGIBILITY_URL,
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": "Bearer " + (token.get("access_token") or ""),
-            "Content-Type": "application/json",
-            "User-Agent": USAGE_AGENT,
-        },
-    )
+    request = _post(ELIGIBILITY_URL, auth, body)
     try:
         with urllib.request.urlopen(request, timeout=15) as resp:
             answer = json.load(resp)

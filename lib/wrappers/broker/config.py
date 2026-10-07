@@ -101,6 +101,30 @@ def home_account(cfg, provider=None):
     return cfg.get("account")
 
 
+def write_json(target, data, prefix=".tmp-", indent=None):
+    """Write one JSON file atomically and 0600.
+
+    Written beside the destination and renamed over it, so a dropped connection
+    or a killed process never replaces a working file with half of one. The
+    three callers wrote this out separately until one of them was found to be
+    missing the chmod.
+    """
+    directory = os.path.dirname(target)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=prefix)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            json.dump(data, fh, indent=indent)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def save(patch):
     """Merge into the config, atomically and 0600."""
     try:
@@ -109,17 +133,4 @@ def save(patch):
     except (OSError, ValueError):
         cfg = {}
     cfg.update(patch)
-    directory = os.path.dirname(PATH)
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".config-")
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            json.dump(cfg, fh, indent=2)
-        os.replace(tmp, PATH)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    write_json(PATH, cfg, prefix=".config-", indent=2)

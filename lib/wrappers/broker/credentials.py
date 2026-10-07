@@ -2,7 +2,6 @@
 
 import json
 import os
-import tempfile
 
 from . import config
 from .out import warn
@@ -18,19 +17,7 @@ def write_auth(provider, path, auth):
     # AUTH_NAME may be a path (agy keeps its token three levels down), so the
     # temp file has to be written beside the destination, not at the top.
     target = os.path.join(path, provider.AUTH_NAME)
-    os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target), prefix=".auth-", suffix=".json")
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            json.dump(auth, fh)
-        os.replace(tmp, target)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    config.write_json(target, auth, prefix=".auth-")
 
 
 def _cache_dir():
@@ -66,19 +53,8 @@ def write_cache(provider, account, auth):
     file to fall back on when the broker cannot be reached. This is that
     fallback, and nothing else reads it.
     """
-    directory = _cache_dir()
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".cache-")
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            json.dump(auth, fh)
-        os.replace(tmp, cache_path(provider, account))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _cache_dir()  # the fallback directory, made before anything is written into it
+    config.write_json(cache_path(provider, account), auth, prefix=".cache-")
 
 
 def read_auth(provider, account):

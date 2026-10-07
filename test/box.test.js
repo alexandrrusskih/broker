@@ -252,9 +252,9 @@ test("the way back names the session the harness itself named", async (t) => {
 
   const out = engine(`
 from broker import box
-from broker.box import sessions
+from broker.box import sessions, store
 from broker.providers import codex
-print(sessions._resume_hint(codex, "demo", "${project}", {}, 0, None,
+print(store._resume_hint(codex, "demo", "${project}", {}, 0, None,
                        "019efe7b-889a-72d3-8a7c-bfae7be3dacd"))
 `, { HOME: dir });
 
@@ -276,10 +276,10 @@ test("a run that named no session says so, rather than inventing one", async (t)
 
   const out = engine(`
 from broker import box
-from broker.box import sessions
+from broker.box import sessions, store
 from broker.providers import claude
 claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
-print(sessions._resume_hint(claude, "demo", "${project}"))
+print(store._resume_hint(claude, "demo", "${project}"))
 `, { HOME: dir });
 
   assert.match(out, /did not name its session/);
@@ -290,7 +290,7 @@ print(sessions._resume_hint(claude, "demo", "${project}"))
 test("resuming and typing nothing still gets you back to the same session", async (t) => {
   const dir = await temp(t);
   const out = engine(`
-from broker.box import sessions
+from broker.box import sessions, store
 from broker.providers import codex, claude
 # The harness names no session on its way out — correctly, it started none:
 # nothing was typed, so there was nothing to save. The id was in the command.
@@ -656,7 +656,7 @@ test("the session a box offers to resume is its own, not the newest on the machi
 
   const out = engine(`
 from broker import box
-from broker.box import sessions
+from broker.box import sessions, store
 from broker.providers import claude
 claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
 claude.SESSION_ID_FLAG = ("--session-id", "%s")
@@ -664,7 +664,7 @@ claude.SESSION_PICKERS = ("--resume", "-r", "--continue", "-c", "--session-id")
 
 pinned, argv = box.sessions._pin_session(claude, ["--dangerously-skip-permissions"])
 print("FLAG", argv[0], argv[1] == pinned, argv[2])
-print(box.sessions._resume_hint(claude, "demo", "${project}", {}, 0, None, pinned))
+print(box.store._resume_hint(claude, "demo", "${project}", {}, 0, None, pinned))
 `, { HOME: dir });
 
   // The id is decided before the run, passed to the harness, and printed back
@@ -682,7 +682,7 @@ test("naming a session yourself leaves the command exactly as you typed it", asy
 
   const out = engine(`
 from broker import box
-from broker.box import sessions
+from broker.box import sessions, store
 from broker.providers import claude
 claude.SESSION_ID_FLAG = ("--session-id", "%s")
 claude.SESSION_PICKERS = ("--resume", "-r", "--continue", "-c", "--session-id")
@@ -711,7 +711,7 @@ test("a box can stand in for a command that must not run inside it", async (t) =
   const out = engine(`
 import json
 from broker import box
-from broker.box import sessions
+from broker.box import store
 from broker.providers import claude
 claude.MCP_CONFIG = None
 print(json.dumps(box.command(claude, "demo", {
@@ -1121,15 +1121,15 @@ test("a harness whose history is one database folds its session back by asking i
 
   const out = engine(`
 from broker import box
-from broker.box import sessions
+from broker.box import store
 from broker.providers import opencode
 
 # What the fold would run, without running it.
-store = sessions._private_store(opencode, "demo")
-print(store)
+private = store._private_store(opencode, "demo")
+print(private)
 print(opencode.BOX_SYNC_SHELL % {"session": "ses_TEST", "bin": "/bin/oc",
-                                 "store_parent": "'" + store.rsplit("/", 1)[0] + "'"})
-print(sessions._private_store(opencode, None))
+                                 "store_parent": "'" + private.rsplit("/", 1)[0] + "'"})
+print(store._private_store(opencode, None))
 `, { HOME: dir });
 
   const [found, script, missing] = out.trim().split("\n");

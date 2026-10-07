@@ -8,7 +8,7 @@ import sys
 from ..out import die, warn
 # Imported as modules, not as names: a test that replaces one of these replaces
 # it where it lives, and a bound name here would keep pointing at the original.
-from . import clones, environ, extras, harness, http_mcp, mcp, nested
+from . import clones, environ, extras, harness, http_mcp, mcp, nested, shim
 from .mcp import HOST_GATEWAY
 from .paths import _bind, _mount, _paths, expand, home_dir
 
@@ -136,7 +136,7 @@ def command(provider, name, profile, argv, env, remote=False):
                 if os.environ.get(variable) and variable not in inherited:
                     inherited[variable] = os.environ[variable]
             claimed[target] = server_name
-            cmd += _bind(mcp._write_shim(provider, server_name, live), target, "ro")
+            cmd += _bind(shim._write_shim(provider, server_name, live), target, "ro")
         for variable, value in sorted(inherited.items()):
             cmd += ["-e", "%s=%s" % (variable, value)]
         if claimed:

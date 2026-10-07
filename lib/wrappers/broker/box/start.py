@@ -12,8 +12,8 @@ from ..out import die, warn
 from . import boxes
 from .run import command
 from .sync import _sync_back
-from .sessions import (_exit_note, _pin_session, _remember, _resume_hint,
-                       _session_from_argv, _session_from_store, _session_it_named)
+from .sessions import _exit_note, _pin_session, _session_from_argv, _session_it_named
+from .store import _remember, _resume_hint, _session_from_store
 from .terminal import (_guard_terminal, _restore_terminal, _terminal_state,
                        _through_terminal)
 from .paths import expand

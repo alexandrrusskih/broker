@@ -14,7 +14,7 @@ import time
 
 from .. import config
 from ..out import warn
-from .sessions import _private_store
+from .store import _private_store
 
 
 SYNC_LOG = os.path.join(config.CONFIG_DIR, "box", "sync.log")

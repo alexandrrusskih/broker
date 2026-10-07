@@ -1,0 +1,116 @@
+"""The log of box sessions this machine started, and the way back into one."""
+
+import json
+import os
+import shlex
+import subprocess
+import time
+
+from .. import config
+from .sessions import _sessions_are_shared
+
+
+LOG = "sessions.log"
+
+
+def _remember(provider, name, workdir, session, account, status):
+    """Write down what was just run, so the way back survives anything.
+
+    The line a box prints on its way out is the only place the session id
+    appears — and it is printed by a program that has just been interrupted.
+    Ctrl-C, a killed container, a terminal closed by accident: the run ends,
+    the id goes with it, and what is left is a file among fourteen thousand
+    whose name nobody knows.
+
+    So it is also written here, one line per run, every run. Nothing clever:
+    the point is that it is on disk before anyone needs it.
+    """
+    line = "%s\t%s\t%s\t%s\t%s\texit %s\n" % (
+        time.strftime("%Y-%m-%d %H:%M:%S"), provider.NAME, name or "-",
+        workdir, session or "-", status)
+    path = os.path.join(config.CONFIG_DIR, LOG)
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with open(path, "a") as handle:
+            handle.write(line)
+    except OSError:
+        pass  # a missing note is not a reason to fail the run
+def _resume_hint(provider, name, workdir, env=None, since=0, account=None, session=None):
+    """What to type to come back INTO this box, on the same account.
+
+    The harness prints its own resume line as it exits, and that line is missing
+    the box: run it as printed and the session reopens on the host, in a
+    different world, which is not obvious until something behaves oddly.
+
+    The account is named only when it would otherwise be lost: a harness that
+    files its sessions INSIDE the per-account profile records an id the next
+    account cannot find ("no rollout found for thread id"). When the profiles
+    all reach one pile of sessions — which is the normal arrangement — the
+    broker picks an account by itself and the line stays clean.
+    """
+    form = getattr(provider, "SESSION_RESUME", "--resume %s")
+    if not session:
+        # It did not say — killed before it could, most likely. The way back is
+        # the harness's own picker, which knows; an id made up out here would
+        # look exactly like an answer and be a stranger's conversation.
+        return ("\nThis run did not name its session. To come back into this box:"
+                "\n  %s %s --box %s\n"
+                % (provider.BIN, getattr(provider, "SESSION_PICK", "resume"), name))
+    if isinstance(session, (list, tuple)):
+        # More than one was written. Every id, newest first — a guess would be
+        # worse than a list, and no list at all is worst of them all: the only
+        # other copy is on a screen the harness has already wiped.
+        pin = ""
+        if (account and getattr(provider, "CREDENTIALS", "file") != "env"
+                and not _sessions_are_shared(provider, env)):
+            pin = "%s_ACCOUNT=%s " % (provider.NAME.upper(), account)
+        lines = ["\nSessions written by this run, newest first:"]
+        lines += ["  %s%s %s --box %s" % (pin, provider.BIN, form % one, name)
+                  for one in session]
+        return "\n".join(lines) + "\n"
+    resume = form % (session or "<the id printed above>")
+    pin = ""
+    if (account and getattr(provider, "CREDENTIALS", "file") != "env"
+            and not _sessions_are_shared(provider, env)):
+        pin = "%s_ACCOUNT=%s " % (provider.NAME.upper(), account)
+    # The box goes last, after the id, so the line differs from the one the
+    # harness printed above it only by a suffix: type that suffix onto the end
+    # of what you already have, or delete it to go back to the host.
+    return "\nResume it in this box with:\n  %s%s %s --box %s\n" % (pin, provider.BIN, resume, name)
+def _session_from_store(provider, name, since):
+    """Ask the harness which session it just wrote, when there are no files.
+
+    One database and no session files means nothing on disk changes name when a
+    conversation happens, so the only way to know what to fold back is to ask —
+    in the box's own copy, which by now has no writer left.
+    """
+    shell = getattr(provider, "BOX_SESSION_SHELL", None)
+    store = _private_store(provider, name) if shell else None
+    if not store:
+        return None
+    from ..run import real_bin
+
+    binary = real_bin(provider)
+    if not binary:
+        return None
+    try:
+        found = subprocess.run(
+            ["/bin/sh", "-c", shell % {"bin": shlex.quote(binary),
+                                       "store_parent": shlex.quote(os.path.dirname(store))}],
+            capture_output=True, text=True, timeout=60)
+        rows = json.loads(found.stdout or "[]")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    # Milliseconds there, seconds here.
+    touched = [r for r in rows if isinstance(r, dict)
+               and (r.get("updated") or 0) / 1000.0 >= since]
+    if not touched:
+        return None
+    return max(touched, key=lambda r: r.get("updated") or 0).get("id")
+def _private_store(provider, name):
+    """The directory holding this box's own copy of the harness's databases."""
+    if not name:
+        return None
+    root = os.path.join(config.CONFIG_DIR, "box", "private",
+                        name.replace("/", "_"), provider.NAME)
+    return root if os.path.isdir(root) else None

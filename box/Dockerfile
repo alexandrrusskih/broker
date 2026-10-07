@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Pinned rather than floating: an image whose harness version changes between
 # builds is an image you cannot reproduce a bug in. Raise them deliberately.
 ARG CLAUDE_VERSION=2.1.285
-ARG CODEX_VERSION=0.160.0
+ARG CODEX_VERSION=0.160.1
 # bun is a project dependency, not a harness one: repositories pin it in
 # "packageManager", and without it `bun install` and every script that shells out
 # to it fails inside the box while working fine outside.

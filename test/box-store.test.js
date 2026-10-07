@@ -4,22 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
-const root = path.join(__dirname, "..");
-
-async function temp(t) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "broker-box-test-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  // realpath: on macOS the temp directory sits under /var, which is itself a
-  // symlink to /private/var — and the code under test resolves symlinks.
-  return fs.realpath(dir);
-}
-
-// The engine builds the command line; running python is how we see it.
-function engine(code, env = {}) {
-  return execFileSync("python3", ["-c", `import sys; sys.path.insert(0, 'lib/wrappers')\n${code}`],
-    { cwd: root, encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", ...env } });
-}
+const { temp, engine } = require("./helpers");
 
 test("a session written in a box joins the history out here, in order", async (t) => {
   const dir = await temp(t);
@@ -28,14 +13,12 @@ test("a session written in a box joins the history out here, in order", async (t
 import json, os, time
 from broker.box import sync
 
-
 class Provider:
     NAME = "demo"
     BIN = "demo"
     # Two steps: a thread started in a box lives in the box's copy of the
     # database, and one call is not enough to take it into the history here.
     BOX_SYNC = (("archive", "%(session)s"), ("unarchive", "%(session)s"))
-
 
 sync.SYNC_LOG = ${JSON.stringify(log)}
 import broker.run

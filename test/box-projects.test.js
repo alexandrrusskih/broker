@@ -2,24 +2,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
-const os = require("node:os");
-const net = require("node:net");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
-const root = path.join(__dirname, "..");
-
-async function temp(t) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "broker-mcp-test-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  // realpath: on macOS the temp directory sits under /var, which is itself a
-  // symlink to /private/var — and the code under test resolves symlinks.
-  return fs.realpath(dir);
-}
-
-function engine(code, env = {}) {
-  return execFileSync("python3", ["-c", `import sys; sys.path.insert(0, 'lib/wrappers')\n${code}`],
-    { cwd: root, encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", ...env } });
-}
+const { root, temp, engine } = require("./helpers");
 
 test("an explicit path in a box resolves symlinks too, so it cannot key a second database", async (t) => {
   const dir = await temp(t);

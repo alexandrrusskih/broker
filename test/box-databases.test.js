@@ -4,22 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
-const root = path.join(__dirname, "..");
-
-async function temp(t) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "broker-box-test-"));
-  t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  // realpath: on macOS the temp directory sits under /var, which is itself a
-  // symlink to /private/var — and the code under test resolves symlinks.
-  return fs.realpath(dir);
-}
-
-// The engine builds the command line; running python is how we see it.
-function engine(code, env = {}) {
-  return execFileSync("python3", ["-c", `import sys; sys.path.insert(0, 'lib/wrappers')\n${code}`],
-    { cwd: root, encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", ...env } });
-}
+const { root, temp, engine } = require("./helpers");
 
 test("the links to the machine's databases are taken out of a profile", async (t) => {
   const dir = await temp(t);
@@ -61,11 +46,9 @@ test("a database the harness invents in a profile becomes everyone's", () => {
 import json, os, tempfile
 from broker import layout
 
-
 class Provider:
     SHARED_GLOBS = ("*.sqlite",)
     SHARED = ()
-
 
 with tempfile.TemporaryDirectory() as root:
     Provider.CANONICAL_HOME = os.path.join(root, "home")

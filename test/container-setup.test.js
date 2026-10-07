@@ -131,30 +131,33 @@ test("real overlay builder produces a standalone bundle and home shim without a 
 });
 
 test("setup --container is opt-in and forwards the connection options without changing ordinary setup", async () => {
-  const source = (await fs.readFile(path.join(__dirname, "../cli.js"), "utf8"))
-    .replace("main().catch", "globalThis.done = main().catch");
+  // The command module itself: the sandbox below answers every require, so
+  // loading the whole CLI would take the test out of the sandbox.
+  const source = await fs.readFile(path.join(__dirname, "../lib/cmd/providers.js"), "utf8");
   for (const container of [false, true]) {
     const calls = [];
     const context = {
+      module: { exports: null },
       process: {
-        argv: ["node", "cli.js", "setup", ...(container ? ["--container"] : []),
-          "--client-config", "/test/client.json", "--url", "https://broker.test", "--no-ask"],
         stderr: { write(s) { assert.fail(s); } }, exit() { assert.fail("unexpected exit"); }
       },
       console: { log() {} },
       require(name) {
-        if (name === "./lib/config") return {};
-        if (name === "./lib/container-setup") return {
+        if (name === "../config") return {};
+        if (name === "../container-setup") return {
           setupContainer: async (options) => { calls.push(["container", options]); return { file: "/test/config", wrapper: "/test/wrapper", url: options.url, network: { accounts: 2 } }; }
         };
-        if (name === "./lib/setup") return {
+        if (name === "../setup") return {
           setup: async (options) => { calls.push(["client", options]); return { configured: true }; }
         };
         throw new Error(`unexpected module ${name}`);
       }
     };
     vm.runInNewContext(source, context);
-    await context.done;
+    await context.module.exports.setup({
+      container: container || undefined, "client-config": "/test/client.json",
+      url: "https://broker.test", "no-ask": true
+    });
     assert.equal(calls.length, 1);
     assert.equal(calls[0][0], container ? "container" : "client");
     assert.equal(calls[0][1].clientConfig, "/test/client.json");

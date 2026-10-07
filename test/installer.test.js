@@ -36,20 +36,23 @@ test("shell installer keeps the default client-only and forwards explicit server
 });
 
 test("upgrade changes the server only with --server; --all keeps its harness-update meaning", async () => {
-  const source = (await fs.readFile(path.join(root, "cli.js"), "utf8")).replace("main().catch", "globalThis.done = main().catch");
+  // The module itself, not the CLI around it: the sandbox below answers every
+  // require, so loading the real lib/ tree would take the test out of the sandbox.
+  const source = await fs.readFile(path.join(root, "lib", "cmd", "upgrade.js"), "utf8");
   for (const flags of [[], ["--all"], ["--server"], ["--all", "--server"]]) {
     const calls = [];
     const output = [];
     const pkg = "/test/new checkout";
     const cfg = { shims: ["codex", "opencode"] };
     const context = {
-      process: { argv: ["node", "cli.js", "upgrade", ...flags, "--from", pkg], execPath: "/test/node", stdout: { write() {} }, stderr: { write(s) { throw new Error(s); } }, exit() { assert.fail("unexpected exit"); } },
+      module: { exports: null },
+      process: { execPath: "/test/node", stdout: { write() {} }, stderr: { write(s) { throw new Error(s); } }, exit() { assert.fail("unexpected exit"); } },
       console: { log(s) { output.push(s); }, error(s) { output.push(s); } },
       require(name) {
-        if (name === "./lib/config") return { read: () => cfg };
+        if (name === "../config") return { read: () => cfg };
         // DROP AFTER 2026-12 along with the module itself.
-        if (name === "./lib/legacy") return { dropCaches: () => calls.push(["legacy.dropCaches"]) };
-        if (name === "./package.json") return { version: "test" };
+        if (name === "../legacy") return { dropCaches: () => calls.push(["legacy.dropCaches"]) };
+        if (name === "../../package.json") return { version: "test" };
         if (name === "child_process") return {
           execSync: (cmd) => calls.push([cmd]),
           execFileSync: (cmd, args) => { calls.push([cmd, ...args]); return args[0] === "--version" ? Buffer.from(`${cmd} 1.2.3\n`) : undefined; }
@@ -57,17 +60,17 @@ test("upgrade changes the server only with --server; --all keeps its harness-upd
         if (name === "os") return { homedir: () => "/test/user" };
         if (name === "path") return path;
         if (name === "fs") return { existsSync: (p) => p === path.join(pkg, "lib", "service.js") };
-        if (name === "./lib/source") return { sourcePackage: (_cfg, from) => { assert.equal(from, pkg); return pkg; } };
-        if (name === "./lib/wrap") return { WRAP: {
+        if (name === "../source") return { sourcePackage: (_cfg, from) => { assert.equal(from, pkg); return pkg; } };
+        if (name === "../wrap") return { WRAP: {
           codex: { cmd: "broker-cx", bin: "codex" },
           opencode: { cmd: "broker-oc", bin: "opencode", updateCommand: "upgrade" }
         } };
-        if (name === "./lib/service") return { createServiceManager: () => ({ requireInstalled: async () => calls.push(["check-server-installed"]) }) };
+        if (name === "../service") return { createServiceManager: () => ({ requireInstalled: async () => calls.push(["check-server-installed"]) }) };
         throw new Error(`unexpected module ${name}`);
       }
     };
     vm.runInNewContext(source, context);
-    await context.done;
+    await context.module.exports({ ...Object.fromEntries(flags.map((f) => [f.slice(2), true])), from: pkg });
     const hasServer = flags.includes("--server");
     assert.equal(calls.some((c) => c[0] === "check-server-installed"), hasServer);
     assert.equal(calls.some((c) => c[0] === "/test/node" && c[2] === "server"), hasServer);

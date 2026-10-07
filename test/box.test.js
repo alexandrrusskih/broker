@@ -23,7 +23,7 @@ function engine(code, env = {}) {
 test("--box is taken out of the arguments, and everything after -- is left alone", () => {
   const out = engine(`
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 import json
 print(json.dumps([
   box.take_flag(["--box", "work", "-p", "hi"]),
@@ -51,7 +51,7 @@ test("the box carries the harness's own directory and the project, with the toke
   const out = engine(`
 import json, os
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 cmd = box.command(claude, "demo",
                   {"rw": [${JSON.stringify(project)}], "ro": [${JSON.stringify(reference)}]},
@@ -95,7 +95,7 @@ test("a file-credentials harness gets its per-account profile, not the shared di
   const out = engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import codex
 cmd = box.command(codex, "demo", {"rw": [${JSON.stringify(project)}]}, ["exec", "hi"],
                   {"CODEX_HOME": ${JSON.stringify(profile)}, "BROKER_ACTIVE": "codex:sk"})
@@ -315,7 +315,7 @@ test("an undefined box names what is defined instead of failing blankly", async 
   }`);
   const out = engine(`
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 box.boxes.PATH = ${JSON.stringify(file)}
 print(sorted(box.profiles()))
 try:
@@ -339,7 +339,7 @@ test("a stopped container daemon says so, instead of offering a line to resume",
   const out = engine(`
 import contextlib, io
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import codex
 box.boxes.PATH = ${JSON.stringify(file)}
 said, code = io.StringIO(), None
@@ -368,7 +368,7 @@ test("only a box that runs containers gets a daemon, root and privileges", async
   const build = (extra) => JSON.parse(engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]${extra}}, [], {})))
@@ -404,7 +404,7 @@ test("a box gets only the ssh keys it names, and knows only the hosts it uses", 
   const out = engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 print(json.dumps(box.command(claude, "demo", {
@@ -437,7 +437,7 @@ test("a host can be a name that is not an address, without carrying your ssh con
   engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 box.command(claude, "demo", {
@@ -464,7 +464,7 @@ test("a box without an ssh section gets no ssh material at all", async (t) => {
   const out = engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]}, [], {})))
@@ -481,7 +481,7 @@ test("a box can give a shared tool its own copy of a directory the host also has
   const out = engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 print(json.dumps(box.command(claude, "demo", {"rw": [
@@ -512,7 +512,7 @@ test("the working directory inside a box is the physical path, not the link you 
   const out = engine(`
 import json, os
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 os.chdir("${link}/sub")
@@ -538,7 +538,7 @@ test("paths in a box resolve against your real home, not a profile handed to a h
   const out = engine(`
 import json, os
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import agy
 agy.MCP_CONFIG = None
 os.environ["HOME"] = os.path.expanduser("~/.some-profile")
@@ -567,7 +567,7 @@ test("a box that needs more than the base brings its own Dockerfile", async (t) 
   const out = engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 box.boxes.PATH = "${path.join(dir, ".config", "broker", "boxes.json")}"
@@ -627,7 +627,7 @@ test("a box decides what flags the harness gets, and yours still win", async (t)
   const run = (args, argv) => JSON.parse(engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 print(json.dumps(box.command(claude, "demo",
@@ -796,6 +796,10 @@ sys.stdout = tty
 
 # The restore has to sit in a finally, or an exception on the way out skips it.
 tree = ast.parse(io.open("lib/wrappers/broker/box/run.py", encoding="utf-8").read())
+# The signal handlers moved to box/terminal.py with the pty loop; exec_box, and
+# therefore the finally that restores the terminal, is still in run.py.
+signals_tree = ast.parse(
+    io.open("lib/wrappers/broker/box/terminal.py", encoding="utf-8").read())
 fn = next(n for n in ast.walk(tree)
           if isinstance(n, ast.FunctionDef) and n.name == "exec_box")
 guarded = any(
@@ -810,7 +814,7 @@ print(json.dumps({
     "on_pipe": on_pipe,
     "guarded": guarded,
     "signals": sorted(
-        n.attr for n in ast.walk(tree)
+        n.attr for n in ast.walk(signals_tree)
         if isinstance(n, ast.Attribute) and n.attr in ("SIGTERM", "SIGHUP")
     ),
 }))
@@ -932,7 +936,7 @@ test("a session written in a box joins the history out here, in order", async (t
   const log = path.join(dir, "sync.log");
   const out = engine(`
 import json, os, time
-from broker.box import run
+from broker.box import run, sync
 
 
 class Provider:
@@ -943,7 +947,7 @@ class Provider:
     BOX_SYNC = (("archive", "%(session)s"), ("unarchive", "%(session)s"))
 
 
-run.SYNC_LOG = ${JSON.stringify(log)}
+sync.SYNC_LOG = ${JSON.stringify(log)}
 run.real_bin = lambda p: "/bin/echo"
 import broker.run
 broker.run.real_bin = lambda p: "/bin/echo"
@@ -1040,7 +1044,7 @@ test("a box can run on another machine, and only its sources move", async (t) =>
   const out = engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
 claude.MCP_CONFIG = None
 box.boxes.PATH = "${path.join(dir, ".config", "broker", "boxes.json")}"
@@ -1076,7 +1080,7 @@ test("a harness the broker holds no credentials for still gets a box", async (t)
   const out = engine(`
 import json
 from broker import box
-from broker.box import boxes, mcp, run
+from broker.box import boxes, mcp, run, sync
 from broker.providers import opencode
 opencode.MCP_CONFIG = None
 print(json.dumps(box.command(opencode, "demo", {"rw": ["${project}"]}, ["run", "hi"], {})))
@@ -1131,14 +1135,14 @@ test("folding a session back and copying the databases never overlap", async (t)
   const log = path.join(dir, "sync.log");
   const out = engine(`
 import json, os, time
-from broker.box import run
+from broker.box import run, sync
 
 class Provider:
     NAME = "demo"
     BIN = "demo"
     BOX_SYNC = (("archive", "%(session)s"), ("unarchive", "%(session)s"))
 
-run.SYNC_LOG = ${JSON.stringify(log)}
+sync.SYNC_LOG = ${JSON.stringify(log)}
 run.real_bin = lambda p: "/bin/echo"
 import broker.run
 broker.run.real_bin = lambda p: "/bin/echo"

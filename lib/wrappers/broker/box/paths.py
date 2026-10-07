@@ -127,6 +127,18 @@ def _passwd_file(runtime, image):
     return cache
 
 
+def _bind(source, target, mode="rw"):
+    """One bind mount, source and target given separately.
+
+    _mount below is for a path kept at its own name, and it binds the physical
+    path as well. Everything that lands somewhere ELSE — a stub, a shim, a blank
+    file over a secret, a staged config — wants exactly one bind and said so by
+    writing the docker argument out by hand, nineteen times. This is that line.
+    """
+    flag = ",readonly" if mode == "ro" else ""
+    return ["--mount", "type=bind,source=%s,target=%s%s" % (source, target, flag)]
+
+
 def _mount(host, mode="rw", target=None):
     """Mount a path at its own path — and at its physical one too, if they differ.
 

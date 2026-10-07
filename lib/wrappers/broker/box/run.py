@@ -20,7 +20,15 @@ from ..out import die, warn
 # it where it lives, and a bound name here would keep pointing at the original.
 from . import boxes, http_mcp, mcp, ssh
 from .mcp import HOST_GATEWAY
-from .paths import _empty_file, _mount, _passwd_file, _paths, expand, home_dir, window_key
+from .sync import SYNC_LOG, _StoreLock, _sync_back
+from .sessions import (LOG, SAID_ID, SESSION_ID, _created, _exit_note, _id_shape, _pin_session,
+                      _private_store, _remember, _resume_hint, _session_from_argv,
+                      _session_from_store, _session_id, _session_it_named, _session_path,
+                      _session_root, _sessions_are_shared)
+from .terminal import (TERMINAL_RESET, _guard_terminal, _restore_terminal,
+                      _terminal_state, _through_terminal)
+from .paths import (_bind, _empty_file, _mount, _passwd_file, _paths, expand, home_dir,
+                    window_key)
 
 # What the terminal is, said in the terminal's own terms. Without these the
 # container substitutes a plain "xterm" and a C locale: mouse reporting,
@@ -272,7 +280,7 @@ def command(provider, name, profile, argv, env, remote=False):
     mounted = []
     passwd = _passwd_file(binary, image)
     if passwd:
-        cmd += ["--mount", "type=bind,source=%s,target=/etc/passwd,readonly" % passwd]
+        cmd += _bind(passwd, "/etc/passwd", "ro")
 
     for entry in COMMON_RO:
         host = expand(entry)
@@ -289,18 +297,17 @@ def command(provider, name, profile, argv, env, remote=False):
     for target, message in sorted((profile.get("stubs") or {}).items()):
         stub = _write_stub(name, expand(target), str(message))
         if stub:
-            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (stub, expand(target))]
+            cmd += _bind(stub, expand(target), "ro")
 
     # Named keys only, at their own paths, so a tool that resolves ~/.ssh/<name>
     # finds what it expects and nothing else is there to find.
     ssh_config, ssh_keys, ssh_known = ssh._ssh_config(name, profile)
     if ssh_config:
-        cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (ssh_config, os.path.join(home, ".ssh", "config"))]
+        cmd += _bind(ssh_config, os.path.join(home, ".ssh", "config"), "ro")
         for key in ssh_keys:
-            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (key, key)]
+            cmd += _bind(key, key, "ro")
         if ssh_known:
-            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly"
-                    % (ssh_known, os.path.join(home, ".ssh", "known_hosts"))]
+            cmd += _bind(ssh_known, os.path.join(home, ".ssh", "known_hosts"), "ro")
 
     # The harness's own directory: settings, MCP servers, agents, history.
     #
@@ -312,14 +319,14 @@ def command(provider, name, profile, argv, env, remote=False):
     # offering to restore it from a backup, while the host's copy was fine.
     http_config = None if profile.get("mcp") is False or provider.NAME == "codex" else http_mcp.stage(provider, env, name)
     http_config_mounted = False
-    http_mode = "" if provider.NAME == "claude" else ",readonly"
+    http_mode = "rw" if provider.NAME == "claude" else "ro"
     settings_mounted = set()
     for entry in getattr(provider, "BOX_HOME", ()):
         host = expand(entry)
         if not os.path.exists(host):
             continue
         if http_config and host == http_config[1]:
-            cmd += ["--mount", "type=bind,source=%s,target=%s%s" % (http_config[0], host, http_mode)]
+            cmd += _bind(http_config[0], host, http_mode)
             http_config_mounted = True
             settings_mounted.add(host)
             continue
@@ -335,8 +342,8 @@ def command(provider, name, profile, argv, env, remote=False):
         except OSError as exc:
             warn("could not stage %s for the box (%s) — it will be missing inside" % (host, exc))
             continue
-        mode = ",readonly" if entry in getattr(provider, "BOX_SETTINGS", ()) else ""
-        cmd += ["--mount", "type=bind,source=%s,target=%s%s" % (copy, host, mode)]
+        mode = "ro" if entry in getattr(provider, "BOX_SETTINGS", ()) else "rw"
+        cmd += _bind(copy, host, mode)
         settings_mounted.add(host)
     # ...minus its credentials file. The token comes from the broker below.
     blank = None
@@ -344,7 +351,7 @@ def command(provider, name, profile, argv, env, remote=False):
         host = expand(entry)
         if any(host.startswith(m + os.sep) for m in mounted):
             blank = blank or _empty_file()
-            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (blank, host)]
+            cmd += _bind(blank, host, "ro")
 
     # This window's own databases, at the same path inside as outside. The
     # harness is pointed at them by its own variable (see the provider), so a
@@ -396,8 +403,7 @@ def command(provider, name, profile, argv, env, remote=False):
         except OSError as exc:
             warn("could not write the glab config for the box (%s)" % exc)
         else:
-            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly"
-                    % (where, os.path.join(home, ".config", "glab-cli", "config.yml"))]
+            cmd += _bind(where, os.path.join(home, ".config", "glab-cli", "config.yml"), "ro")
 
     # Files a box gets EMPTY and keeps to itself: it may write them, and what
     # it writes stays inside. Not a secret it must not see (that is above, and
@@ -431,7 +437,7 @@ def command(provider, name, profile, argv, env, remote=False):
         except OSError as exc:
             warn("could not give the box a blank %s (%s)" % (entry, exc))
             continue
-        cmd += ["--mount", "type=bind,source=%s,target=%s" % (own, host)]
+        cmd += _bind(own, host)
 
     # Files a box may READ but must not touch. Not the same as a secret it may
     # not see at all: a harness inside needs these to work, and needs them to
@@ -444,7 +450,7 @@ def command(provider, name, profile, argv, env, remote=False):
     for entry in getattr(provider, "BOX_READONLY", ()):
         host = expand(entry)
         if os.path.exists(host) and any(host.startswith(m + os.sep) for m in mounted):
-            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly" % (host, host)]
+            cmd += _bind(host, host, "ro")
 
     writable = list(_paths(profile, "rw"))
     for host, target in writable:
@@ -504,7 +510,7 @@ def command(provider, name, profile, argv, env, remote=False):
         except OSError as exc:
             warn("could not give the box its own %s (%s)" % (entry, exc))
             continue
-        cmd += ["--mount", "type=bind,source=%s,target=%s" % (copy, host)]
+        cmd += _bind(copy, host)
 
     # Files a box must not share with the host, however they got there: cloned
     # in, so writing them inside changes nothing outside. One clone per real
@@ -538,7 +544,7 @@ def command(provider, name, profile, argv, env, remote=False):
                             warn("could not give the box its own %s (%s)" % (os.path.basename(real), exc))
                             continue
                         clones[real] = copy
-                    cmd += ["--mount", "type=bind,source=%s,target=%s" % (copy, host)]
+                    cmd += _bind(copy, host)
                     # sqlite keeps its write-ahead log and shared-memory file
                     # BESIDE the database, and those are part of its state: the
                     # newest pages live in -wal until a checkpoint folds them
@@ -562,8 +568,7 @@ def command(provider, name, profile, argv, env, remote=False):
                             warn("could not give the box its own %s (%s)"
                                  % (os.path.basename(real) + side, exc))
                             continue
-                        cmd += ["--mount", "type=bind,source=%s,target=%s"
-                                % (beside, host + side)]
+                        cmd += _bind(beside, host + side)
 
         # Copied; whoever wants to register a session may go ahead.
         store_lock.__exit__()
@@ -580,7 +585,7 @@ def command(provider, name, profile, argv, env, remote=False):
             for entry in shared:
                 host = os.path.join(sibling, entry)
                 if os.path.exists(host):
-                    cmd += ["--mount", "type=bind,source=%s,target=%s" % (os.path.realpath(host), host)]
+                    cmd += _bind(os.path.realpath(host), host)
 
     # The harness's config directory, wherever this run was pointed at: a
     # per-account profile for a file-credentials provider, and for claude
@@ -601,8 +606,7 @@ def command(provider, name, profile, argv, env, remote=False):
             cmd += _mount(source, target=host)
             cmd += ["-e", "%s=%s" % (home_env, host)]
     if http_config and not http_config_mounted:
-        cmd += ["--mount", "type=bind,source=%s,target=%s%s"
-                % (http_config[0], http_config[2], http_mode)]
+        cmd += _bind(http_config[0], http_config[2], http_mode)
 
     # Host settings stay read-only. Runtime state in the same home stays writable.
     config_target = http_config[1] if http_config else None
@@ -660,8 +664,7 @@ def command(provider, name, profile, argv, env, remote=False):
                 if os.environ.get(variable) and variable not in inherited:
                     inherited[variable] = os.environ[variable]
             claimed[target] = name
-            cmd += ["--mount", "type=bind,source=%s,target=%s,readonly"
-                    % (mcp._write_shim(provider, name, live), target)]
+            cmd += _bind(mcp._write_shim(provider, name, live), target, "ro")
         for variable, value in sorted(inherited.items()):
             cmd += ["-e", "%s=%s" % (variable, value)]
         if claimed:
@@ -701,629 +704,54 @@ def command(provider, name, profile, argv, env, remote=False):
     return cmd
 
 
-SESSION_ID = re.compile(
-    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-
-
-def _pin_session(provider, argv):
-    """Decide this run's session id before it starts, if the harness lets us.
-
-    Otherwise the box has to work it out afterwards by reading the newest
-    session file in the project's directory — which is right only while one
-    harness writes there. Every box open on the same project shares that
-    directory, so on a busy machine the newest file is somebody else's window,
-    and the resume line the box prints leads into a stranger's conversation.
-    The id is unguessable but not unknowable: harnesses accept it as an
-    argument, so it is chosen here and simply known.
-
-    Returns the id and the arguments to run with. When the person is already
-    naming a session — resuming, continuing, picking one from a list — the id
-    is theirs: it is read from what they typed, or left unknown when only a
-    picker can answer, and nothing is added.
-    """
-    flag = getattr(provider, "SESSION_ID_FLAG", None)
-    if not flag:
-        return None, argv
-    pickers = getattr(provider, "SESSION_PICKERS", ())
-    for index, arg in enumerate(argv):
-        key, _, inline = arg.partition("=")
-        if key not in pickers:
-            continue
-        value = inline if inline else (argv[index + 1] if index + 1 < len(argv) else "")
-        # A picker with nothing after it, or followed by the next flag: the
-        # session is chosen inside the harness, out of our sight.
-        return (value if SESSION_ID.match(value) else None), argv
-    chosen = str(uuid.uuid4())
-    return chosen, [flag[0], flag[1] % chosen, *argv]
-
-
-def _created(path):
-    """When this file came into being, where the filesystem records it."""
-    stat = os.stat(path)
-    return getattr(stat, "st_birthtime", stat.st_ctime)
-
-
-def _session_id(path):
-    """The id a harness gave this session, however it spells the filename."""
-    stem = os.path.splitext(os.path.basename(path))[0]
-    # Some name the file after the session; others prefix it with a timestamp
-    # and leave the id at the end.
-    match = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", stem)
-    return match.group(0) if match else stem
-
-
-def _session_root(provider, config_dir):
-    """Where this harness keeps its sessions, with links resolved."""
-    pattern = getattr(provider, "SESSION_GLOB", "") or ""
-    head = pattern.split("*", 1)[0] % {
-        "config": config_dir, "home": home_dir(), "key": "",
-    }
-    return os.path.realpath(head)
-
-
-def _sessions_are_shared(provider, env=None):
-    """Whether a session can be reopened without naming the account.
-
-    The account only matters when sessions live INSIDE the profile: the broker
-    moves to another account when one runs out of room, and an id recorded
-    under the first is then not found at all. When every profile reaches one
-    pile — a link, or simply the same directory — naming the account adds
-    nothing, and the broker choosing an account for itself is the point of it.
-    """
-    home_env = getattr(provider, "HOME_ENV", None)
-    config = (env or {}).get(home_env) if home_env and home_env != "HOME" else None
-    if not config:
-        return True
-    canonical = expand(getattr(provider, "CANONICAL_HOME", "~"))
-    return _session_root(provider, expand(config)) == _session_root(provider, canonical)
-
-
-def _session_path(provider, session, workdir, env=None):
-    """The file this session was written to, or None if it cannot be placed."""
-    pattern = getattr(provider, "SESSION_GLOB", None)
-    if not (pattern and session):
-        return None
-    import glob as globmodule
-
-    home_env = getattr(provider, "HOME_ENV", None)
-    config = (env or {}).get(home_env) if home_env and home_env != "HOME" else None
-    fields = {
-        "key": workdir.replace(os.sep, "-"),
-        "home": home_dir(),
-        "config": config or expand(getattr(provider, "CANONICAL_HOME", "~")),
-    }
-    for path in globmodule.glob(pattern % fields):
-        if _session_id(path) == session:
-            return path
-    return None
-
-
-def _exit_note(provider, session, workdir, env=None):
-    """Why the harness stopped, said again where it will still be readable.
-
-    A harness that draws a full-screen interface does it on the terminal's
-    alternate buffer: when it exits, the old screen comes back and everything
-    it had shown goes with it. Someone whose account ran out mid-run is left
-    facing a bare prompt, with no hint that anything was said at all — the
-    message was there, for as long as the program was.
-    """
-    read = getattr(provider, "session_error", None)
-    if not read:
-        return None
-    path = _session_path(provider, session, workdir, env)
-    if not path:
-        return None
-    try:
-        return read(path)
-    except Exception:  # never let a note about an error become an error
-        return None
-
-
-LOG = "sessions.log"
-
-
-def _through_terminal(cmd):
-    """Run the box with its terminal intact, and read what goes past.
-
-    The harness names the session itself as it exits — that line is the one
-    true answer to "which conversation was this", and everything else the box
-    has tried was a guess about file times in a directory every window writes
-    to. So the line is read rather than reconstructed.
-
-    Reading it must cost the terminal nothing: a full-screen interface needs a
-    real tty on the other side, with its size, its signals and its resizes. So
-    this is a pty in the middle, copying bytes both ways and keeping only the
-    tail to search afterwards.
-
-    Returns (exit status, what the harness printed).
-    """
-    import fcntl
-    import signal
-    import struct
-    import termios
-    import tty
-
-    master, slave = pty.openpty()
-    child = None
-    last_size = None
-
-    def resized(*_):
-        nonlocal last_size
-        try:
-            size = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
-            if size == last_size:
-                return
-            # The slave is closed after Popen; the master remains open for the run.
-            fcntl.ioctl(master, termios.TIOCSWINSZ, size)
-            last_size = size
-            if child is not None:
-                child.send_signal(signal.SIGWINCH)
-        except (OSError, ValueError):
-            pass
-
-    resized()
-    saved = None
-    try:
-        saved = termios.tcgetattr(sys.stdin.fileno())
-        tty.setraw(sys.stdin.fileno())
-    except (termios.error, ValueError, OSError):
-        saved = None
-
-    try:
-        previous = signal.signal(signal.SIGWINCH, resized)
-    except ValueError:
-        previous = None
-
-    # Ctrl-C belongs to whatever is inside: the terminal is raw, so it travels
-    # as a byte down the pty and the harness decides what to do with it. This
-    # process must not also die of it — someone holding the key down sends
-    # several, and the ones after the first would kill the very thing that is
-    # about to print how to come back. Seen exactly that: the harness named its
-    # session, and nothing was left on the screen to say so.
-    try:
-        interrupt = signal.signal(signal.SIGINT, signal.SIG_IGN)
-    except ValueError:
-        interrupt = None
-    child = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave,
-                             close_fds=True)
-    os.close(slave)
-    tail = b""
-    try:
-        while True:
-            # Some terminal managers update the PTY size without SIGWINCH.
-            resized()
-            try:
-                readable, _, _ = select.select([master, sys.stdin], [], [], 0.2)
-            except (OSError, ValueError):
-                break
-            if master in readable:
-                try:
-                    chunk = os.read(master, 65536)
-                except OSError:
-                    break
-                if not chunk:
-                    break
-                os.write(sys.stdout.fileno(), chunk)
-                # Enough to hold the last screen, not enough to hold a session.
-                tail = (tail + chunk)[-65536:]
-            if sys.stdin in readable:
-                try:
-                    typed = os.read(sys.stdin.fileno(), 65536)
-                except OSError:
-                    typed = b""
-                if typed:
-                    os.write(master, typed)
-            if child.poll() is not None and master not in readable:
-                # It is gone, but the terminal may still hold the last of what
-                # it wrote — the id among it. Drain to the end rather than stop
-                # here: stopping here worked about one time in three, which is
-                # the worst way for a thing to work.
-                while True:
-                    try:
-                        rest = os.read(master, 65536)
-                    except OSError:
-                        break
-                    if not rest:
-                        break
-                    os.write(sys.stdout.fileno(), rest)
-                    tail = (tail + rest)[-65536:]
-                break
-    finally:
-        try:
-            os.close(master)
-        except OSError:
-            pass
-        if saved is not None:
-            try:
-                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)
-            except (termios.error, ValueError, OSError):
-                pass
-        if previous is not None:
-            try:
-                signal.signal(signal.SIGWINCH, previous)
-            except ValueError:
-                pass
-        if interrupt is not None:
-            try:
-                signal.signal(signal.SIGINT, interrupt)
-            except ValueError:
-                pass
-    return child.wait(), tail
-
-
-def _session_from_argv(provider, argv):
-    """The session named on the command line, when one was.
-
-    Resuming and then typing nothing leaves the harness with nothing to save,
-    so it names no session on the way out — correctly, it started none. But the
-    id is right there in what was typed, and coming back to it is exactly what
-    the person was in the middle of doing.
-    """
-    pickers = set(getattr(provider, "SESSION_PICKERS", ()) or ())
-    pickers.add(getattr(provider, "SESSION_PICK", "resume"))
-    wanted = False
-    for word in argv or ():
-        if wanted and _id_shape(provider).fullmatch(word.encode()):
-            return word
-        wanted = word in pickers
-    return None
-
-
-# How a session id looks. Most harnesses use a uuid; opencode spells its own
-# "ses_" and then letters and digits, so the shape is asked of the provider
-# rather than assumed — an id that does not match is an id that is never found,
-# and the person is told their session has no name.
-SAID_ID = re.compile(rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-
-
-def _id_shape(provider):
-    own = getattr(provider, "SESSION_ID_RE", None)
-    if not own:
-        return SAID_ID
-    return re.compile(own.encode() if isinstance(own, str) else own)
-
-
-def _session_it_named(printed, pattern=None, provider=None):
-    """The session id the harness itself printed, if it did.
-
-    Its own resume line is what is wanted, so that is looked for first; a bare
-    id anywhere in the last screen is the fallback. The LAST one: a screen can
-    carry older ids in the scrollback of what it was doing.
-    """
-    if not printed:
-        return None
-    text = re.sub(rb"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*(\x07|\x1b\\)", b"", printed)
-    if pattern:
-        named = re.findall(pattern.encode() if isinstance(pattern, str) else pattern, text)
-        if named:
-            return named[-1].decode()
-    found = _id_shape(provider).findall(text) if provider else SAID_ID.findall(text)
-    return found[-1].decode() if found else None
-
-
-def _remember(provider, name, workdir, session, account, status):
-    """Write down what was just run, so the way back survives anything.
-
-    The line a box prints on its way out is the only place the session id
-    appears — and it is printed by a program that has just been interrupted.
-    Ctrl-C, a killed container, a terminal closed by accident: the run ends,
-    the id goes with it, and what is left is a file among fourteen thousand
-    whose name nobody knows.
-
-    So it is also written here, one line per run, every run. Nothing clever:
-    the point is that it is on disk before anyone needs it.
-    """
-    line = "%s\t%s\t%s\t%s\t%s\texit %s\n" % (
-        time.strftime("%Y-%m-%d %H:%M:%S"), provider.NAME, name or "-",
-        workdir, session or "-", status)
-    path = os.path.join(config.CONFIG_DIR, LOG)
-    try:
-        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-        with open(path, "a") as handle:
-            handle.write(line)
-    except OSError:
-        pass  # a missing note is not a reason to fail the run
-
-
-def _resume_hint(provider, name, workdir, env=None, since=0, account=None, session=None):
-    """What to type to come back INTO this box, on the same account.
-
-    The harness prints its own resume line as it exits, and that line is missing
-    the box: run it as printed and the session reopens on the host, in a
-    different world, which is not obvious until something behaves oddly.
-
-    The account is named only when it would otherwise be lost: a harness that
-    files its sessions INSIDE the per-account profile records an id the next
-    account cannot find ("no rollout found for thread id"). When the profiles
-    all reach one pile of sessions — which is the normal arrangement — the
-    broker picks an account by itself and the line stays clean.
-    """
-    form = getattr(provider, "SESSION_RESUME", "--resume %s")
-    if not session:
-        # It did not say — killed before it could, most likely. The way back is
-        # the harness's own picker, which knows; an id made up out here would
-        # look exactly like an answer and be a stranger's conversation.
-        return ("\nThis run did not name its session. To come back into this box:"
-                "\n  %s %s --box %s\n"
-                % (provider.BIN, getattr(provider, "SESSION_PICK", "resume"), name))
-    if isinstance(session, (list, tuple)):
-        # More than one was written. Every id, newest first — a guess would be
-        # worse than a list, and no list at all is worst of them all: the only
-        # other copy is on a screen the harness has already wiped.
-        pin = ""
-        if (account and getattr(provider, "CREDENTIALS", "file") != "env"
-                and not _sessions_are_shared(provider, env)):
-            pin = "%s_ACCOUNT=%s " % (provider.NAME.upper(), account)
-        lines = ["\nSessions written by this run, newest first:"]
-        lines += ["  %s%s %s --box %s" % (pin, provider.BIN, form % one, name)
-                  for one in session]
-        return "\n".join(lines) + "\n"
-    resume = form % (session or "<the id printed above>")
-    pin = ""
-    if (account and getattr(provider, "CREDENTIALS", "file") != "env"
-            and not _sessions_are_shared(provider, env)):
-        pin = "%s_ACCOUNT=%s " % (provider.NAME.upper(), account)
-    # The box goes last, after the id, so the line differs from the one the
-    # harness printed above it only by a suffix: type that suffix onto the end
-    # of what you already have, or delete it to go back to the host.
-    return "\nResume it in this box with:\n  %s%s %s --box %s\n" % (pin, provider.BIN, resume, name)
-
-
-SYNC_LOG = os.path.join(config.CONFIG_DIR, "box", "sync.log")
-
-
-def _session_from_store(provider, name, since):
-    """Ask the harness which session it just wrote, when there are no files.
-
-    One database and no session files means nothing on disk changes name when a
-    conversation happens, so the only way to know what to fold back is to ask —
-    in the box's own copy, which by now has no writer left.
-    """
-    shell = getattr(provider, "BOX_SESSION_SHELL", None)
-    store = _private_store(provider, name) if shell else None
-    if not store:
-        return None
-    from ..run import real_bin
-
-    binary = real_bin(provider)
-    if not binary:
-        return None
-    try:
-        found = subprocess.run(
-            ["/bin/sh", "-c", shell % {"bin": shlex.quote(binary),
-                                       "store_parent": shlex.quote(os.path.dirname(store))}],
-            capture_output=True, text=True, timeout=60)
-        rows = json.loads(found.stdout or "[]")
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    # Milliseconds there, seconds here.
-    touched = [r for r in rows if isinstance(r, dict)
-               and (r.get("updated") or 0) / 1000.0 >= since]
-    if not touched:
-        return None
-    return max(touched, key=lambda r: r.get("updated") or 0).get("id")
-
-
-class _StoreLock:
-    """Held while a harness's databases are copied, and while one is written.
-
-    Registering a session out here takes two steps, and between them the
-    session is archived. A box starting in that instant copied a database that
-    said so, and then refused to reopen its own session — "Failed to unarchive
-    session" — over a thread this machine considered perfectly live. That is
-    the only reason folding back was switched off.
-
-    The two are not in the same process, or even the same run, so the lock is a
-    file: whoever copies waits for whoever registers, and the other way round.
-    """
-
-    def __init__(self, provider):
-        self.path = os.path.join(config.CONFIG_DIR, "box", "%s-store.lock" % provider.NAME)
-        self.handle = None
-
-    def __enter__(self):
-        import fcntl
-
-        try:
-            os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
-            self.handle = open(self.path, "a+")
-            fcntl.flock(self.handle, fcntl.LOCK_EX)
-        except OSError:
-            # Never fatal: without the lock this is what it was before.
-            self.handle = None
-        return self
-
-    def __exit__(self, *_exc):
-        if self.handle is not None:
-            try:
-                import fcntl
-
-                fcntl.flock(self.handle, fcntl.LOCK_UN)
-            except OSError:
-                pass
-            self.handle.close()
-            self.handle = None
-        return False
-
-
-def _private_store(provider, name):
-    """The directory holding this box's own copy of the harness's databases."""
-    if not name:
-        return None
-    root = os.path.join(config.CONFIG_DIR, "box", "private",
-                        name.replace("/", "_"), provider.NAME)
-    return root if os.path.isdir(root) else None
-
-
-def _sync_back(provider, session, env=None, name=None):
-    """Put what the box wrote back into the history out here — in the background.
-
-    A box works on its own clone of the harness's databases, because sharing one
-    SQLite file across the container boundary tears it. The work itself is in
-    the session file, which IS shared — so the harness is asked to read that
-    session back into its history, which is what the command exists for. Merging
-    its tables by hand would be us guessing at someone else's schema.
-
-    Waited for, this held the prompt for several seconds every time: the harness
-    looks through every session it has to find the one named, and there are
-    thirteen thousand of them here. Nothing downstream depends on it having
-    finished — the session file is the record, the database is a view of it — so
-    it is started and left to run, with its output kept in case it fails.
-    """
-    template = getattr(provider, "BOX_SYNC", None)
-    if not template:
-        return
-    from ..run import real_bin
-
-    binary = real_bin(provider)
-    if not binary:
-        return
-    # One command, or several to run in order — a harness may need more than a
-    # single call to take a session into its history.
-    steps = template if isinstance(template[0], (list, tuple)) else (template,)
-    # Where the box's own copy of this harness's state ended up. A harness
-    # whose sessions live in one database has nothing to fold back WITHOUT it:
-    # the record is in there, not in a file the host can already see.
-    store = _private_store(provider, name)
-    fields = {"session": session, "bin": shlex.quote(binary),
-              "store_parent": shlex.quote(os.path.dirname(store)) if store else ""}
-
-    # A harness whose sessions live in one database cannot be folded back by
-    # copying files: the whole history is in that one file, and the box's copy
-    # would overwrite everything done outside while it ran. Such a harness
-    # spells the fold as a shell line instead, reading its own copy and asking
-    # itself to import the session — see providers/opencode.py.
-    shell = getattr(provider, "BOX_SYNC_SHELL", None)
-    if shell:
-        if not store:
-            return
-        script = shell % fields
-        by_hand = script
-        argvs = None
-    else:
-        argvs = [[binary] + [part % fields for part in step] for step in steps]
-    if argvs is not None:
-        by_hand = " && ".join(
-            " ".join([provider.BIN] + [part % fields for part in step])
-            for step in steps)
-    try:
-        os.makedirs(os.path.dirname(SYNC_LOG), mode=0o700, exist_ok=True)
-        log = open(SYNC_LOG, "a")
-    except OSError:
-        log = subprocess.DEVNULL
-    try:
-        log.write("\n=== %s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), by_hand))
-        log.flush()
-    except (AttributeError, OSError, ValueError):
-        pass
-    try:
-        # Its own session, so quitting the terminal does not take it with it.
-        # Chained through a shell rather than started one by one, because
-        # nothing here waits: the steps must still run in order after this
-        # process is gone.
-        if argvs is not None:
-            script = " && ".join(" ".join(shlex.quote(a) for a in argv) for argv in argvs)
-
-        # Under the same lock the copying takes. These steps leave the session
-        # archived in between, and a box copying the database right then would
-        # carry that state into a container which then could not reopen its own
-        # work — which is why folding back was switched off before. The child
-        # holds the lock, because this process does not wait for it.
-        script = "%s %s %s %s" % (
-            shlex.quote(sys.executable),
-            shlex.quote(os.path.join(os.path.dirname(os.path.abspath(__file__)), "holdlock.py")),
-            shlex.quote(_StoreLock(provider).path),
-            script,
-        )
-        subprocess.Popen(["/bin/sh", "-c", script], env={**os.environ, **(env or {})},
-                         stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                         start_new_session=True)
-    except (OSError, subprocess.SubprocessError) as exc:
-        # Not fatal: the session file is intact and the command can be run again
-        # by hand. Say which one, so it can be.
-        warn("could not fold this session back into the history (%s) — run: %s"
-             % (exc, by_hand))
-    finally:
-        if log is not subprocess.DEVNULL:
-            try:
-                log.close()
-            except OSError:
-                pass
-
-
-# Putting the terminal back the way the harness found it.
-#
-# A harness in a box owns the terminal completely: it switches to the alternate
-# screen, asks for mouse reports, and turns on the kitty keyboard protocol, in
-# which Enter arrives as "27;3u" and an arrow as "1:1A" rather than as ordinary
-# characters. On the way out it undoes every one of those — but only if it gets
-# to run. Stop the container from outside, or let it crash, and the process dies
-# where it stands: the pane is left speaking a language the shell underneath
-# does not understand, and typing into it produces "zsh: command not found: 1:1A".
-#
-# So the undoing belongs out here, in the thing that outlives the container.
-# Sending these when they are already off costs nothing — each is a no-op on a
-# terminal that is already in that state.
-TERMINAL_RESET = (
-    "\033[?1049l"                  # leave the alternate screen
-    "\033[<u"                      # pop the kitty keyboard flags
-    "\033[=0;1u"                   # ...and clear any that were set outright
-    "\033[?1l\033>"                # cursor keys and keypad back to normal
-    "\033[?2004l"                  # bracketed paste off
-    "\033[?1004l"                  # focus in/out reporting off — it arrives as "\033[O"
-    "\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1015l"  # mouse reporting off
-    "\033[?25h"                    # cursor visible again
-    "\033[0m"                      # attributes back to default
-)
-
-
-def _terminal_state():
-    """This terminal's driver settings, to be restored after the run."""
-    try:
-        if not sys.stdin.isatty():
-            return None
-        return termios.tcgetattr(sys.stdin.fileno())
-    except (termios.error, OSError, ValueError):
-        return None
-
-
-def _restore_terminal(saved):
-    """Undo both halves of what a harness does to a terminal: the driver's
-    settings (raw mode, no echo) and the modes held by the emulator itself."""
-    if saved is not None:
-        try:
-            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, saved)
-        except (termios.error, OSError, ValueError):
-            pass
-    try:
-        if sys.stdout.isatty():
-            sys.stdout.write(TERMINAL_RESET)
-            sys.stdout.flush()
-    except (OSError, ValueError):
-        pass
-
-
-def _guard_terminal(saved):
-    """Restore the terminal on the signals that would otherwise skip `finally`.
-
-    A `finally` covers the ordinary endings — the harness exits, the container
-    crashes, docker fails to start one. It does not cover this process being
-    told to end: the default action for SIGTERM and SIGHUP is to die on the
-    spot, leaving the pane in the harness's modes. SIGKILL still cannot be
-    caught, and that is the one case left for `broker box repair`.
-    """
-    def handler(number, _frame):
-        _restore_terminal(saved)
-        # Exit the way the signal would have, so anything waiting on this
-        # process still sees a signal death rather than a plain status.
-        signal.signal(number, signal.SIG_DFL)
-        os.kill(os.getpid(), number)
-
-    for number in (signal.SIGTERM, signal.SIGHUP):
-        try:
-            signal.signal(number, handler)
-        except (ValueError, OSError):  # not the main thread, or no such signal
-            pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def _over_ssh(cmd, machine, name):

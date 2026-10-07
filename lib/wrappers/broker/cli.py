@@ -22,12 +22,12 @@ from . import api, box, config, out, run, select, sessions
 COMMANDS = {
     "list": ("commands", "cmd_list"),
     "ls": ("commands", "cmd_list"),
-    "refresh": ("commands", "cmd_refresh"),
-    "delete-auth": ("commands", "cmd_delete_auth"),
+    "refresh": ("refresh", "cmd_refresh"),
+    "delete-auth": ("forget", "cmd_delete_auth"),
     "version": ("commands", "cmd_version"),
     "startup": ("commands", "cmd_startup"),
     "auth": ("install", "cmd_auth"),
-    "upgrade": ("install", "cmd_upgrade"),
+    "upgrade": ("upgrade", "cmd_upgrade"),
 }
 
 

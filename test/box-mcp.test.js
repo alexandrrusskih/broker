@@ -379,7 +379,7 @@ import json, sys, tempfile
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
-from broker import profile
+from broker import layout
 from broker.box import mcp as boxmcp
 from broker.providers import agy
 
@@ -395,8 +395,8 @@ with tempfile.TemporaryDirectory() as d:
     with patch.object(agy, 'CANONICAL_HOME', str(home)), \
          patch.object(agy, 'MCP_CONFIG', (str(shared), 'json', 'mcpServers')):
         plain, iso = Path(d) / 'p-plain', Path(d) / 'p-iso'
-        profile.mirror(agy, str(plain))
-        profile.mirror(agy, str(iso), isolate_mcp=True)
+        layout.mirror(agy, str(plain))
+        layout.mirror(agy, str(iso), isolate_mcp=True)
 
         # An ordinary profile keeps bridging what you declared.
         assert sorted(boxmcp.mcp_servers(agy, {'HOME': str(home)})) == ['srv-a', 'srv-b']

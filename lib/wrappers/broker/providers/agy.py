@@ -31,7 +31,7 @@ BOX_SETTINGS = ("~/.gemini/settings.json", "~/.gemini/config/mcp_config.json")
 
 # agy has no config-dir variable of its own — it goes to $HOME/.gemini and that
 # is that. So the profile IS a home directory, handed to the child through HOME,
-# and mirrored from the real one (see profile.mirror) so it differs in exactly
+# and mirrored from the real one (see layout.mirror) so it differs in exactly
 # one file: the token. PROFILE_ENV is ours, not agy's: HOME is always set, so it
 # cannot double as the "profile override" variable the way CODEX_HOME does.
 HOME_ENV = "HOME"

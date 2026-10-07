@@ -10,7 +10,7 @@ not even probed — a probe carries their own tokens and would light them up fro
 here too.
 """
 
-from . import accounts, api, config, profile, table
+from . import accounts, api, config, credentials, table
 from .out import die, warn
 
 
@@ -29,7 +29,7 @@ def _named(cfg, provider, account):
     if row["error"]:
         die("%s: %s" % (account, row["error"]))
     if row["auth"]:
-        profile.ensure(provider, [row])
+        credentials.ensure(provider, [row])
         return account, row["auth"]
     try:
         return account, api.fetch_auth(cfg, provider, account)
@@ -50,7 +50,7 @@ def _cached_or_die(provider, account, exc):
 
     Only for Unreachable: a rejected or revoked account must still fail loudly.
     """
-    auth = profile.read_auth(provider, account)
+    auth = credentials.read_auth(provider, account)
     if not auth:
         die("%s: %s (and no cached credentials in the profile)" % (account, exc))
     warn("%s — using the token already in the profile; limits unknown" % exc)
@@ -88,7 +88,7 @@ def resolve(cfg, provider, explicit, preferred=None):
         except api.Unreachable as exc:
             return home, _cached_or_die(provider, home, exc)
         if accounts.has_room(cfg, row):
-            profile.ensure(provider, [row])
+            credentials.ensure(provider, [row])
             # A provider with no readable usage would otherwise announce a
             # confident "0% used, 100% left" it knows nothing about.
             # Say when the number was taken if it did not come from just now:
@@ -124,7 +124,7 @@ def resolve(cfg, provider, explicit, preferred=None):
         return _named(cfg, provider, names[0])
 
     rows = accounts.probe_all(cfg, provider, names)
-    profile.ensure(provider, rows)
+    credentials.ensure(provider, rows)
 
     usable = [r for r in rows if not r["error"]]
     if not usable:

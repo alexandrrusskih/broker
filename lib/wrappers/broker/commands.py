@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 
-from . import accounts, api, config, profile, table
+from . import accounts, api, config, credentials, layout, profile, table
 from .out import die, warn
 
 try:
@@ -124,10 +124,10 @@ def cmd_refresh(cfg, provider, args):
         existed = os.path.isdir(home)
         try:
             if row["auth"]:
-                profile.write_auth(provider, home, row["auth"])
+                credentials.write_auth(provider, home, row["auth"])
             else:
                 os.makedirs(home, mode=0o700, exist_ok=True)
-                profile.prepare(provider, home)
+                layout.prepare(provider, home)
         except OSError as exc:
             warn("%s: cannot prepare %s: %s" % (row["account"], home, exc))
             continue
@@ -238,7 +238,7 @@ def drop_credentials(provider, account):
     survives at all.
     """
     removed = []
-    candidates = [profile.cache_path(provider, account)]
+    candidates = [credentials.cache_path(provider, account)]
     if getattr(provider, "CREDENTIALS", "file") != "env":
         candidates.append(os.path.join(profile.profile_dir(provider, account), provider.AUTH_NAME))
     for path in candidates:

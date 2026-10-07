@@ -3,7 +3,7 @@
 import os
 import sys
 
-from . import profile
+from . import credentials, profile
 from .out import die, warn
 
 # Mistaking a shim for the real binary is how a wrapper ends up calling itself —
@@ -120,13 +120,13 @@ def exec_harness(cfg, provider, account, auth, argv, extra_env=None, in_box=None
         for name in getattr(provider, "CLEAR_ENV", ()):
             os.environ.pop(name, None)
         try:
-            profile.write_cache(provider, account, auth)
+            credentials.write_cache(provider, account, auth)
         except OSError as exc:
             warn("could not cache the token (%s) — offline runs will not work" % exc)
     else:
         home = profile.profile_dir(provider, account)
         try:
-            profile.write_auth(provider, home, auth)
+            credentials.write_auth(provider, home, auth)
         except OSError as exc:
             die("cannot write %s in %s: %s" % (provider.AUTH_NAME, home, exc))
         if provider.HOME_ENV:

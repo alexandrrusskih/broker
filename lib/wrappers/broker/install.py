@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 
-from . import accounts, api, config, profile, table
+from . import accounts, api, config, credentials, layout, profile, table
 from .out import die, warn
 
 # `upgrade` installs the CLI straight from the source repo — the only source
@@ -57,7 +57,7 @@ def cmd_auth(cfg, provider, args):
         home = profile.profile_dir(provider, account)
         try:
             os.makedirs(home, mode=0o700, exist_ok=True)
-            profile.prepare(provider, home)
+            layout.prepare(provider, home)
         except OSError as exc:
             die("cannot create the profile %s: %s" % (home, exc))
         env = provider.login_env(dict(os.environ, **{provider.HOME_ENV: home}))
@@ -97,7 +97,7 @@ def cmd_auth(cfg, provider, args):
     # The TUI exits 0 whether or not anyone signed in, so the profile is the only
     # honest answer to "did this work".
     if (signed_in and getattr(provider, "CREDENTIALS", "file") != "env"
-            and not profile.read_auth(provider, account)):
+            and not credentials.read_auth(provider, account)):
         die("%s exited without leaving credentials in %s — nothing was seeded. "
             "Sign in fully (paste the code from the browser), then quit it."
             % (provider.BIN, home))
@@ -213,7 +213,7 @@ def _swap_for_broker_copy(cfg, provider, home, account):
     """
     for _try in range(2):
         try:
-            profile.write_auth(provider, home, api.fetch_auth(cfg, provider, account))
+            credentials.write_auth(provider, home, api.fetch_auth(cfg, provider, account))
             return True
         except Exception as exc:  # noqa: BLE001 — reported, then retried once
             last = exc

@@ -56,7 +56,7 @@ import sys
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
 from broker.providers import codex
-from broker import run, api
+from broker import api, run
 cfg = {'url': 'https://broker.example.test', 'key': 'fake'}
 auth = {'tokens': {'refresh_token': 'a' * 64, 'access_token': 'fake'}}
 env = {}
@@ -71,7 +71,7 @@ codex.login_env(env)
 assert not env
 assert api.TIMEOUT > 62
 # Exercise the actual exec handoff without running Codex or touching its home.
-with patch.object(codex, 'HOME_ENV', 'BROKER_TEST_PROFILE'), patch.object(run.profile, 'profile_dir', return_value='/test/profile'), patch.object(run.profile, 'write_auth') as write_auth, patch.object(run, 'real_bin', return_value='/test/native-codex'), patch.object(run, '_path_without_shim', return_value='/test/bin'), patch.object(run.os, 'execv') as native:
+with patch.object(codex, 'HOME_ENV', 'BROKER_TEST_PROFILE'), patch.object(run.profile, 'profile_dir', return_value='/test/profile'), patch.object(run.credentials, 'write_auth') as write_auth, patch.object(run, 'real_bin', return_value='/test/native-codex'), patch.object(run, '_path_without_shim', return_value='/test/bin'), patch.object(run.os, 'execv') as native:
     run.exec_harness(cfg, codex, 'main', auth, ['exec', 'test'])
     write_auth.assert_called_once_with(codex, '/test/profile', auth)
     native.assert_called_once_with('/test/native-codex', ['codex', 'exec', 'test'])
@@ -108,11 +108,11 @@ assert 'fake-admin-key' not in str([z.read(n) for n in z.namelist() if not n.end
 # Exercise the shipped artifact too: updating source alone must not leave the
 # Medulla bundle unable to prepare a profile in a fresh container.
 sys.path.insert(0, sys.argv[1])
-from broker import profile
+from broker import credentials
 from broker.providers import codex
 with tempfile.TemporaryDirectory() as fresh:
     codex.CANONICAL_HOME = os.path.join(fresh, '.codex')
-    profile.write_auth(codex, os.path.join(fresh, '.codex-main'), {'synthetic': True})
+    credentials.write_auth(codex, os.path.join(fresh, '.codex-main'), {'synthetic': True})
     assert os.path.isdir(codex.CANONICAL_HOME)
     assert not os.path.exists(os.path.join(codex.CANONICAL_HOME, 'auth.json'))
 `;
@@ -127,13 +127,13 @@ test("a fresh auto-picked retry skips a broken account, while an explicit accoun
 import sys
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
-from broker import select, accounts, api, profile
+from broker import accounts, api, credentials, select
 from broker.providers import codex
 cfg = {'accounts': {'codex': 'main'}}
 good = dict(accounts.stub('main'), auth={'tokens': {'access_token': 'fake-main'}}, used=10)
 bad = dict(accounts.stub('main'), error='needs re-auth')
 backup = dict(accounts.stub('backup'), auth={'tokens': {'access_token': 'fake-backup'}}, used=20)
-with patch.object(accounts, 'probe', side_effect=[good, bad, bad]), patch.object(api, 'list_accounts', return_value=['main','backup']), patch.object(accounts, 'probe_all', return_value=[backup,bad]), patch.object(profile, 'ensure'), patch.object(select, '_announce'):
+with patch.object(accounts, 'probe', side_effect=[good, bad, bad]), patch.object(api, 'list_accounts', return_value=['main','backup']), patch.object(accounts, 'probe_all', return_value=[backup,bad]), patch.object(credentials, 'ensure'), patch.object(select, '_announce'):
     assert select.resolve(cfg, codex, None)[0] == 'main'
     assert select.resolve(cfg, codex, None)[0] == 'backup'
     try:
@@ -152,7 +152,7 @@ test("a resumed session starts from the account it ran on, and a new session is 
 import os, stat, sys
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
-from broker import select, accounts, api, profile, sessions, config
+from broker import accounts, api, config, credentials, select, sessions
 from broker.providers import claude, codex
 
 # which session a run names
@@ -182,13 +182,13 @@ assert stat.S_IMODE(os.stat(sessions._file(claude)).st_mode) == 0o600
 # the session's account replaces the default as the one tried first...
 cfg = {'account': 'main'}
 roomy = dict(accounts.stub('backup'), auth={'token': 'fake'}, used=10)
-with patch.object(accounts, 'probe', return_value=roomy) as probe, patch.object(profile, 'ensure'), patch.object(select, 'warn'):
+with patch.object(accounts, 'probe', return_value=roomy) as probe, patch.object(credentials, 'ensure'), patch.object(select, 'warn'):
     assert select.resolve(cfg, claude, None, 'backup')[0] == 'backup'
     assert probe.call_args[0][2] == 'backup'
 # ...but a session whose account ran dry still moves elsewhere
 dry = dict(accounts.stub('backup'), auth={'token': 'fake'}, used=100, blocked=True)
 other = dict(accounts.stub('main'), auth={'token': 'fake-main'}, used=5)
-with patch.object(accounts, 'probe', return_value=dry), patch.object(api, 'list_accounts', return_value=['main', 'backup']), patch.object(accounts, 'probe_all', return_value=[other, dry]), patch.object(profile, 'ensure'), patch.object(select, 'warn'), patch.object(select, '_announce'):
+with patch.object(accounts, 'probe', return_value=dry), patch.object(api, 'list_accounts', return_value=['main', 'backup']), patch.object(accounts, 'probe_all', return_value=[other, dry]), patch.object(credentials, 'ensure'), patch.object(select, 'warn'), patch.object(select, '_announce'):
     assert select.resolve(cfg, claude, None, 'backup')[0] == 'main'
 `;
   execFileSync("python3", ["-c", program], { cwd: root, env: { ...process.env, HOME: home, PYTHONDONTWRITEBYTECODE: "1" }, stdio: "pipe" });

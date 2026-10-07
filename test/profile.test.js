@@ -11,7 +11,7 @@ import json, os, stat, sys, tempfile
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
-from broker import profile
+from broker import credentials, layout
 from broker.providers import codex
 
 with tempfile.TemporaryDirectory() as directory:
@@ -20,15 +20,15 @@ with tempfile.TemporaryDirectory() as directory:
     main, second = root / '.codex-main', root / '.codex-second'
     with patch.object(codex, 'CANONICAL_HOME', str(canonical)):
         assert not canonical.exists()
-        profile.write_auth(codex, str(main), {'synthetic': 'main'})
+        credentials.write_auth(codex, str(main), {'synthetic': 'main'})
         assert canonical.is_dir()
         assert stat.S_IMODE(canonical.stat().st_mode) == 0o700
         assert not (canonical / 'auth.json').exists()
         # A future file name must be shared without editing a hard-coded list.
         (canonical / 'future-state.json').write_text('shared')
-        profile.write_auth(codex, str(second), {'synthetic': 'second'})
-        profile.prepare(codex, str(main))
-        profile.prepare(codex, str(second))
+        credentials.write_auth(codex, str(second), {'synthetic': 'second'})
+        layout.prepare(codex, str(main))
+        layout.prepare(codex, str(second))
         for folder, expected in [(main, 'main'), (second, 'second')]:
             assert (folder / 'future-state.json').is_symlink()
             assert (folder / 'future-state.json').read_text() == 'shared'
@@ -47,7 +47,7 @@ import os, sys, tempfile
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
-from broker import profile
+from broker import credentials, layout
 from broker.providers import codex
 
 with tempfile.TemporaryDirectory() as directory:
@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory() as directory:
         (account / ('thread_history_1.sqlite' + suffix)).write_text(value)
     (account / 'auth.json').write_text('private sentinel')
     with patch.object(codex, 'CANONICAL_HOME', str(canonical)):
-        profile.prepare(codex, str(account))
+        layout.prepare(codex, str(account))
         assert (account / 'thread_history_1.sqlite').is_symlink()
         for suffix, value in [('', 'database'), ('-wal', 'checkpoint'), ('-shm', 'index')]:
             assert (canonical / ('thread_history_1.sqlite' + suffix)).read_text() == value
@@ -67,7 +67,7 @@ with tempfile.TemporaryDirectory() as directory:
         # Existing copies remain a deliberate merge, never overwritten by prepare.
         (canonical / 'state_5.sqlite').write_text('canonical')
         (account / 'state_5.sqlite').write_text('account')
-        profile.prepare(codex, str(account))
+        layout.prepare(codex, str(account))
         assert (canonical / 'state_5.sqlite').read_text() == 'canonical'
         assert (account / 'state_5.sqlite').read_text() == 'account'
 print('ok')
@@ -122,7 +122,7 @@ import os, sys, tempfile
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, 'lib/wrappers')
-from broker import profile
+from broker import layout, profile, tree
 from broker.providers import agy
 
 def old_algorithm(provider, path):
@@ -130,7 +130,7 @@ def old_algorithm(provider, path):
     pairs, parts = [], provider.AUTH_NAME.split(os.sep)
     canonical, dst = provider.CANONICAL_HOME, path
     for depth, private in enumerate(parts):
-        for name in profile._entries(canonical):
+        for name in tree._entries(canonical):
             if name != private:
                 pairs.append((os.path.join(canonical, name), os.path.join(dst, name)))
         if depth == len(parts) - 1:
@@ -168,10 +168,10 @@ with tempfile.TemporaryDirectory() as directory:
         assert str(home / '.gitconfig') in shared_iso, 'and so does the rest of the home'
 
         # The mirror on disk: a link where it shared, a real directory where it split.
-        profile.mirror(agy, str(plain))
+        layout.mirror(agy, str(plain))
         assert (plain / '.gemini' / 'config').is_symlink()
 
-        profile.mirror(agy, str(isolated), isolate_mcp=True)
+        layout.mirror(agy, str(isolated), isolate_mcp=True)
         assert not (isolated / '.gemini' / 'config').is_symlink(), 'split, not linked'
         assert (isolated / '.gemini' / 'config').is_dir()
         assert (isolated / '.gemini' / 'config' / 'config.json').is_symlink()
@@ -187,7 +187,7 @@ with tempfile.TemporaryDirectory() as directory:
         assert (isolated / '.gemini' / 'antigravity-cli' / 'workspaces.json').is_symlink()
 
         # Turning it on again is idempotent, and a link the user aimed elsewhere stays.
-        profile.mirror(agy, str(isolated), isolate_mcp=True)
+        layout.mirror(agy, str(isolated), isolate_mcp=True)
         assert (isolated / '.gemini' / 'config' / 'mcp_config.json').read_text() == \
                '{"mcpServers":{}}'
 print('ok')

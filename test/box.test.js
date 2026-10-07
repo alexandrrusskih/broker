@@ -840,7 +840,7 @@ test("a database the harness invents in a profile becomes everyone's", () => {
   // in silence until one held the only real history.
   const out = engine(`
 import json, os, tempfile
-from broker import profile
+from broker import layout
 
 
 class Provider:
@@ -862,7 +862,7 @@ with tempfile.TemporaryDirectory() as root:
     open(os.path.join(Provider.CANONICAL_HOME, "logs_2.sqlite"), "w").write("theirs")
     open(os.path.join(prof, "logs_2.sqlite"), "w").write("mine")
 
-    moved = profile.promote(Provider, prof)
+    moved = layout.promote(Provider, prof)
     link = os.path.join(prof, "state_5.sqlite")
     print(json.dumps({
         "moved": moved,
@@ -1191,10 +1191,10 @@ test("a file the harness will not open through a link gets a second name instead
 
   const out = engine(`
 import json, os
-from broker import profile
+from broker import layout
 from broker.providers import codex
 codex.CANONICAL_HOME = ${JSON.stringify(canonical)}
-profile.prepare(codex, ${JSON.stringify(profile)})
+layout.prepare(codex, ${JSON.stringify(profile)})
 
 creds = os.path.join(${JSON.stringify(profile)}, ".credentials.json")
 conf = os.path.join(${JSON.stringify(profile)}, "config.toml")
@@ -1276,10 +1276,10 @@ test("a lock that is not shared is not a lock", async (t) => {
 
   const out = engine(`
 import json, os
-from broker import profile
+from broker import layout
 from broker.providers import codex
 codex.CANONICAL_HOME = ${JSON.stringify(canonical)}
-profile.prepare(codex, ${JSON.stringify(profile)})
+layout.prepare(codex, ${JSON.stringify(profile)})
 locks = os.path.join(${JSON.stringify(profile)}, "mcp-oauth-locks")
 print(json.dumps({
     "is_link": os.path.islink(locks),

@@ -971,33 +971,45 @@ print(json.dumps({"log": open(${JSON.stringify(log)}).read()}))
 
 test("image pins follow the machine forward, never backward", async (t) => {
   const dir = await temp(t);
-  const context = path.join(dir, "box");
-  await fs.mkdir(context, { recursive: true });
-  await fs.writeFile(path.join(context, "Dockerfile"), [
+  const dockerfile = path.join(dir, "Dockerfile");
+  await fs.writeFile(dockerfile, [
     "FROM node:24-trixie-slim",
     "ARG CLAUDE_VERSION=2.1.267",
     "ARG GH_VERSION=2.100.0",
     "",
   ].join("\n"));
 
-  const box = require("../lib/box");
-  const original = box.installedVersion;
-  t.after(() => { box.installedVersion = original; });
-
+  const pins = require("../lib/box-pins");
   // This machine is behind on one tool and ahead on the other — the situation
   // that lowered six pins for everybody when a colleague ran `upgrade`.
-  box.installedVersion = (spec) => ({ CLAUDE_VERSION: "2.1.251", GH_VERSION: "2.101.0" })[spec.arg];
+  const installed = (_spec, arg) =>
+    ({ CLAUDE_VERSION: "2.1.251", GH_VERSION: "2.101.0" })[arg];
+
+  const changed = [];
+  const skipped = [];
+  pins.syncPinsIn(dockerfile, { installed }, changed, skipped);
+  const text = await fs.readFile(dockerfile, "utf8");
+
+  // The tool this machine is ahead on moves; the one it is behind on stays.
+  assert.deepEqual(changed, [{ arg: "GH_VERSION", from: "2.100.0", to: "2.101.0" }]);
+  assert.deepEqual(skipped, [{ arg: "CLAUDE_VERSION", pinned: "2.1.267", installed: "2.1.251" }]);
+  assert.match(text, /ARG GH_VERSION=2\.101\.0/);
+  assert.match(text, /ARG CLAUDE_VERSION=2\.1\.267/);
+
+  // ...unless the downgrade is asked for by name.
+  const down = [];
+  pins.syncPinsIn(dockerfile, { installed, allowDowngrade: true }, down, []);
+  assert.deepEqual(down, [{ arg: "CLAUDE_VERSION", from: "2.1.267", to: "2.1.251" }]);
 
   // laterVersion is what decides, and it has to compare numbers as numbers:
   // 1.116.0 is newer than 1.107.0, and 2.101.0 newer than 2.100.0.
-  assert.equal(box.laterVersion("1.116.0", "1.107.0"), "1.116.0");
-  assert.equal(box.laterVersion("2.101.0", "2.100.0"), "2.101.0");
-  assert.equal(box.laterVersion("1.4.2", "1.3.14"), "1.4.2");
-  assert.equal(box.laterVersion("v5.5.1", "v5.4.0"), "v5.5.1");
+  assert.equal(pins.laterVersion("1.116.0", "1.107.0"), "1.116.0");
+  assert.equal(pins.laterVersion("2.101.0", "2.100.0"), "2.101.0");
+  assert.equal(pins.laterVersion("1.4.2", "1.3.14"), "1.4.2");
+  assert.equal(pins.laterVersion("v5.5.1", "v5.4.0"), "v5.5.1");
   // An older pin genuinely loses to a newer install.
-  assert.equal(box.laterVersion("2.1.251", "2.1.267"), "2.1.267");
+  assert.equal(pins.laterVersion("2.1.251", "2.1.267"), "2.1.267");
 });
-
 test("state a box must not share can be keyed to the window", async (t) => {
   // A box's name is the same in every window, so a directory named after the
   // box is one directory for all of them. Measured here as thirteen boxes

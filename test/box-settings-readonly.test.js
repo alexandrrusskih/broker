@@ -28,9 +28,9 @@ test("host settings stay read-only in every box", async (t) => {
   const code = `
 import json, sys
 sys.path.insert(0, "lib/wrappers")
-from broker.box import run
+from broker.box import extras, run
 from broker.providers import codex, claude, agy, opencode
-run._passwd_file = lambda *args: None
+extras._passwd_file = lambda *args: None
 result = {}
 for provider in (codex, claude, agy, opencode):
     env = {"CODEX_HOME": ${JSON.stringify(account)}} if provider.NAME == "codex" else {}

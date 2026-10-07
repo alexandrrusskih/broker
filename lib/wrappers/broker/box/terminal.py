@@ -10,7 +10,6 @@ import os
 import pty
 import select
 import signal
-import struct
 import subprocess
 import sys
 import termios
@@ -32,12 +31,6 @@ def _through_terminal(cmd):
 
     Returns (exit status, what the harness printed).
     """
-    import fcntl
-    import signal
-    import struct
-    import termios
-    import tty
-
     master, slave = pty.openpty()
     child = None
     last_size = None

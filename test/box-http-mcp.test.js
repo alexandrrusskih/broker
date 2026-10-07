@@ -25,9 +25,9 @@ import json, os, sys
 from types import SimpleNamespace
 sys.path.insert(0, "lib/wrappers")
 from broker import config
-from broker.box import run
+from broker.box import extras, run
 config.CONFIG_DIR = ${JSON.stringify(path.join(f.dir, "broker"))}
-run._passwd_file = lambda *args: None
+extras._passwd_file = lambda *args: None
 provider = SimpleNamespace(NAME="probe", BIN="echo", CREDENTIALS=None,
     BOX_HOME=(${JSON.stringify(wholeDirectory ? f.home : f.source)},),
     HOME_ENV="CODEX_HOME", CANONICAL_HOME=${JSON.stringify(f.home)},

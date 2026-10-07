@@ -252,9 +252,9 @@ test("the way back names the session the harness itself named", async (t) => {
 
   const out = engine(`
 from broker import box
-from broker.box import run
+from broker.box import sessions
 from broker.providers import codex
-print(run._resume_hint(codex, "demo", "${project}", {}, 0, None,
+print(sessions._resume_hint(codex, "demo", "${project}", {}, 0, None,
                        "019efe7b-889a-72d3-8a7c-bfae7be3dacd"))
 `, { HOME: dir });
 
@@ -276,10 +276,10 @@ test("a run that named no session says so, rather than inventing one", async (t)
 
   const out = engine(`
 from broker import box
-from broker.box import run
+from broker.box import sessions
 from broker.providers import claude
 claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
-print(run._resume_hint(claude, "demo", "${project}"))
+print(sessions._resume_hint(claude, "demo", "${project}"))
 `, { HOME: dir });
 
   assert.match(out, /did not name its session/);
@@ -290,13 +290,13 @@ print(run._resume_hint(claude, "demo", "${project}"))
 test("resuming and typing nothing still gets you back to the same session", async (t) => {
   const dir = await temp(t);
   const out = engine(`
-from broker.box import run
+from broker.box import sessions
 from broker.providers import codex, claude
 # The harness names no session on its way out — correctly, it started none:
 # nothing was typed, so there was nothing to save. The id was in the command.
-print(run._session_from_argv(codex, ["resume", "019efe7b-889a-72d3-8a7c-bfae7be3dacd"]))
-print(run._session_from_argv(claude, ["--resume", "019efe7b-889a-72d3-8a7c-bfae7be3dacd"]))
-print(run._session_from_argv(codex, ["exec", "hello"]))
+print(sessions._session_from_argv(codex, ["resume", "019efe7b-889a-72d3-8a7c-bfae7be3dacd"]))
+print(sessions._session_from_argv(claude, ["--resume", "019efe7b-889a-72d3-8a7c-bfae7be3dacd"]))
+print(sessions._session_from_argv(codex, ["exec", "hello"]))
 `, { HOME: dir });
 
   const [fromCodex, fromClaude, fromPlainRun] = out.trim().split("\n");
@@ -656,14 +656,15 @@ test("the session a box offers to resume is its own, not the newest on the machi
 
   const out = engine(`
 from broker import box
+from broker.box import sessions
 from broker.providers import claude
 claude.SESSION_GLOB = "%(home)s/.claude/projects/%(key)s/*.jsonl"
 claude.SESSION_ID_FLAG = ("--session-id", "%s")
 claude.SESSION_PICKERS = ("--resume", "-r", "--continue", "-c", "--session-id")
 
-pinned, argv = box.run._pin_session(claude, ["--dangerously-skip-permissions"])
+pinned, argv = box.sessions._pin_session(claude, ["--dangerously-skip-permissions"])
 print("FLAG", argv[0], argv[1] == pinned, argv[2])
-print(box.run._resume_hint(claude, "demo", "${project}", {}, 0, None, pinned))
+print(box.sessions._resume_hint(claude, "demo", "${project}", {}, 0, None, pinned))
 `, { HOME: dir });
 
   // The id is decided before the run, passed to the harness, and printed back
@@ -681,17 +682,18 @@ test("naming a session yourself leaves the command exactly as you typed it", asy
 
   const out = engine(`
 from broker import box
+from broker.box import sessions
 from broker.providers import claude
 claude.SESSION_ID_FLAG = ("--session-id", "%s")
 claude.SESSION_PICKERS = ("--resume", "-r", "--continue", "-c", "--session-id")
 
 # Resuming by id: yours, and already known.
-print("BYID", *box.run._pin_session(claude, ["--resume", "bbbbbbbb-1111-2222-3333-444444444444"]))
+print("BYID", *box.sessions._pin_session(claude, ["--resume", "bbbbbbbb-1111-2222-3333-444444444444"]))
 # A picker with nothing to pick from yet: the answer lives inside the harness.
-print("PICKER", box.run._pin_session(claude, ["--continue"])[0])
+print("PICKER", box.sessions._pin_session(claude, ["--continue"])[0])
 # A harness that cannot be told an id keeps the old way of finding out.
 claude.SESSION_ID_FLAG = None
-print("UNTOLD", box.run._pin_session(claude, ["--print", "hi"]))
+print("UNTOLD", box.sessions._pin_session(claude, ["--print", "hi"]))
 `, { HOME: dir });
 
   // Nothing added, nothing reordered: a session the person named is theirs.
@@ -709,6 +711,7 @@ test("a box can stand in for a command that must not run inside it", async (t) =
   const out = engine(`
 import json
 from broker import box
+from broker.box import sessions
 from broker.providers import claude
 claude.MCP_CONFIG = None
 print(json.dumps(box.command(claude, "demo", {
@@ -763,7 +766,7 @@ test("a box puts the terminal back, whatever killed it", () => {
   // undoes none of it, and the shell underneath then reads Enter as "27;3u".
   const out = engine(`
 import ast, io, json, sys
-from broker.box import run
+from broker.box import terminal
 
 wrote = io.StringIO()
 
@@ -774,7 +777,7 @@ class Tty(io.StringIO):
 
 
 # What the sequence actually turns off.
-reset = run.TERMINAL_RESET
+reset = terminal.TERMINAL_RESET
 modes = {
     "alternate screen": "\\033[?1049l" in reset,
     "kitty keyboard": "\\033[<u" in reset,
@@ -787,17 +790,17 @@ modes = {
 # On a terminal it is written; on a pipe it is not, or a redirected run would
 # collect escape bytes in its output file.
 tty, sys.stdout = sys.stdout, Tty()
-run._restore_terminal(None)
+terminal._restore_terminal(None)
 on_tty = sys.stdout.getvalue()
 sys.stdout = io.StringIO()
-run._restore_terminal(None)
+terminal._restore_terminal(None)
 on_pipe = sys.stdout.getvalue()
 sys.stdout = tty
 
 # The restore has to sit in a finally, or an exception on the way out skips it.
-tree = ast.parse(io.open("lib/wrappers/broker/box/run.py", encoding="utf-8").read())
-# The signal handlers moved to box/terminal.py with the pty loop; exec_box, and
-# therefore the finally that restores the terminal, is still in run.py.
+tree = ast.parse(io.open("lib/wrappers/broker/box/start.py", encoding="utf-8").read())
+# The signal handlers live in box/terminal.py with the pty loop; exec_box, and
+# therefore the finally that restores the terminal, lives in box/start.py.
 signals_tree = ast.parse(
     io.open("lib/wrappers/broker/box/terminal.py", encoding="utf-8").read())
 fn = next(n for n in ast.walk(tree)
@@ -936,7 +939,7 @@ test("a session written in a box joins the history out here, in order", async (t
   const log = path.join(dir, "sync.log");
   const out = engine(`
 import json, os, time
-from broker.box import run, sync
+from broker.box import sync
 
 
 class Provider:
@@ -948,10 +951,9 @@ class Provider:
 
 
 sync.SYNC_LOG = ${JSON.stringify(log)}
-run.real_bin = lambda p: "/bin/echo"
 import broker.run
 broker.run.real_bin = lambda p: "/bin/echo"
-run._sync_back(Provider, "SID")
+sync._sync_back(Provider, "SID")
 # Started and left to run: nothing here waits for it.
 for _ in range(50):
     time.sleep(0.1)
@@ -1052,7 +1054,7 @@ print(json.dumps(sorted(box.profiles())))
 name, machine, rest = box.boxes.take_remote(["--remote", "windows", "-p", "hi"])
 print(json.dumps([name, rest]))
 cmd = box.command(claude, "demo", box.profiles()["demo"], rest, {})
-print(json.dumps(box.run._over_ssh(cmd, machine, name)))
+print(json.dumps(box.start._over_ssh(cmd, machine, name)))
 `, { HOME: dir });
 
   const [boxesLine, flagLine, sshLine] = out.trim().split("\n");
@@ -1107,15 +1109,15 @@ test("a harness whose history is one database folds its session back by asking i
 
   const out = engine(`
 from broker import box
-from broker.box import run
+from broker.box import sessions
 from broker.providers import opencode
 
 # What the fold would run, without running it.
-store = run._private_store(opencode, "demo")
+store = sessions._private_store(opencode, "demo")
 print(store)
 print(opencode.BOX_SYNC_SHELL % {"session": "ses_TEST", "bin": "/bin/oc",
                                  "store_parent": "'" + store.rsplit("/", 1)[0] + "'"})
-print(run._private_store(opencode, None))
+print(sessions._private_store(opencode, None))
 `, { HOME: dir });
 
   const [found, script, missing] = out.trim().split("\n");
@@ -1135,7 +1137,7 @@ test("folding a session back and copying the databases never overlap", async (t)
   const log = path.join(dir, "sync.log");
   const out = engine(`
 import json, os, time
-from broker.box import run, sync
+from broker.box import sync
 
 class Provider:
     NAME = "demo"
@@ -1143,7 +1145,6 @@ class Provider:
     BOX_SYNC = (("archive", "%(session)s"), ("unarchive", "%(session)s"))
 
 sync.SYNC_LOG = ${JSON.stringify(log)}
-run.real_bin = lambda p: "/bin/echo"
 import broker.run
 broker.run.real_bin = lambda p: "/bin/echo"
 
@@ -1151,8 +1152,8 @@ broker.run.real_bin = lambda p: "/bin/echo"
 # archive and unarchive the session is archived, and a box copying the database
 # in that instant carries that into a container which then cannot reopen its
 # own work. That is the race that switched this off in the first place.
-with run._StoreLock(Provider):
-    run._sync_back(Provider, "SID")
+with sync._StoreLock(Provider):
+    sync._sync_back(Provider, "SID")
     time.sleep(1.5)
     held = open(${JSON.stringify(log)}).read() if os.path.exists(${JSON.stringify(log)}) else ""
 

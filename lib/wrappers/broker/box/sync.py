@@ -6,7 +6,6 @@ that says the session is archived.
 """
 
 import fcntl
-import json
 import os
 import shlex
 import subprocess
@@ -15,11 +14,12 @@ import time
 
 from .. import config
 from ..out import warn
-from .paths import expand
-from .sessions import _private_store, _session_path
+from .sessions import _private_store
 
 
 SYNC_LOG = os.path.join(config.CONFIG_DIR, "box", "sync.log")
+
+
 class _StoreLock:
     """Held while a harness's databases are copied, and while one is written.
 

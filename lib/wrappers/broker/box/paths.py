@@ -11,7 +11,7 @@ import pwd
 import subprocess
 
 from .. import config
-from ..out import die, warn
+from ..out import die
 
 REAL_HOME_ENV = "BROKER_REAL_HOME"
 

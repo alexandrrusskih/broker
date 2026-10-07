@@ -14,7 +14,7 @@ import time
 
 from .. import config
 from ..out import warn
-from .paths import expand, home_dir
+from .paths import expand
 
 # Inside a container "localhost" is the container. This is the host.
 HOST_GATEWAY = "host.docker.internal"

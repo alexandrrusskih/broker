@@ -18,19 +18,22 @@ Two things make the difference between "it runs" and "it is usable":
     credentials file: the token arrives from the broker, and a copy on disk
     inside the box is a copy that can leak out of it.
 
-Split across four files because each answers a different question: profiles (what
-a box is), paths (where things go), mcp and ssh (what a box may reach), run (how
-it starts).
+Split by subject, because each file answers a different question: boxes (what a
+box is), paths (where things go), mcp and ssh (what a box may reach), environ
+(what it carries), harness, clones and extras (which files it sees and which
+copies it keeps), nested (a box that runs containers), run (the command line) and
+start (running it, and the terminal while it runs).
 """
 
-from . import boxes, mcp, paths, run, ssh
+from . import boxes, mcp, paths, run, ssh, start
 from .mcp import mcp_servers
 from .paths import REAL_HOME_ENV, expand, home_dir
 from .boxes import EXAMPLE, FLAG, PATH, profiles, take_flag
-from .run import command, exec_box
+from .run import command
+from .start import exec_box
 
 __all__ = [
     "EXAMPLE", "FLAG", "PATH", "REAL_HOME_ENV",
-    "boxes", "mcp", "paths", "run", "ssh",
+    "boxes", "mcp", "paths", "run", "ssh", "start",
     "command", "exec_box", "expand", "home_dir", "mcp_servers", "profiles", "take_flag",
 ]

@@ -90,6 +90,7 @@ test("a file-credentials harness gets its per-account profile, not the shared di
   const profile = path.join(dir, "codex-sk");
   await fs.mkdir(project);
   await fs.mkdir(profile);
+  await fs.writeFile(path.join(profile, "auth.json"), "profile-token");
 
   const out = engine(`
 import json
@@ -101,7 +102,11 @@ cmd = box.command(codex, "demo", {"rw": [${JSON.stringify(project)}]}, ["exec", 
 print(json.dumps(cmd))
 `);
   const line = JSON.parse(out).join(" ");
-  assert.ok(line.includes(`source=${profile},target=${profile}`), "the account's profile comes in");
+  const mount = JSON.parse(out).find((part) => part.includes(`target=${profile}`));
+  assert.ok(mount, "the account's profile comes in");
+  const source = mount.match(/source=([^,]+)/)[1];
+  assert.notEqual(source, profile, "the box cannot replace a host profile symlink");
+  assert.equal(await fs.readFile(path.join(source, "auth.json"), "utf8"), "profile-token");
   assert.ok(line.includes(`-e CODEX_HOME=${profile}`), "and the harness is pointed at it");
   assert.ok(line.includes(`target=${os.homedir()}/.codex/auth.json,readonly`), "the shared directory's own token is covered");
 });

@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import tempfile
 from urllib.parse import urlsplit, urlunsplit
 
@@ -43,6 +44,34 @@ def _box_url(value):
     if port is not None:
         host += ":%d" % port
     return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
+
+
+def codex_args(provider, env):
+    """Override loopback MCP URLs without mounting Codex's writable config file."""
+    if provider.NAME != "codex":
+        return []
+    path = _config_path(provider, env)
+    if not path or not os.path.isfile(path):
+        return []
+    try:
+        import tomllib
+
+        with open(path, "rb") as handle:
+            servers = tomllib.load(handle).get("mcp_servers", {})
+    except (OSError, ValueError) as error:
+        warn("could not read MCP URLs for the box: %s" % error)
+        return []
+    args = []
+    for name, server in servers.items():
+        if not isinstance(server, dict):
+            continue
+        url = _box_url(server.get("url"))
+        if url and not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            warn("cannot override MCP URL for server %r in the box" % name)
+            continue
+        if url:
+            args.extend(["-c", "mcp_servers.%s.url=%s" % (name, json.dumps(url))])
+    return args
 
 
 def stage(provider, env, box):

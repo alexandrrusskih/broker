@@ -138,7 +138,7 @@ def _daemon_is_up(binary):
     return probe.returncode == 0 and bool(probe.stdout.strip())
 
 
-def command(provider, name, profile, argv, env):
+def command(provider, name, profile, argv, env, remote=False):
     """The full container command line for this run."""
     runtime = profile.get("runtime") or "docker"
     binary = shutil.which(runtime)
@@ -310,15 +310,18 @@ def command(provider, name, profile, argv, env):
     # points at an inode nothing links to any more, and inside the box the file
     # has simply vanished: claude reported ~/.claude.json missing and started
     # offering to restore it from a backup, while the host's copy was fine.
-    http_config = None if profile.get("mcp") is False else http_mcp.stage(provider, env, name)
+    http_config = None if profile.get("mcp") is False or provider.NAME == "codex" else http_mcp.stage(provider, env, name)
     http_config_mounted = False
+    http_mode = "" if provider.NAME == "claude" else ",readonly"
+    settings_mounted = set()
     for entry in getattr(provider, "BOX_HOME", ()):
         host = expand(entry)
         if not os.path.exists(host):
             continue
         if http_config and host == http_config[1]:
-            cmd += ["--mount", "type=bind,source=%s,target=%s" % (http_config[0], host)]
+            cmd += ["--mount", "type=bind,source=%s,target=%s%s" % (http_config[0], host, http_mode)]
             http_config_mounted = True
+            settings_mounted.add(host)
             continue
         if os.path.isdir(host):
             cmd += _mount(host)
@@ -332,7 +335,9 @@ def command(provider, name, profile, argv, env):
         except OSError as exc:
             warn("could not stage %s for the box (%s) — it will be missing inside" % (host, exc))
             continue
-        cmd += ["--mount", "type=bind,source=%s,target=%s" % (copy, host)]
+        mode = ",readonly" if entry in getattr(provider, "BOX_SETTINGS", ()) else ""
+        cmd += ["--mount", "type=bind,source=%s,target=%s%s" % (copy, host, mode)]
+        settings_mounted.add(host)
     # ...minus its credentials file. The token comes from the broker below.
     blank = None
     for entry in getattr(provider, "BOX_SECRETS", ()):
@@ -586,11 +591,32 @@ def command(provider, name, profile, argv, env):
     if home_env and home_env != "HOME" and env.get(home_env):
         host = os.path.abspath(os.path.expanduser(env[home_env]))
         if os.path.isdir(host) and host not in mounted:
-            cmd += _mount(host)
+            source = host
+            if provider.NAME == "codex" and host != canonical and not remote:
+                root = os.path.join(config.CONFIG_DIR, "box", "profiles",
+                                    name.replace("/", "_"))
+                os.makedirs(root, mode=0o700, exist_ok=True)
+                source = os.path.join(root, uuid.uuid4().hex)
+                shutil.copytree(host, source, symlinks=True)
+            cmd += _mount(source, target=host)
             cmd += ["-e", "%s=%s" % (home_env, host)]
     if http_config and not http_config_mounted:
-        cmd += ["--mount", "type=bind,source=%s,target=%s"
-                % (http_config[0], http_config[2])]
+        cmd += ["--mount", "type=bind,source=%s,target=%s%s"
+                % (http_config[0], http_config[2], http_mode)]
+
+    # Host settings stay read-only. Runtime state in the same home stays writable.
+    config_target = http_config[1] if http_config else None
+    for entry in getattr(provider, "BOX_SETTINGS", ()):
+        host = expand(entry)
+        if os.path.isfile(host) and host != config_target and host not in settings_mounted:
+            cmd += _mount(os.path.realpath(host), "ro", host)
+    if provider.NAME == "codex" and env.get("CODEX_HOME"):
+        profile_home = os.path.abspath(expand(env["CODEX_HOME"]))
+        if profile_home != canonical:
+            for filename in ("config.toml", "hooks.json"):
+                host = os.path.join(profile_home, filename)
+                if os.path.isfile(host):
+                    cmd += _mount(os.path.realpath(host), "ro", host)
 
     # git refuses to touch a repository it thinks belongs to someone else, and
     # inside a box it always thinks so: Docker Desktop's file sharing does not
@@ -652,6 +678,8 @@ def command(provider, name, profile, argv, env):
     cmd.append(image)
     cmd.append("broker-box-entry")
     cmd.append(provider.BIN)
+    if profile.get("mcp") is not False:
+        cmd += http_mcp.codex_args(provider, env)
 
     # Flags the box hands the harness, before what you typed — so a flag you
     # pass on the command line still wins. This is where a box says how much it
@@ -1370,7 +1398,11 @@ def exec_box(provider, name, argv, env, account=None):
         if binary and not _daemon_is_up(binary):
             die("the %s daemon is not running — start it, then try again" % runtime)
     pinned, argv = _pin_session(provider, argv)
-    cmd = command(provider, name, defined[name], argv, env)
+    cmd = command(provider, name, defined[name], argv, env, remote=bool(remote))
+    shadow_root = os.path.join(config.CONFIG_DIR, "box", "profiles") + os.sep
+    shadows = [part.partition("source=")[2].partition(",")[0]
+               for part in cmd if part.startswith("type=bind,source=")
+               and part.partition("source=")[2].startswith(shadow_root)]
     if remote:
         # Sessions, databases and MCP bridges all belong to the machine the box
         # runs on, and none of them reach across. Say so once, rather than let
@@ -1409,6 +1441,8 @@ def exec_box(provider, name, argv, env, account=None):
         # Whatever happened in there — a clean exit, a crash, `docker stop` from
         # another window — the pane is usable again from this line on.
         _restore_terminal(saved)
+        for shadow in shadows:
+            shutil.rmtree(shadow, ignore_errors=True)
 
     # 125 is the one exit code docker keeps for itself: the CLI could not run the
     # container at all. Nothing ran in there, so there is no session to fold back

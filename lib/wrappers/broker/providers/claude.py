@@ -46,6 +46,7 @@ BOX_HOME = ("~/.claude", "~/.claude.json")
 # session was gone again at the next start. So it travels like the rest of the
 # directory, and a login inside a box is a login everywhere.
 BOX_SECRETS = ()
+BOX_SETTINGS = ("~/.claude/settings.json",)
 # Where this harness declares its MCP servers, so a box can reach the ones that
 # only exist on this machine (see mcpbridge.py).
 MCP_CONFIG = ("~/.claude.json", "json", "mcpServers")

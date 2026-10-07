@@ -28,6 +28,7 @@ CANONICAL_HOME = os.path.expanduser("~")
 #   "codebase-memory": { "type": "local", "command": ["/path/to/server"],
 #                        "environment": {...} }
 MCP_CONFIG = ("~/.config/opencode/opencode.jsonc", "jsonc", "mcp")
+BOX_SETTINGS = ("~/.config/opencode/opencode.jsonc",)
 
 # One SQLite database for every session it has ever had — a gigabyte of it
 # here. Shared across the container boundary it would tear: the journal lives

@@ -32,6 +32,7 @@ AUTH_NAME = "auth.json"
 # credentials this run uses live.
 BOX_HOME = ("~/.codex",)
 BOX_SECRETS = ("~/.codex/auth.json",)
+BOX_SETTINGS = ("~/.codex/config.toml", "~/.codex/hooks.json")
 MCP_CONFIG = ("~/.codex/config.toml", "toml", "mcp_servers")
 
 # Sessions, in one pile per config directory rather than per project: the file

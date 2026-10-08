@@ -44,6 +44,27 @@ BOX_HOME = ("~/.claude", "~/.claude.json")
 # session was gone again at the next start. So it travels like the rest of the
 # directory, and a login inside a box is a login everywhere.
 BOX_SECRETS = ()
+
+# What the HOST runs or reads as instruction from this directory, and a box has
+# no business changing. The directory itself travels writable, because that is
+# where the harness keeps its state — so without this a box could rewrite a
+# hook, a skill or a plugin's code, and the harness OUT HERE would run it at its
+# next start. Prompt files are the quieter half of the same hole: a line added
+# to one of these reaches every chat on this machine.
+#
+# Cache and state are deliberately left out. A box that cannot write its own
+# cache is a box that does not work.
+BOX_READONLY = (
+    "~/.claude/CLAUDE.md",
+    "~/.claude/RTK.md",
+    "~/.claude/hooks",
+    "~/.claude/skills",
+    "~/.claude/agents",
+    "~/.claude/commands",
+    # The plugin code and the hooks inside it; its cache and store stay writable.
+    "~/.claude/plugins/marketplaces",
+    "~/.claude/plugins/data",
+)
 BOX_SETTINGS = ("~/.claude/settings.json",)
 # Where this harness declares its MCP servers, so a box can reach the ones that
 # only exist on this machine (see mcpbridge.py).

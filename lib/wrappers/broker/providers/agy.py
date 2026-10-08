@@ -71,6 +71,20 @@ SESSION_RESUME = "--conversation %s"
 # and a smaller one than losing the login itself.
 BOX_BLANK = ((os.path.join("~", ".gemini", "antigravity-cli", "mcp_oauth_tokens.json"), "{}"),)
 
+# What the HOST runs or reads as instruction from this directory, and a box has
+# no business changing. The directory itself travels writable, because that is
+# where the harness keeps its state — so without this a box could rewrite a
+# hook, a skill or a plugin's code, and the harness OUT HERE would run it at its
+# next start. Prompt files are the quieter half of the same hole: a line added
+# to one of these reaches every chat on this machine.
+#
+# Cache and state are deliberately left out. A box that cannot write its own
+# cache is a box that does not work.
+BOX_READONLY = (
+    "~/.gemini/GEMINI.md",
+    "~/.gemini/skills",
+)
+
 # Ways of naming a conversation that already exists: the id is the person's
 # then, not ours to guess. This harness keeps every conversation it has ever
 # had in one directory — five hundred of them here, with nothing separating

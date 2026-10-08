@@ -33,6 +33,27 @@ AUTH_NAME = "auth.json"
 # credentials this run uses live.
 BOX_HOME = ("~/.codex",)
 BOX_SECRETS = ("~/.codex/auth.json",)
+
+# What the HOST runs or reads as instruction from this directory, and a box has
+# no business changing. The directory itself travels writable, because that is
+# where the harness keeps its state — so without this a box could rewrite a
+# hook, a skill or a plugin's code, and the harness OUT HERE would run it at its
+# next start. Prompt files are the quieter half of the same hole: a line added
+# to one of these reaches every chat on this machine.
+#
+# Cache and state are deliberately left out. A box that cannot write its own
+# cache is a box that does not work.
+BOX_READONLY = (
+    "~/.codex/AGENTS.md",
+    "~/.codex/RTK.md",
+    "~/.codex/rules",
+    "~/.codex/skills",
+    "~/.codex/prompts",
+    # The binaries the HOST's codex runs, kept under its own home. They are
+    # macOS builds, so a Linux box can neither use them nor need them — and
+    # could replace the one this machine starts tomorrow.
+    "~/.codex/packages",
+)
 BOX_SETTINGS = ("~/.codex/config.toml", "~/.codex/hooks.json")
 MCP_CONFIG = ("~/.codex/config.toml", "toml", "mcp_servers")
 

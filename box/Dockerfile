@@ -158,24 +158,6 @@ RUN git config --system --add safe.directory '*' \
 RUN git config --system core.checkStat minimal \
  && git config --system --get core.checkStat
 
-# Codex runs the chat-identity hook in every box. The versioned files on the
-# public download host keep rebuilds stable when agntbus gets a new release.
-# As with the tools above, that host must be online while this image builds.
-ARG AGNTBUS_BUILD=7ace447
-ARG AGNTBUS_ARM64_SHA=3d8b1e9e1adfde02937528ce0ea777d181b97942339027ac17fcf06c58182bd3
-ARG AGNTBUS_AMD64_SHA=3d15f1e66c17b8b4290cbcd03de7d4a2c3a428d65fa6b63b33e93262ff40ceda
-RUN set -eu; \
-    case "$(dpkg --print-architecture)" in \
-      arm64) artifact=agntbus-linux-arm64; digest="$AGNTBUS_ARM64_SHA" ;; \
-      amd64) artifact=agntbus-linux-x86_64; digest="$AGNTBUS_AMD64_SHA" ;; \
-      *) echo 'unsupported agntbus architecture' >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL "https://agntbus.otion.us/downloads/$artifact-$AGNTBUS_BUILD" -o /tmp/agntbus; \
-    printf '%s  %s\n' "$digest" /tmp/agntbus | sha256sum -c -; \
-    install -m 0755 /tmp/agntbus /usr/local/bin/agntbus; \
-    rm /tmp/agntbus; \
-    agntbus --version
-
 # The box runs as the host's own uid, passed at run time, so no user is created
 # here — and nothing in the image is owned by it. $HOME comes in as a tmpfs with
 # the right owner (see box.py), with the harness's real directories mounted on

@@ -1,6 +1,7 @@
 """The harness's own files and directories, as the box sees them."""
 
 import os
+import re
 import shutil
 import uuid
 
@@ -101,15 +102,57 @@ def chosen_home(provider, env, name, remote, mounted, canonical):
     return args
 
 
+# An absolute path inside a settings file. Stops at a quote or a space, so
+# `bash '/Users/me/.claude/hooks/state.sh' session` yields the script alone.
+SCRIPT = re.compile(r"/[\w./+-]+")
+
+
+def _named_scripts(provider, protected):
+    """Every script the harness's own settings tell it to run, read-only.
+
+    The settings files are read-only above, and that is not enough: a command
+    inside one NAMES a script, and those sit in the harness's own directory —
+    which a box gets writable, because that is where the harness keeps its
+    state. So a box could rewrite one and the HOST harness would run it at its
+    next session event, outside any container. Confirmed on this machine for
+    ~/.claude/hooks/herdr-agent-state.sh and ~/.codex/herdr-agent-state.sh.
+
+    The boundary is the directory the settings file itself lives in, and not the
+    harness home: agy's home IS your home, so "under the home" would have meant
+    every tool you own — including the MCP servers mounted by name further down,
+    which docker then refuses as a duplicate mount point.
+    """
+    args = []
+    seen = set(protected)
+    for entry in getattr(provider, "BOX_SETTINGS", ()):
+        host = expand(entry)
+        inside = os.path.dirname(host) + os.sep
+        try:
+            with open(host, encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        for found in SCRIPT.findall(text):
+            if found in seen or not found.startswith(inside):
+                continue
+            if not os.path.isfile(found):
+                continue
+            seen.add(found)
+            args += _mount(os.path.realpath(found), "ro", found)
+    return args
+
+
 def settings(provider, env, canonical, http_config, settings_mounted):
     """What the host decided and the box may read but not rewrite."""
     args = []
     # Host settings stay read-only. Runtime state in the same home stays writable.
     config_target = http_config[1] if http_config else None
+    protected = set(settings_mounted)
     for entry in getattr(provider, "BOX_SETTINGS", ()):
         host = expand(entry)
         if os.path.isfile(host) and host != config_target and host not in settings_mounted:
             args += _mount(os.path.realpath(host), "ro", host)
+            protected.add(host)
     if provider.NAME == "codex" and env.get("CODEX_HOME"):
         profile_home = os.path.abspath(expand(env["CODEX_HOME"]))
         if profile_home != canonical:
@@ -117,4 +160,8 @@ def settings(provider, env, canonical, http_config, settings_mounted):
                 host = os.path.join(profile_home, filename)
                 if os.path.isfile(host):
                     args += _mount(os.path.realpath(host), "ro", host)
+                    protected.add(host)
+    if config_target:
+        protected.add(config_target)
+    args += _named_scripts(provider, protected)
     return args

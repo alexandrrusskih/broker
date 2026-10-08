@@ -37,7 +37,7 @@ ARG BUN_VERSION=1.4.2
 # A fourth harness, kept at the same version as the machine outside. The broker
 # holds no credentials for this one and chooses no account for it — it is here
 # so that `opencode --box <name>` has something to run.
-ARG OPENCODE_VERSION=1.18.34
+ARG OPENCODE_VERSION=1.18.35
 RUN npm install -g --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
@@ -76,10 +76,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # rtk trims command output before it reaches the model. It hooks every tool use,
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
-ARG RTK_VERSION=0.50.0
+ARG RTK_VERSION=0.51.0
 ARG AGY_VERSION=1.2.16
 ARG GH_VERSION=2.102.0
-ARG GLAB_VERSION=1.120.0
+ARG GLAB_VERSION=1.121.0
 ARG GITLEAKS_VERSION=8.30.1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \

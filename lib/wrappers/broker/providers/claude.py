@@ -61,9 +61,14 @@ BOX_READONLY = (
     "~/.claude/skills",
     "~/.claude/agents",
     "~/.claude/commands",
-    # The plugin code and the hooks inside it; its cache and store stay writable.
+    # Every part of the plugin tree that holds CODE. "cache" is a misnomer: a
+    # cached version is the installed plugin — cache/<market>/<plugin>/<ver>/
+    # carries its hooks/hooks.json, its scripts, its commands, its agents and
+    # its .mcp.json, and the host starts all of that. Only plugins/store, which
+    # is state, stays writable.
     "~/.claude/plugins/marketplaces",
     "~/.claude/plugins/data",
+    "~/.claude/plugins/cache",
 )
 BOX_SETTINGS = ("~/.claude/settings.json",)
 # Where this harness declares its MCP servers, so a box can reach the ones that

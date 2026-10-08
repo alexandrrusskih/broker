@@ -13,7 +13,7 @@ TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
                 "LANG", "LC_ALL", "LC_CTYPE")
 
 
-def carried(profile, env, home):
+def carried(profile, env, home, box):
     """Everything the box gets from outside, plus what names this run."""
     args = []
     # What the person set in the shell they typed from, carried in as it is.
@@ -62,6 +62,17 @@ def carried(profile, env, home):
     # own. The same key `{window}` resolves to in a box's paths, so a tool and
     # the directory it was given agree on what "this run" means.
     args += ["-e", "BROKER_WINDOW_ID=%s" % window_key()]
+    # ...and that this IS a box, and which one. Nothing inside could tell: the
+    # paths match the host exactly, which is the point, so a tool that must
+    # behave differently in here had nothing to ask. A hook is the case this
+    # exists for — it reports the chat it is in to a terminal manager that
+    # cannot see into a container, and it has to know to do that.
+    args += ["-e", "BROKER_BOX=%s" % box]
+    # The same fact under the name the bus hooks already read. They are on the
+    # host, in the harness settings this box mounts read-only, so they run in
+    # here as they do out there — and their box branch was dead, because
+    # nothing set this. A box exists to make what works outside work inside.
+    args += ["-e", "AGNTBUS_BOX=1"]
     for variable in TERMINAL_ENV:
         if os.environ.get(variable):
             args += ["-e", "%s=%s" % (variable, os.environ[variable])]

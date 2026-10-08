@@ -30,7 +30,7 @@ def command(provider, name, profile, argv, env, remote=False):
     if sys.stdin.isatty() and sys.stdout.isatty():
         cmd.append("-it")
     cmd += nested.flags(name, profile, binary)
-    cmd += environ.carried(profile, env, home)
+    cmd += environ.carried(profile, env, home, name)
     # $HOME itself is a tmpfs owned by that uid. Without it the harness cannot
     # write to its own home: the container creates missing mount points as root,
     # and mounting the real home instead would hand the box everything in it.

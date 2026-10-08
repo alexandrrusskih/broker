@@ -180,3 +180,24 @@ print(json.dumps(cmd))
   // instead of carrying on without the servers that need a login.
   assert.ok(!line.includes(`target=${tokens},readonly`), "a box may write its own");
 });
+
+// Nothing inside a box could tell it was in one: the paths match the host
+// exactly, which is the point. A hook that must report the chat it is in to a
+// terminal manager outside the container has to know to do that.
+test("a box says that it is a box, and which one", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project);
+  const out = engine(`
+import json
+from broker import box
+from broker.providers import claude
+cmd = box.command(claude, "work", {"rw": [${JSON.stringify(project)}], "mcp": False}, [], {})
+print(json.dumps([cmd[i + 1] for i, part in enumerate(cmd) if part == "-e"]))
+`);
+  const env = JSON.parse(out);
+  assert.ok(env.includes("BROKER_BOX=work"), "the box says its own name");
+  // The bus hooks run from the harness settings this box mounts, on the host
+  // and in here alike, and their box branch reads this one.
+  assert.ok(env.includes("AGNTBUS_BOX=1"), "the bus hooks are told they are boxed");
+});

@@ -102,13 +102,16 @@ def chosen_home(provider, env, name, remote, mounted, canonical):
     return args
 
 
-# An absolute path inside a settings file. Stops at a quote or a space, so
-# `bash '/Users/me/.claude/hooks/state.sh' session` yields the script alone.
-SCRIPT = re.compile(r"/[\w./+-]+")
+# An absolute path named inside a settings file: quoted — so it may hold spaces
+# — or bare. Every candidate is checked against the filesystem below, so being
+# generous here costs nothing and missing a form costs the protection.
+SCRIPTS = (re.compile(r"'(/[^']+)'"),
+           re.compile(r'"(/[^"]+)"'),
+           re.compile(r"(/[\w./+-]+)"))
 
 
-def _named_scripts(provider, protected):
-    """Every script the harness's own settings tell it to run, read-only.
+def _named_scripts(sources, protected):
+    """Every script the read-only settings tell the harness to run, read-only too.
 
     The settings files are read-only above, and that is not enough: a command
     inside one NAMES a script, and those sit in the harness's own directory —
@@ -117,28 +120,40 @@ def _named_scripts(provider, protected):
     next session event, outside any container. Confirmed on this machine for
     ~/.claude/hooks/herdr-agent-state.sh and ~/.codex/herdr-agent-state.sh.
 
-    The boundary is the directory the settings file itself lives in, and not the
+    `sources` is every settings file mounted read-only just above, including the
+    per-account profile copies — not the provider's declared list, which leaves
+    those out.
+
+    The boundary is the directory each settings file lives in, and not the
     harness home: agy's home IS your home, so "under the home" would have meant
     every tool you own — including the MCP servers mounted by name further down,
-    which docker then refuses as a duplicate mount point.
+    which docker then refuses as a duplicate mount point. A settings file that
+    sits directly in the home is skipped for the same reason.
     """
     args = []
     seen = set(protected)
-    for entry in getattr(provider, "BOX_SETTINGS", ()):
-        host = expand(entry)
+    # Compared as written, not resolved: a settings file names a path the way
+    # the person typed it, and resolving one side only never matches.
+    home = expand("~") + os.sep
+    for host in sources:
         inside = os.path.dirname(host) + os.sep
+        if inside == home or home.startswith(inside):
+            continue
         try:
             with open(host, encoding="utf-8", errors="replace") as handle:
-                text = handle.read()
+                # JSON holds a quoted path as \", and the quote is what delimits
+                # a name with a space in it.
+                text = handle.read().replace('\\"', '"')
         except OSError:
             continue
-        for found in SCRIPT.findall(text):
-            if found in seen or not found.startswith(inside):
-                continue
-            if not os.path.isfile(found):
-                continue
-            seen.add(found)
-            args += _mount(os.path.realpath(found), "ro", found)
+        for pattern in SCRIPTS:
+            for found in pattern.findall(text):
+                if found in seen or not found.startswith(inside):
+                    continue
+                if not os.path.isfile(found):
+                    continue
+                seen.add(found)
+                args += _mount(os.path.realpath(found), "ro", found)
     return args
 
 
@@ -148,8 +163,11 @@ def settings(provider, env, canonical, http_config, settings_mounted):
     # Host settings stay read-only. Runtime state in the same home stays writable.
     config_target = http_config[1] if http_config else None
     protected = set(settings_mounted)
+    sources = []
     for entry in getattr(provider, "BOX_SETTINGS", ()):
         host = expand(entry)
+        if os.path.isfile(host):
+            sources.append(host)
         if os.path.isfile(host) and host != config_target and host not in settings_mounted:
             args += _mount(os.path.realpath(host), "ro", host)
             protected.add(host)
@@ -161,7 +179,8 @@ def settings(provider, env, canonical, http_config, settings_mounted):
                 if os.path.isfile(host):
                     args += _mount(os.path.realpath(host), "ro", host)
                     protected.add(host)
+                    sources.append(host)
     if config_target:
         protected.add(config_target)
-    args += _named_scripts(provider, protected)
+    args += _named_scripts(sources, protected)
     return args

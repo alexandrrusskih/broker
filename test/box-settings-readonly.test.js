@@ -75,10 +75,16 @@ test("a hook script the host settings name is read-only too", async (t) => {
     await fs.writeFile(file, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   }
   await fs.mkdir(project);
+  // A name with a space in it has to be quoted to be a name at all, so the
+  // quote is what delimits it. A verifier found the first pass stopped at the
+  // space and left such a script writable.
+  const spaced = path.join(home, ".claude", "hooks", "with space.sh");
+  await fs.writeFile(spaced, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   await fs.writeFile(path.join(home, ".claude", "settings.json"), JSON.stringify({
     hooks: {
       SessionStart: [{ hooks: [
         { type: "command", command: `bash '${inside}' session` },
+        { type: "command", command: `bash "${spaced}" session` },
         { type: "command", command: outside },
         { type: "command", command: "rtk hook claude" },
       ] }],
@@ -101,6 +107,8 @@ print(json.dumps([cmd[i + 1] for i, part in enumerate(cmd) if part == "--mount"]
 
   assert.ok(mounts.some((m) => m.includes(`target=${inside},readonly`)),
     "a script named inside the harness's own directory must be read-only");
+  assert.ok(mounts.some((m) => m.includes(`target=${spaced},readonly`)),
+    "a quoted name with a space in it must be read-only too");
   assert.ok(!mounts.some((m) => m.includes(`target=${outside}`)),
     "a script outside it is the box's own business, and mounting it could collide");
 

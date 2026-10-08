@@ -107,6 +107,16 @@ test("image pins follow the machine forward, never backward", async (t) => {
   pins.syncPinsIn(dockerfile, { installed, allowDowngrade: true }, down, []);
   assert.deepEqual(down, [{ arg: "CLAUDE_VERSION", from: "2.1.267", to: "2.1.251" }]);
 
+  // A pin that is a git tag keeps its "v": the Dockerfile puts BUILDX_VERSION
+  // straight into a release URL, so the bare number 404s on the next build.
+  const tagged = path.join(dir, "Tagged");
+  await fs.writeFile(tagged, "ARG BUILDX_VERSION=v0.37.2\n");
+  const tags = [];
+  pins.syncPinsIn(tagged, { installed: (_s, arg) => arg === "BUILDX_VERSION" ? "0.38.0" : null },
+    tags, []);
+  assert.deepEqual(tags, [{ arg: "BUILDX_VERSION", from: "v0.37.2", to: "v0.38.0" }]);
+  assert.match(await fs.readFile(tagged, "utf8"), /ARG BUILDX_VERSION=v0\.38\.0/);
+
   // laterVersion is what decides, and it has to compare numbers as numbers:
   // 1.116.0 is newer than 1.107.0, and 2.101.0 newer than 2.100.0.
   assert.equal(pins.laterVersion("1.116.0", "1.107.0"), "1.116.0");

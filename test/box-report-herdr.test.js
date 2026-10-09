@@ -4,54 +4,12 @@
 // launcher believed it had said everything.
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { temp, engine } = require("./helpers");
+const { temp, engine, MANAGER } = require("./helpers");
 
 // A stand-in for the manager, answering the way the patched one does: it takes
 // a session from a source it does not already trust for that pane only through
 // pane.report_agent, and refuses pane.report_agent_session with
 // session_not_accepted.
-const MANAGER = `
-import json, os, socket, threading
-heard = []
-held = {}
-ready = threading.Event()
-def listen(path):
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(path)
-    server.listen(4)
-    # AFTER listen, not after bind: a client that connects in between is
-    # refused, and the test then fails on a socket error rather than on what it
-    # is about. Waiting for the path to appear was that race.
-    ready.set()
-    while True:
-        conn, _ = server.accept()
-        line = b""
-        while b"\\n" not in line:
-            chunk = conn.recv(4096)
-            if not chunk:
-                break
-            line += chunk
-        request = json.loads(line.split(b"\\n", 1)[0] or b"{}")
-        heard.append(request)
-        if request.get("method") == "pane.report_agent":
-            # The real manager answers ok whether or not it applied the report,
-            # so the stand-in does too, and records what it would hold.
-            if not held or request["params"].get("source") == held.get("source"):
-                held.clear()
-                held.update(agent=request["params"].get("agent"), source=request["params"].get("source"),
-                            value=request["params"].get("agent_session_id"))
-            answer = {"id": request.get("id"), "result": {"type": "ok"}}
-        elif request.get("method") == "pane.get":
-            answer = {"id": request.get("id"), "result": {"type": "pane_info", "pane": {
-                "pane_id": request["params"].get("pane_id"), "agent": held.get("agent"),
-                "agent_session": {"agent": held.get("agent"), "kind": "id",
-                                  "source": held.get("source"), "value": held.get("value")}}}}
-        else:
-            answer = {"id": request.get("id"),
-                      "error": {"code": "session_not_accepted", "message": "session_not_accepted"}}
-        conn.sendall((json.dumps(answer) + "\\n").encode())
-        conn.close()
-`;
 
 test("the first report goes through the call the manager will take", async (t) => {
   const dir = await temp(t);

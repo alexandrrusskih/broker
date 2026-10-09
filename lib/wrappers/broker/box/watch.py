@@ -4,14 +4,25 @@ Split out of box/report.py, which is about the directory itself. This is the
 reading half: what a report has to be before it is believed, and the retrying
 that a manager restart needs.
 
-What a box CAN do is name an id of the same harness belonging to another
-window. It is refused for exactly one case: a run whose id this process CHOSE
-before the container started, which is claude on a fresh chat. Then the report
-has to match it. Everywhere else the id is the harness's own to invent or to
-pick — codex, agy, opencode always, and claude too when the person resumes
-through its picker instead of naming a chat, because then nothing out here ever
-learns which one they chose. Those reports are accepted on their shape alone.
-That is the boundary, and it is written down rather than hidden.
+WHAT IS BELIEVED, AND HOW FAR. The pane is the boundary, and it is not in the
+report: it comes from this process's own environment, and this process reports
+for its own pane and no other. So the worst a lying box achieves is to point
+ITS OWN pane at another chat of the same harness — never somebody else's pane.
+
+On top of that there is one piece of proof, and it covers the FIRST report
+only. When this process chose the id before the container started — claude on a
+fresh chat — the first report has to match it. After that it must not: the
+person types /clear, or resumes another chat inside the one they have, and the
+harness is then legitimately in a chat nobody out here named. ph found this as
+a blocker, and it was the real cost of being strict: the report was refused, so
+the pane kept the first chat for ever and a cold restart reopened the wrong
+one.
+
+So the pinned id is proof of a beginning, not a lease. Once it has been
+accepted, a later id from the same box is taken on its shape — which is exactly
+where codex, agy and opencode stand all the time, and where claude stands too
+whenever the person resumes through its own picker and nothing out here ever
+learns which chat they chose. Written down rather than hidden.
 """
 
 import json
@@ -58,6 +69,10 @@ def accept(raw, provider, pinned):
     if not isinstance(session, str) or not ID.match(session):
         return None, "the id is not an id"
     if pinned and session != pinned:
+        # Only until the pinned id itself has landed; see the module docstring.
+        # A box that names another chat BEFORE proving it is the box that was
+        # given this one is refused, and a box whose first report never lands
+        # never gets past this line either — fail-closed stays fail-closed.
         return None, "the id is not the one this run was given"
     return session, ""
 
@@ -113,7 +128,12 @@ class Watcher:
             return
         taken, why = herdr.tell(self.pane, self.provider, self.box, self.pending)
         if taken:
+            # Whatever was just taken can only have been the pinned id while
+            # one was outstanding — accept() allows nothing else through. So
+            # this is the moment the beginning is proved, and a /clear in the
+            # same box is a chat switch rather than an impostor.
             self.sent, self.pending, self._backoff = self.pending, None, 1.0
+            self.pinned = None
             return
         self._retry_at = now + self._backoff
         self._backoff = min(self._backoff * 2, 30.0)

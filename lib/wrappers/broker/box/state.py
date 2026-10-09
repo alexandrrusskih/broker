@@ -75,32 +75,25 @@ def live():
 
 
 def resolve(entry):
-    """Fill in the session for a harness that was not told its id.
+    """What is known about this box's chat, and how — or nothing.
 
-    claude is given one before it starts, so there is nothing to do. The others
-    make their own as they begin, and write it into the name of their session
-    file — which the host already has. Returns (entry, how it was established).
+    Only exact sources: the id the launcher handed the harness before it
+    started, or the one typed on the command line to resume. There is no third.
+
+    A fallback by file time was tried here and withdrawn the same day. Every
+    window writes its sessions into one directory, so two boxes started in the
+    same second each see the other's file as "created after I began", and both
+    are handed an id belonging to neither. box/start.py already says this in
+    plain words about the same mistake made once before; codex-misc-p5 caught
+    me repeating it.
+
+    So for a harness that names its own session — codex, agy, opencode on a
+    fresh run — this returns nothing, and the honest word for that is
+    unsupported.
     """
     if entry.get("session"):
-        return entry, "argv"
-    from ..providers import agy, claude, codex, opencode
-    from .sessions import _session_since
-
-    known = {p.NAME: p for p in (claude, codex, agy, opencode)}
-    provider = known.get(entry.get("harness"))
-    started = entry.get("started_ms")
-    if not provider or not started:
-        return entry, "unknown"
-    env = {}
-    home_env = getattr(provider, "HOME_ENV", None)
-    if home_env and entry.get("config_home"):
-        env[home_env] = entry["config_home"]
-    found = _session_since(provider, entry.get("cwd") or "", started / 1000.0, env)
-    if not found:
-        return entry, "none yet"
-    note = dict(entry)
-    note["session"] = found
-    return note, "session file written after the box started"
+        return entry, entry.get("confirmed_by") or "argv"
+    return entry, "unsupported: this harness names its own session"
 
 
 def release(box):

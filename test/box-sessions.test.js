@@ -124,58 +124,53 @@ print("UNTOLD", box.sessions._pin_session(claude, ["--print", "hi"]))
   assert.match(out, /UNTOLD \(None, \['--print', 'hi'\]\)/);
 });
 
-// A harness that is not told its id makes one when it starts talking, and
-// writes it into the NAME of its own session file. That file lands in a
-// directory the host already shares, so the launcher can read the id out here
-// without asking the container anything — no socket, no exec, no polling.
-test("a box that names its own session is matched by the file it wrote", async (t) => {
+// A harness that is not told its id names its own, and the host cannot know
+// which one. Matching by file time was tried here and withdrawn the same day:
+// every window writes into one directory, so two boxes started in the same
+// second each see the other's file as "created after I began" and both are
+// handed an id belonging to neither. box/start.py had already learned this.
+// The supported answer is to say "unsupported", not to guess.
+test("a box whose harness names its own session gets no guessed id", async (t) => {
   const dir = await temp(t);
   const sessions = path.join(dir, "sessions", "2026", "10", "09");
   await fs.mkdir(sessions, { recursive: true });
-  // One from an earlier run, one this box wrote.
-  const older = path.join(sessions, "rollout-2026-10-09T08-00-00-01a0ffff-aaaa-7000-8000-000000000001.jsonl");
-  const mine = path.join(sessions, "rollout-2026-10-09T09-01-45-01a11fe5-bbbb-7000-8000-000000000002.jsonl");
-  await fs.writeFile(older, "{}\n");
 
   const out = engine(`
-import json, os, time
+import json, os
 from types import SimpleNamespace
 from broker import config
 from broker.box import state
-from broker.box.sessions import _session_since
 
 provider = SimpleNamespace(NAME="codex", HOME_ENV="CODEX_HOME",
                            CANONICAL_HOME=${JSON.stringify(dir)},
                            SESSION_GLOB="%(config)s/sessions/*/*/*/rollout-*.jsonl")
 env = {"CODEX_HOME": ${JSON.stringify(dir)}}
-
-# The launcher notes the box BEFORE the container starts, which is the whole
-# reason the session file it later writes can be told from anyone else's.
 config.CONFIG_DIR = ${JSON.stringify(path.join(dir, "cfg"))}
 state.ROOT = os.path.join(config.CONFIG_DIR, "box", "state")
-started = time.time()
-before = _session_since(provider, "/work", started, env)
+
 state.claim("demo", provider, None, env, "/work")
-noted = state.live()
+noted = state.live()[0]
 
-# ...and now the box names its own.
-open(${JSON.stringify(mine)}, "w").write("{}\\n")
-after = _session_since(provider, "/work", started, env)
-filled, how = state.resolve(dict(noted[0], harness="codex"))
+# Another window writes its own session a moment later. It is not ours, and
+# nothing here may offer it as ours.
+open(os.path.join(${JSON.stringify(sessions)},
+     "rollout-2026-10-09T09-01-45-01a11fe5-bbbb-7000-8000-000000000002.jsonl"),
+     "w").write("{}\\n")
+
+entry, how = state.resolve(noted)
+pinned, pinned_how = state.resolve(dict(noted, session="2a56e858-0000-4000-8000-000000000001"))
 state.release("demo")
-
-print(json.dumps({"before": before, "after": after,
-                  "pane_from_host": "pane" in noted[0],
-                  "cwd": noted[0]["cwd"], "config_home": noted[0]["config_home"],
-                  "resolved": filled["session"], "how": how,
+print(json.dumps({"pane_from_host": "pane" in noted, "cwd": noted["cwd"],
+                  "guessed": entry["session"], "how": how,
+                  "pinned": pinned["session"], "pinned_how": pinned_how,
                   "gone": state.live()}))
 `);
   const got = JSON.parse(out);
-  assert.equal(got.before, null, "an older session is not this box's");
-  assert.equal(got.after, "01a11fe5-bbbb-7000-8000-000000000002", "the one written after the start is");
   assert.equal(got.cwd, "/work");
-  assert.equal(got.config_home, dir, "the resolver needs the home this run used");
-  assert.equal(got.resolved, "01a11fe5-bbbb-7000-8000-000000000002", "resolve fills in what the box named");
-  assert.match(got.how, /after the box started/);
+  assert.equal(got.pane_from_host, true, "the pane comes from the launcher, never the box");
+  assert.equal(got.guessed, null, "a session written by another window is not ours");
+  assert.match(got.how, /unsupported/);
+  assert.equal(got.pinned, "2a56e858-0000-4000-8000-000000000001", "an exact id is kept");
+  assert.match(got.pinned_how, /argv/);
   assert.deepEqual(got.gone, [], "the note goes when the box does");
 });

@@ -171,3 +171,56 @@ print(json.dumps([values, env["Q"], mcpbridge.identity_key(env=env, extra=["Q"])
   assert.equal(second[1], "2");
   assert.equal(second[2], first[2], "the effective box env also identifies the MCP listener");
 });
+
+// Crew builds its own container and needs the same bridge a box gets: the
+// server stays on this machine and only its stdio crosses. One supported call
+// writes the connector; the listener's port, its secret and the template stay
+// inside broker. Reuse must tell callers apart — a server answering about code
+// must answer about the CALLER's code — so the identity folds in the env and
+// the allowed root, not just the command.
+test("a connector for a host MCP server is written once per caller identity", async (t) => {
+  const dir = await temp(t);
+  // HOME, not a patched attribute: the listener is a child process and works
+  // its own config directory out from the environment, so the two have to agree
+  // or the parent waits five seconds for a listener it will never find.
+  const out = engine(`
+import json, os, re, sys
+sys.path.insert(0, "lib/wrappers")
+from broker import box, config
+
+def port_of(file):
+    # The template spells it HOST, PORT, TOKEN = 'host', 41234, 'secret'
+    return int(re.search(r"TOKEN = .*?, (\\d+),", open(file).read()).group(1))
+
+first = box.connect_mcp("probe", ["cat"], os.path.join(${JSON.stringify(dir)}, "a"),
+                        env={"PROBE_ROOT": ${JSON.stringify(dir)}}, roots=[${JSON.stringify(dir)}])
+again = box.connect_mcp("probe", ["cat"], os.path.join(${JSON.stringify(dir)}, "b"),
+                        env={"PROBE_ROOT": ${JSON.stringify(dir)}}, roots=[${JSON.stringify(dir)}])
+other = box.connect_mcp("probe", ["cat"], os.path.join(${JSON.stringify(dir)}, "c"),
+                        env={"PROBE_ROOT": "/somewhere/else"}, roots=["/somewhere/else"])
+
+body = open(first).read()
+print(json.dumps({
+    "mode": oct(os.stat(first).st_mode & 0o777),
+    "reaches_host": "host.docker.internal" in body,
+    "keeps_secret_out_of_argv": "TOKEN" in body,
+    "same_identity_same_listener": port_of(first) == port_of(again),
+    "other_identity_own_listener": port_of(first) != port_of(other),
+}))
+
+# Listeners outlive this process on purpose; this test does not leave them.
+import glob, signal
+for state in glob.glob(os.path.join(config.CONFIG_DIR, "box", "mcp", "*")):
+    try:
+        os.kill(json.load(open(state))["pid"], signal.SIGTERM)
+    except Exception:
+        pass
+`, { HOME: dir, BROKER_REAL_HOME: dir });
+  const got = JSON.parse(out);
+  assert.equal(got.mode, "0o700", "it carries the connection secret");
+  assert.equal(got.reaches_host, true);
+  assert.equal(got.keeps_secret_out_of_argv, true, "the secret is in the file, not a command line");
+  assert.equal(got.same_identity_same_listener, true, "one listener per caller, reused");
+  assert.equal(got.other_identity_own_listener, true,
+    "a different allowed root is a different caller and gets its own listener");
+});

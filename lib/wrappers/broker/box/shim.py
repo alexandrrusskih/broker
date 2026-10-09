@@ -75,7 +75,12 @@ def _write_shim(provider, name, live):
 
     directory = os.path.join(config.CONFIG_DIR, "box", "shims", provider.NAME)
     os.makedirs(directory, mode=0o700, exist_ok=True)
-    path = os.path.join(directory, "%s-%s" % (name.replace("/", "_"), window_key()))
+    return _write(os.path.join(directory, "%s-%s" % (name.replace("/", "_"), window_key())),
+                  name, live)
+
+
+def _write(path, name, live):
+    """The connector itself, written atomically and 0700."""
     body = SHIM_TEMPLATE % {"name": name, "host": HOST_GATEWAY,
                             "port": live["port"], "token": live["token"]}
     tmp = path + ".new"
@@ -84,3 +89,46 @@ def _write_shim(provider, name, live):
     os.chmod(tmp, 0o700)  # it carries the connection secret
     os.replace(tmp, path)
     return path
+
+
+def connect_mcp(name, command, out, env=None, roots=(), inherit=()):
+    """A connector for a host MCP server, for a container that is not a box.
+
+    Written for Crew, which builds its own container and needs the same bridge:
+    the server stays on this machine and only its stdio crosses. The listener's
+    port, its secret and the text of the connector stay in here; the caller
+    gets a file that speaks MCP on stdin and stdout.
+
+      name     the server as the host's own config calls it
+      command  its argv on the host, a list
+      out      where to write the connector
+      env      what the server needs in its environment
+      roots    the paths it may be asked about; the first is the one a
+               root-scoped server is pinned to, physical path, as for a box
+      inherit  names of host variables the listener carries into the server
+
+    A live listener is reused only when its command AND its caller identity
+    match — the identity folds in the pane, the workspace, the bus home, every
+    variable named in `env`, and the effective allowed root. Two callers that
+    differ in any of those get their own listener, which is the whole point:
+    a server answering about code must answer about the caller's code.
+
+    Returns the path written. Raises LookupError when no listener could be
+    started.
+
+    One path per concurrent container. A bind mount holds the inode it was
+    given and this replaces the file, so sharing one path between two live
+    containers pulls the connector out from under the first — which looks
+    exactly like a bridge dropping at random.
+    """
+    from .mcp import _start_bridge
+
+    server = {"command": list(command), "env": dict(env or {}), "inherit": list(inherit)}
+    # identity_env says which values decide whether a listener may be reused.
+    # The names from `env` are added by _start_bridge itself; the allowed root
+    # is named here because it can arrive through `roots` instead.
+    profile = {"env": dict(env or {}), "mcp": {name: {"identity_env": ["CBM_ALLOWED_ROOT"]}}}
+    live = _start_bridge(name, server, profile, [str(r) for r in roots])
+    if not live:
+        raise LookupError("no listener for the %r MCP server could be started" % name)
+    return _write(out, name, live)

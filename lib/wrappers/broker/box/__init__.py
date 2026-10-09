@@ -27,6 +27,7 @@ start (running it, and the terminal while it runs).
 
 from . import boxes, mcp, paths, run, ssh, start
 from .mcp import mcp_servers
+from .shim import connect_mcp
 from .paths import REAL_HOME_ENV, expand, home_dir
 from .boxes import EXAMPLE, FLAG, PATH, profiles, take_flag
 from .run import command
@@ -35,5 +36,6 @@ from .start import exec_box
 __all__ = [
     "EXAMPLE", "FLAG", "PATH", "REAL_HOME_ENV",
     "boxes", "mcp", "paths", "run", "ssh", "start",
-    "command", "exec_box", "expand", "home_dir", "mcp_servers", "profiles", "take_flag",
+    "command", "connect_mcp", "exec_box", "expand", "home_dir", "mcp_servers",
+    "profiles", "take_flag",
 ]

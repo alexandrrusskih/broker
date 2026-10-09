@@ -12,7 +12,7 @@ const box = (dir, extra = {}) => ({ HOME: dir, HERDR_PANE_ID: "wA:p1", ...extra 
 test("the box is given one directory, writable, at the same path, and told its name", async (t) => {
   const dir = await temp(t);
   const out = engine(`
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 print("\\n".join(report.flags("demo")))
 print("DIR", report.directory("demo"))
 `, box(dir));
@@ -29,7 +29,7 @@ print("DIR", report.directory("demo"))
 test("one directory per box and per window — never a shared one", async (t) => {
   const dir = await temp(t);
   const out = engine(`
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 print(report.directory("one"))
 print(report.directory("two"))
 `, box(dir));
@@ -39,7 +39,7 @@ print(report.directory("two"))
   assert.ok(path.basename(one).length > 0);
 
   const other = engine(`
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 print(report.directory("one"))
 `, box(dir, { HERDR_PANE_ID: "wB:p9" }));
   assert.notEqual(one, other.trim(), "another window is another directory");
@@ -49,7 +49,7 @@ test("a report left by a crashed run is gone before the next one starts", async 
   const dir = await temp(t);
   const out = engine(`
 import os
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 here = report.directory("demo")
 os.makedirs(here, exist_ok=True)
 open(os.path.join(here, report.NAME), "w").write('{"agent":"claude","id":"dead-one-from-before"}')
@@ -64,11 +64,11 @@ test("the pane is never read from the report, and nothing is said without one", 
   const dir = await temp(t);
   const out = engine(`
 import json, os, time
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.providers import claude
 
 said = []
-herdr.tell = lambda pane, provider, box, session: (said.append((pane, session)), (True, ""))[1]
+state.set_session = lambda box, session: (said.append((box, session)), (True, ""))[1]
 # A box naming a pane of its own: the field is not even looked at.
 watcher = watch.Watcher("demo", claude, None)
 print("PANE", repr(watcher.pane))
@@ -83,7 +83,7 @@ test("the directory goes when the box does", async (t) => {
   const dir = await temp(t);
   const out = engine(`
 import os
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 report.flags("demo")
 here = report.directory("demo")
 open(os.path.join(here, report.NAME), "w").write("{}")

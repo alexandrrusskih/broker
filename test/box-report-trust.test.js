@@ -12,7 +12,7 @@ const box = (dir, extra = {}) => ({ HOME: dir, HERDR_PANE_ID: "wA:p1", ...extra 
 test("what a report has to be before it is believed", async (t) => {
   const dir = await temp(t);
   const out = engine(`
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.providers import agy, claude
 
 good = '{"agent":"claude","id":"0199aaaa-bbbb-cccc-dddd-eeeeffff0000"}'
@@ -45,28 +45,14 @@ for label, provider, pinned, raw in cases:
   assert.match(out, /^id-with-a-slash None$/m);
 });
 
-test("the way back is built here, never taken from the box", async (t) => {
-  const dir = await temp(t);
-  const out = engine(`
-from broker.box import herdr, report, watch
-from broker.providers import agy, claude, codex
-for provider in (claude, codex, agy):
-    print(provider.NAME, herdr.resume_argv(provider, "joppa", "0199aaaa-bbbb-cccc-dddd-eeeeffff0000"))
-`, box(dir));
-  assert.match(out, /claude \['claude', '--resume', '0199aaaa[^']*', '--box', 'joppa'\]/);
-  assert.match(out, /codex \['codex', 'resume', '0199aaaa[^']*', '--box', 'joppa'\]/);
-  // agy spells it its own way, and the box is what the harness's own line lacks.
-  assert.match(out, /agy \['agy', '--conversation', '0199aaaa[^']*', '--box', 'joppa'\]/);
-});
-
 test("an id this run already knows is reported before the container starts", async (t) => {
   const dir = await temp(t);
   const out = engine(`
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.providers import agy
 
 said = []
-herdr.tell = lambda pane, provider, box, session: (said.append((pane, session)), (True, ""))[1]
+state.set_session = lambda box, session: (said.append((box, session)), (True, ""))[1]
 watcher = watch.Watcher("demo", agy, None)
 # The id typed to resume: a fact from the command line, not a guess.
 watcher.announce("0199aaaa-bbbb-cccc-dddd-eeeeffff0000")
@@ -74,19 +60,19 @@ watcher.announce("0199aaaa-bbbb-cccc-dddd-eeeeffff0000")
 print("SAID", said)
 `, box(dir));
   // Once, not twice: the hook reports the same id again on its first bus call.
-  assert.match(out, /SAID \[\('wA:p1', '0199aaaa-bbbb-cccc-dddd-eeeeffff0000'\)\]/);
+  assert.match(out, /SAID \[\('demo', '0199aaaa-bbbb-cccc-dddd-eeeeffff0000'\)\]/);
 });
 
 test("a report renamed into the directory while the box runs is picked up", async (t) => {
   const dir = await temp(t);
   const out = engine(`
 import json, os, time
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.providers import agy
 
 watch.POLL = 0.02
 said = []
-herdr.tell = lambda pane, provider, box, session: (said.append(session), (True, ""))[1]
+state.set_session = lambda box, session: (said.append(session), (True, ""))[1]
 report.flags("demo")
 watcher = watch.Watcher("demo", agy, None).start()
 
@@ -110,12 +96,12 @@ test("a refused report is said out loud and reported to nobody", async (t) => {
   const out = engine(`
 import os, sys, time
 sys.stderr = sys.stdout  # out.py sends every message to the operator to stderr
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.providers import claude
 
 watch.POLL = 0.02
 said = []
-herdr.tell = lambda pane, provider, box, session: (said.append(session), (True, ""))[1]
+state.set_session = lambda box, session: (said.append(session), (True, ""))[1]
 report.flags("demo")
 # This run was given its id out here; the box names a different chat.
 watcher = watch.Watcher("demo", claude, "0199ffff-0000-1111-2222-333344445555").start()
@@ -143,12 +129,12 @@ test("a resumed box reports the id from its own command line, before any bus cal
   // arguments, and that is the moment the answer is needed — so the launcher
   // reads it from argv rather than waiting, and never from a file time.
   const out = engine(`
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.box.sessions import _session_from_argv
 from broker.providers import agy
 
 said = []
-herdr.tell = lambda pane, provider, box, session: (said.append(session), (True, ""))[1]
+state.set_session = lambda box, session: (said.append(session), (True, ""))[1]
 argv = ["--conversation", "0199aaaa-bbbb-cccc-dddd-eeeeffff0000"]
 watcher = watch.Watcher("joppa", agy, None)
 watcher.announce(None or _session_from_argv(agy, argv))
@@ -163,12 +149,12 @@ test("the same id written again is not reported again", async (t) => {
   // wrote last time. The manager hears about an id once.
   const out = engine(`
 import os, time
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.providers import agy
 
 watch.POLL = 0.02
 said = []
-herdr.tell = lambda pane, provider, box, session: (said.append(session), (True, ""))[1]
+state.set_session = lambda box, session: (said.append(session), (True, ""))[1]
 report.flags("demo")
 watcher = watch.Watcher("demo", agy, None).start()
 here = report.directory("demo")
@@ -187,12 +173,12 @@ test("a chat replaced in the same box is reported as the new one", async (t) => 
   const dir = await temp(t);
   const out = engine(`
 import os, time
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.providers import agy
 
 watch.POLL = 0.02
 said = []
-herdr.tell = lambda pane, provider, box, session: (said.append(session), (True, ""))[1]
+state.set_session = lambda box, session: (said.append(session), (True, ""))[1]
 report.flags("demo")
 watcher = watch.Watcher("demo", agy, None).start()
 here = report.directory("demo")

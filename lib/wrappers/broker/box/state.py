@@ -9,9 +9,16 @@ writes them down, on the host, in one small file per box and window, and removes
 it when the box ends. Nothing is mounted and nothing in the box can write here:
 a box that could name its own pane could be woken in another agent's place.
 
-What is NOT here is the harness that only learns its own session id once it
-starts talking — codex, agy, opencode. For those the id is simply absent, and
-whoever wants to wake them needs it from the harness itself.
+What is NOT here at start is the harness that only learns its own session id
+once it starts talking — codex, agy, opencode. For those the id arrives later:
+the box writes it into its report directory, box/watch.py judges it, and
+set_session() writes it here. The same path carries a claude /clear.
+
+This file is what agntbus reads to wake a box, because a stock terminal manager
+keeps a session id only from its own official hooks, and those cannot reach it
+from inside a container. So the pid is here too: a file left by a launcher that
+was killed outright names a chat nobody is in, and the reader checks that the
+launcher still lives before it believes the rest.
 """
 
 import json
@@ -58,6 +65,7 @@ def claim(box, provider, session, env=None, workdir=None):
             "cwd": workdir or os.path.realpath(os.getcwd()),
             "config_home": (env or {}).get(home_env) if home_env and home_env != "HOME" else None,
             "started_ms": int(time.time() * 1000),
+            "pid": os.getpid(),
         }, prefix=".state-")
     except OSError as exc:
         warn("could not note which pane this box belongs to (%s)" % exc)
@@ -103,8 +111,45 @@ def resolve(entry):
     return entry, "unsupported: this harness names its own session"
 
 
+def _own(box):
+    """This launch's entry, or None. Another launch's file is not ours to touch.
+
+    The path is per window, not per launch, so a box started again in the same
+    pane writes the same file while the old launcher is still in its finally.
+    The pid tells the two apart.
+    """
+    try:
+        with open(path(box), encoding="utf-8") as handle:
+            entry = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(entry, dict) or entry.get("pid") != os.getpid():
+        return None
+    return entry
+
+
+def set_session(box, session):
+    """Record the chat that is in this box now. (True, "") or (False, why).
+
+    Called only with an id box/watch.py has already accepted.
+    """
+    entry = _own(box)
+    if entry is None:
+        return False, "this launch has no state file"
+    if entry.get("session") == session:
+        return True, ""
+    entry.update(session=session, confirmed_by="report")
+    try:
+        config.write_json(path(box), entry, prefix=".state-")
+    except OSError as exc:
+        return False, str(exc)
+    return True, ""
+
+
 def release(box):
     """It goes when the box does: a stale line names a chat that has ended."""
+    if _own(box) is None:
+        return
     try:
         os.unlink(path(box))
     except OSError:

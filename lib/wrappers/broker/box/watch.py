@@ -1,8 +1,11 @@
 """Reading the one file a box writes, and keeping at it until it lands.
 
 Split out of box/report.py, which is about the directory itself. This is the
-reading half: what a report has to be before it is believed, and the retrying
-that a manager restart needs.
+reading half: what a report has to be before it is believed, and where it goes
+once it is — the host state file in box/state.py, which agntbus reads to wake
+the pane. Nothing here talks to the terminal manager: a stock one keeps a
+session id only from its own official hooks, and answers anything else with ok
+and then forgets it.
 
 WHAT IS BELIEVED, AND HOW FAR. The pane is the boundary, and it is not in the
 report: it comes from this process's own environment, and this process reports
@@ -33,7 +36,7 @@ import threading
 import time
 
 from ..out import warn
-from . import herdr, report
+from . import report, state
 
 
 POLL = 0.5
@@ -95,11 +98,10 @@ class Watcher:
         self._thread = None
 
     def announce(self, session):
-        """Report an id this process already knows, before anything starts.
+        """Record an id this process already knows, before anything starts.
 
         The hook only fires on a bus call, so a resumed box would say nothing
-        until its agent happened to use the bus — and after a cold restart that
-        is exactly when the manager needs to know. The id is in the arguments
+        until its agent happened to use the bus. The id is in the arguments
         this run was started with, which is a fact, not a guess from file times.
         """
         if not (self.pane and session) or session == self.sent:
@@ -113,33 +115,35 @@ class Watcher:
 
         Kept trying, because the first version gave up without knowing it had.
         A failure left `sent` unset while the file's bytes were remembered as
-        seen, so the same id was never offered again — and the one failure that
-        matters is the manager being restarted, which is exactly when it stops
-        answering for a moment and then wants to be told everything.
+        seen, so the same id was never offered again.
 
-        Backed off rather than retried every tick: a dead socket costs a
-        connect timeout, and spending that twice a second would stall the
-        reading as well as waste the wait.
+        Backed off rather than retried every tick: a write that failed once
+        (a full disk, a directory somebody removed) rarely mends in half a
+        second, and the warning would only repeat.
         """
         if not self.pending or self.pending == self.sent:
             return
         now = time.monotonic()
         if now < self._retry_at:
             return
-        taken, why = herdr.tell(self.pane, self.provider, self.box, self.pending)
+        taken, why = state.set_session(self.box, self.pending)
         if taken:
             # Whatever was just taken can only have been the pinned id while
             # one was outstanding — accept() allows nothing else through. So
             # this is the moment the beginning is proved, and a /clear in the
             # same box is a chat switch rather than an impostor.
             self.sent, self.pending, self._backoff = self.pending, None, 1.0
-            self.pinned = None
+            if self.pinned:
+                # A /clear that came before the pin landed was refused and its
+                # bytes remembered. Forget them, or the file — which nothing
+                # rewrites until the next bus call — would never be read again.
+                self.pinned, self._seen, self._mark = None, None, None
             return
         self._retry_at = now + self._backoff
         self._backoff = min(self._backoff * 2, 30.0)
         if why not in self.refused:
             self.refused.add(why)
-            warn("the manager did not take the '%s' box's session: %s" % (self.box, why))
+            warn("could not record the '%s' box's session: %s" % (self.box, why))
 
     def start(self):
         if not self.pane:

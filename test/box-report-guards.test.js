@@ -89,17 +89,17 @@ test("a report the manager could not take is offered again", async (t) => {
   const out = engine(`
 import os, sys, time
 sys.stderr = sys.stdout
-from broker.box import herdr, report, watch
+from broker.box import report, state, watch
 from broker.providers import agy
 
 watch.POLL = 0.02
 attempts = []
-def flaky(pane, provider, box, session):
+def flaky(box, session):
     attempts.append(session)
     # The manager restarting is the one failure that matters, and it is also
     # exactly when it wants to be told everything.
     return (True, "") if len(attempts) > 2 else (False, "socket is not there")
-herdr.tell = flaky
+state.set_session = flaky
 
 report.flags("demo")
 watcher = watch.Watcher("demo", agy, None)

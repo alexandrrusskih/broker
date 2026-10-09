@@ -13,10 +13,16 @@ const { temp, engine } = require("./helpers");
 const MANAGER = `
 import json, os, socket, threading
 heard = []
+held = {}
+ready = threading.Event()
 def listen(path):
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(path)
     server.listen(4)
+    # AFTER listen, not after bind: a client that connects in between is
+    # refused, and the test then fails on a socket error rather than on what it
+    # is about. Waiting for the path to appear was that race.
+    ready.set()
     while True:
         conn, _ = server.accept()
         line = b""
@@ -28,7 +34,18 @@ def listen(path):
         request = json.loads(line.split(b"\\n", 1)[0] or b"{}")
         heard.append(request)
         if request.get("method") == "pane.report_agent":
-            answer = {"id": request.get("id"), "result": {"accepted": True}}
+            # The real manager answers ok whether or not it applied the report,
+            # so the stand-in does too, and records what it would hold.
+            if not held or request["params"].get("source") == held.get("source"):
+                held.clear()
+                held.update(agent=request["params"].get("agent"), source=request["params"].get("source"),
+                            value=request["params"].get("agent_session_id"))
+            answer = {"id": request.get("id"), "result": {"type": "ok"}}
+        elif request.get("method") == "pane.get":
+            answer = {"id": request.get("id"), "result": {"type": "pane_info", "pane": {
+                "pane_id": request["params"].get("pane_id"), "agent": held.get("agent"),
+                "agent_session": {"agent": held.get("agent"), "kind": "id",
+                                  "source": held.get("source"), "value": held.get("value")}}}}
         else:
             answer = {"id": request.get("id"),
                       "error": {"code": "session_not_accepted", "message": "session_not_accepted"}}
@@ -46,15 +63,13 @@ from broker.providers import agy
 
 sock = os.path.join("${dir}", "herdr.sock")
 threading.Thread(target=listen, args=(sock,), daemon=True).start()
-for _ in range(100):
-    if os.path.exists(sock):
-        break
-    time.sleep(0.02)
+assert ready.wait(10), "the stand-in manager never came up"
 os.environ["HERDR_SOCKET_PATH"] = sock
 
 taken, why = herdr.tell("wA:p1", agy, "joppa", "0199aaaa-bbbb-cccc-dddd-eeeeffff0000")
 print("TAKEN", taken, repr(why))
 print("METHOD", heard[0]["method"])
+print("THEN", heard[1]["method"])
 print("PARAMS", json.dumps({k: heard[0]["params"][k] for k in
       ("pane_id", "source", "agent", "state", "agent_session_id", "resume_argv")}, sort_keys=True))
 `, { HOME: dir });
@@ -64,6 +79,8 @@ print("PARAMS", json.dumps({k: heard[0]["params"][k] for k in
   // the source already holds the pane's agent, which the broker never does on a
   // first report. Proved against the patched manager by codex-misc-p5.
   assert.match(out, /METHOD pane\.report_agent$/m);
+  // And then the pane is read back, because ok does not mean applied.
+  assert.match(out, /THEN pane\.get/);
   const params = JSON.parse(/PARAMS (.+)/.exec(out)[1]);
   assert.equal(params.source, "broker:box");
   assert.equal(params.agent, "agy");
@@ -86,10 +103,7 @@ from broker.providers import agy
 
 sock = os.path.join("${dir}", "herdr.sock")
 threading.Thread(target=listen, args=(sock,), daemon=True).start()
-for _ in range(100):
-    if os.path.exists(sock):
-        break
-    time.sleep(0.02)
+assert ready.wait(10), "the stand-in manager never came up"
 os.environ["HERDR_SOCKET_PATH"] = sock
 os.environ["HERDR_PANE_ID"] = "wA:p1"
 
@@ -108,25 +122,55 @@ watcher.stop()
   assert.match(out, /never reported its session/);
 });
 
-test("an answer that cannot be understood is not success", async (t) => {
+test("an answer that cannot be understood is not a result", async (t) => {
   const dir = await temp(t);
   const out = engine(`
 from broker.box import herdr
 for answer in ("", "not json", '"a string"', "{}", '{"result": null}',
-               '{"result": {"accepted": false, "reason": "session_not_accepted"}}',
-               '{"result": {"accepted": true}}', '{"result": {"ok": 1}}'):
-    print(repr(answer), herdr.accepted(answer))
+               '{"error": {"message": "session_not_accepted"}}',
+               '{"result": {"accepted": false, "reason": "no"}}',
+               '{"result": {"type": "ok"}}'):
+    result, why = herdr.accepted(answer)
+    print(repr(answer), result is not None, repr(why))
 `, { HOME: dir });
 
-  // Fails closed: only a clear yes is a yes.
-  assert.match(out, /^'' \(False/m);
-  assert.match(out, /^'not json' \(False/m);
-  assert.match(out, /^'"a string"' \(False/m);
-  assert.match(out, /^'{}' \(False/m);
-  assert.match(out, /^'{"result": null}' \(False/m);
-  assert.match(out, /accepted": false[^(]*\(False, 'session_not_accepted'\)/m);
-  assert.match(out, /accepted": true}}' \(True, ''\)/m);
-  assert.match(out, /{"ok": 1}}' \(True, ''\)/m);
+  // Fails closed: only a clear result is a result.
+  assert.match(out, /^'' False/m);
+  assert.match(out, /^'not json' False/m);
+  assert.match(out, /^'"a string"' False/m);
+  assert.match(out, /^'{}' False/m);
+  assert.match(out, /^'{"result": null}' False/m);
+  assert.match(out, /^'{"error".*False 'session_not_accepted'$/m);
+  assert.match(out, /^'{"result": {"accepted": false.*False 'no'$/m);
+  // The only yes: a result that is there and does not say otherwise.
+  assert.match(out, /^'{"result": {"type": "ok"}}' True ''$/m);
+});
+
+test("ok is not applied: a pane another source holds is not ours", async (t) => {
+  const dir = await temp(t);
+  // Proved against a live socket by codex-misc-p5: a pane already held by one
+  // source kept its own agent and id, and the conflicting report was still
+  // answered ok. So the answer settles nothing and the pane settles everything.
+  const out = engine(`
+import json, os, time
+${MANAGER}
+from broker.box import herdr
+from broker.providers import agy, claude
+
+sock = os.path.join("${dir}", "herdr.sock")
+threading.Thread(target=listen, args=(sock,), daemon=True).start()
+assert ready.wait(10), "the stand-in manager never came up"
+os.environ["HERDR_SOCKET_PATH"] = sock
+
+# Somebody else got there first, and it is not the broker.
+held.update(agent="claude", source="herdr:claude", value="0199bbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+print("TAKEN", herdr.tell("wA:p1", agy, "joppa", "0199aaaa-bbbb-cccc-dddd-eeeeffff0000"))
+print("METHODS", [h["method"] for h in heard])
+`, { HOME: dir });
+
+  assert.match(out, /TAKEN \(False, 'it answered ok but the pane still holds herdr:claude\/claude 0199bbbb/);
+  // It reported, then read the pane back. Both calls, in that order.
+  assert.match(out, /METHODS \['pane\.report_agent', 'pane\.get'\]/);
 });
 
 test("no socket is not a report either", async (t) => {

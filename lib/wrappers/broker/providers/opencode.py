@@ -34,7 +34,23 @@ BOX_SETTINGS = ("~/.config/opencode/opencode.jsonc",)
 # here. Shared across the container boundary it would tear: the journal lives
 # beside the database, and two writers on either side of that boundary is
 # exactly how we lost a day of codex history. A box gets its own clone.
-BOX_PRIVATE = (".local/share/opencode/opencode.db",)
+BOX_PRIVATE = (
+    ".local/share/opencode/opencode.db",
+    # Its login. The broker holds no credentials for this harness, so the file
+    # IS the credential and a box without it cannot authenticate at all — the
+    # directory it lives in arrives as an empty tmpfs. Cloned rather than
+    # shared: these are static keys (type and key, three of them here), nothing
+    # rotates, so two copies race over nothing, and what a box writes cannot
+    # reach the real file.
+    ".local/share/opencode/auth.json",
+    ".local/share/opencode/account.json",
+)
+
+# NOT carried, deliberately: ~/.local/share/opencode/mcp-auth.json. It holds
+# OAuth material with a refreshToken, and that is the file a box once emptied
+# for agy — two logins granted an hour earlier came back as "Unauthorized".
+# Nothing mounts it, so the tmpfs leaves it absent inside: a box reaches the MCP
+# servers that need no login, and logs in for itself for the rest.
 
 # It writes beside that database — caches, checked-out repositories, logs — and
 # the directory holding it is created by the container as root when the clone

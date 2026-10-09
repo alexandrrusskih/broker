@@ -28,8 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `broker box build --claude <v> --codex <v>` overrides these.
 # Pinned rather than floating: an image whose harness version changes between
 # builds is an image you cannot reproduce a bug in. Raise them deliberately.
-ARG CLAUDE_VERSION=2.1.285
-ARG CODEX_VERSION=0.160.1
+ARG CLAUDE_VERSION=2.1.286
+ARG CODEX_VERSION=0.162.0
 # bun is a project dependency, not a harness one: repositories pin it in
 # "packageManager", and without it `bun install` and every script that shells out
 # to it fails inside the box while working fine outside.
@@ -56,7 +56,7 @@ RUN npm install -g --no-fund --no-audit \
 ARG COMPOSE_VERSION=v5.5.1
 # A project's own build may ask for buildx — and a box that has docker but not
 # buildx fails at the first `docker build` with a plugin that is simply absent.
-ARG BUILDX_VERSION=v0.37.2
+ARG BUILDX_VERSION=v0.38.0
 # docker.io is the daemon only on Debian 13; the client is its own package now,
 # and without it the box has a daemon nothing can talk to.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -77,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
 ARG RTK_VERSION=0.51.0
-ARG AGY_VERSION=1.2.16
+ARG AGY_VERSION=1.3.2
 ARG GH_VERSION=2.102.0
 ARG GLAB_VERSION=1.121.0
 ARG GITLEAKS_VERSION=8.30.1

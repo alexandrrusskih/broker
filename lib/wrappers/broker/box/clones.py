@@ -138,6 +138,13 @@ def private(provider, profile, env, name):
                     # Mounted even when the host has no such file yet, or
                     # sqlite would create one in the shared directory the
                     # moment it opens the database.
+                    #
+                    # Only for a database, though. A private file that is not
+                    # one — a login, a small JSON — got an auth.json-wal and an
+                    # auth.json-shm invented beside it and mounted in, which is
+                    # noise at best and a puzzle for whoever reads the mounts.
+                    if not real.endswith((".db", ".sqlite", ".sqlite3")):
+                        continue
                     for side in ("-wal", "-shm"):
                         beside = copy + side
                         try:

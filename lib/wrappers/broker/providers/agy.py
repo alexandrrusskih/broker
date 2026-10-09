@@ -27,7 +27,14 @@ CREDENTIALS = "file"
 # a box those point at nothing unless the original comes too, and agy refuses to
 # start at all: "CLI failed to start - open .../installation_id".
 BOX_HOME = ("~/.gemini",)
-BOX_SETTINGS = ("~/.gemini/settings.json", "~/.gemini/config/mcp_config.json")
+# hooks.json is here for the reason box/harness.py gives at _named_scripts: it
+# NAMES commands, and the HOST agy runs them on its own session events. Left
+# writable it was an escape by patience — a box rewrites the file, or the
+# script beside it that the file names, and waits for the next session out
+# here. Listing it mounts the file read-only and, through _named_scripts,
+# every script it names inside ~/.gemini/config as well.
+BOX_SETTINGS = ("~/.gemini/settings.json", "~/.gemini/config/mcp_config.json",
+                "~/.gemini/config/hooks.json")
 
 # agy has no config-dir variable of its own — it goes to $HOME/.gemini and that
 # is that. So the profile IS a home directory, handed to the child through HOME,

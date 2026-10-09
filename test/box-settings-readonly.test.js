@@ -12,7 +12,7 @@ test("host settings stay read-only in every box", async (t) => {
   const files = [
     ".codex/config.toml", ".codex/hooks.json", ".claude/settings.json",
     ".claude.json", ".gemini/settings.json", ".gemini/config/mcp_config.json",
-    ".config/opencode/opencode.jsonc",
+    ".gemini/config/hooks.json", ".config/opencode/opencode.jsonc",
   ];
   await fs.mkdir(project);
   for (const name of files) {
@@ -45,7 +45,8 @@ print(json.dumps(result))
   const required = {
     codex: [".codex/config.toml", ".codex/hooks.json"],
     claude: [".claude/settings.json"],
-    agy: [".gemini/settings.json", ".gemini/config/mcp_config.json"],
+    agy: [".gemini/settings.json", ".gemini/config/mcp_config.json",
+          ".gemini/config/hooks.json"],
     opencode: [".config/opencode/opencode.jsonc"],
   };
   for (const [provider, names] of Object.entries(required)) {
@@ -114,6 +115,46 @@ print(json.dumps([cmd[i + 1] for i, part in enumerate(cmd) if part == "--mount"]
 
   // Docker refuses a container with two mounts at one target, so a settings
   // file that names a path already mounted must not add a second one.
+  const targets = mounts.map((m) => m.split("target=")[1].split(",")[0]);
+  assert.equal(new Set(targets).size, targets.length, "no mount target twice");
+});
+
+// The same escape, for the harness whose hooks live in their own file rather
+// than in its settings. agy keeps them in ~/.gemini/config/hooks.json, which
+// was writable from a box while the script it names sat beside it — so a box
+// could rewrite either and wait for the next session out here.
+test("agy's hooks file and the script it names are read-only too", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "broker-agy-hooks-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const project = path.join(home, "project");
+  const hooks = path.join(home, ".gemini", "config", "hooks.json");
+  const script = path.join(home, ".gemini", "config", "hooks", "state.sh");
+  await fs.mkdir(project);
+  await fs.mkdir(path.dirname(script), { recursive: true });
+  await fs.writeFile(script, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  await fs.writeFile(path.join(home, ".gemini", "settings.json"), "{}");
+  await fs.writeFile(hooks, JSON.stringify({
+    herdr: { PreInvocation: [{ type: "command", command: `bash '${script}' session` }] },
+  }));
+
+  const code = `
+import json, sys
+sys.path.insert(0, "lib/wrappers")
+from broker.box import extras, run
+from broker.providers import agy
+extras._passwd_file = lambda *args: None
+cmd = run.command(agy, "demo", {"rw": [${JSON.stringify(project)}], "mcp": False}, [], {})
+print(json.dumps([cmd[i + 1] for i, part in enumerate(cmd) if part == "--mount"]))
+`;
+  const mounts = JSON.parse(execFileSync("python3", ["-c", code], {
+    cwd: path.join(__dirname, ".."), encoding: "utf8",
+    env: { ...process.env, HOME: home, BROKER_REAL_HOME: home, PYTHONDONTWRITEBYTECODE: "1" },
+  }));
+
+  assert.ok(mounts.some((m) => m.includes(`target=${hooks},readonly`)),
+    "the file that names what the host runs must be read-only");
+  assert.ok(mounts.some((m) => m.includes(`target=${script},readonly`)),
+    "and so must the script it names");
   const targets = mounts.map((m) => m.split("target=")[1].split(",")[0]);
   assert.equal(new Set(targets).size, targets.length, "no mount target twice");
 });

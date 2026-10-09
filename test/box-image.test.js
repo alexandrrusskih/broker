@@ -53,28 +53,35 @@ print(json.dumps([
 
 test("a version pin follows the machine into a box's own Dockerfile", async (t) => {
   const dir = await temp(t);
-  const project = path.join(dir, "project");
-  await fs.mkdir(path.join(project, ".box"), { recursive: true });
-  const own = path.join(project, ".box", "Dockerfile");
+  // Both files in ONE checkout: the base, and the Dockerfile a box of this
+  // same repository brings. A tool that lives in one box rather than the base
+  // still has to move with the machine — otherwise the box that needs it most
+  // is the one left behind. A Dockerfile belonging to ANOTHER project is a
+  // different matter and is only reported; see the test below.
+  const checkout = path.join(dir, "checkout");
+  await fs.mkdir(path.join(checkout, "box"), { recursive: true });
+  await fs.mkdir(path.join(checkout, "extras"), { recursive: true });
+  await fs.writeFile(path.join(checkout, "box", "Dockerfile"), "ARG GH_VERSION=1.0.0\n");
+  const own = path.join(checkout, "extras", "Dockerfile");
   await fs.writeFile(own, "FROM broker-box\nARG GH_VERSION=1.0.0\n");
   await fs.mkdir(path.join(dir, ".config", "broker"), { recursive: true });
   await fs.writeFile(path.join(dir, ".config", "broker", "boxes.json"), JSON.stringify({
-    extended: { rw: [project], dockerfile: own },
+    extended: { rw: [checkout], dockerfile: own },
   }));
 
-  // A tool that lives in one box rather than the base still has to move with
-  // the machine — otherwise the box that needs it most is the one left behind.
   const fakeBin = path.join(dir, "bin");
   await fs.mkdir(fakeBin);
   await fs.writeFile(path.join(fakeBin, "gh"), '#!/bin/sh\necho "gh version 2.101.0"\n', { mode: 0o755 });
   const changed = JSON.parse(execFileSync(process.execPath,
-    ["-e", "process.stdout.write(JSON.stringify(require('./lib/box').syncPins({})))"],
+    ["-e", `process.stdout.write(JSON.stringify(require('./lib/box').syncPins(
+       { context: ${JSON.stringify(path.join(checkout, "box"))} })))`],
     { cwd: root, encoding: "utf8", env: { ...process.env, HOME: dir, PATH: `${fakeBin}:${process.env.PATH}` } }));
 
   assert.ok(changed.some((c) => c.arg === "GH_VERSION" && c.to === "2.101.0"), JSON.stringify(changed));
   assert.match(await fs.readFile(own, "utf8"), /ARG GH_VERSION=2\.101\.0/);
+  assert.match(await fs.readFile(path.join(checkout, "box", "Dockerfile"), "utf8"),
+    /ARG GH_VERSION=2\.101\.0/);
 });
-
 test("image pins follow the machine forward, never backward", async (t) => {
   const dir = await temp(t);
   const dockerfile = path.join(dir, "Dockerfile");
@@ -228,4 +235,44 @@ test("every pin in the image is one the machine can be read for", async () => {
   assert.deepEqual(orphans, [], "each ARG needs an entry in PINS to be mirrored");
   // The other way round is allowed: TOFU_VERSION is pinned only by the boxes
   // that touch infrastructure, in their own Dockerfiles, which are synced too.
+});
+
+// A box may name a Dockerfile that belongs to ANOTHER project, and that file is
+// theirs. finik pins Playwright to the version its own package.json depends on,
+// says so in a comment, and a browser build it did not expect makes the harness
+// refuse to start. This sync wrote 1.63.0 -> 1.64.0 into their tracked file and
+// broke their preflight on a dirty tree. Drift outside the checkout being built
+// is reported, never written.
+test("a pin sync never writes another project's Dockerfile", async (t) => {
+  const dir = await temp(t);
+  const checkout = path.join(dir, "checkout", "box");
+  const theirs = path.join(dir, "their-project");
+  await fs.mkdir(checkout, { recursive: true });
+  await fs.mkdir(theirs, { recursive: true });
+  await fs.writeFile(path.join(checkout, "Dockerfile"), "ARG GH_VERSION=0.0.1\n");
+  const foreign = path.join(theirs, "Dockerfile.theirs");
+  await fs.writeFile(foreign, "ARG GH_VERSION=0.0.1\n");
+  // A boxes.json that points one box at the other project's file.
+  const cfg = path.join(dir, ".config", "broker");
+  await fs.mkdir(cfg, { recursive: true });
+  await fs.writeFile(path.join(cfg, "boxes.json"),
+    JSON.stringify({ theirs: { rw: [theirs], dockerfile: foreign } }));
+
+  const out = execFileSync("node", ["-e", `
+    const box = require(${JSON.stringify(path.join(root, "lib", "box.js"))});
+    const moved = box.syncPins({ context: ${JSON.stringify(checkout)},
+                                 installed: () => "9.9.9" });
+    console.log(JSON.stringify({ changed: [...moved], foreign: moved.foreign }));
+  `], { encoding: "utf8", env: { ...process.env, HOME: dir, BROKER_REAL_HOME: dir } });
+  const got = JSON.parse(out);
+
+  assert.deepEqual(got.changed, [{ arg: "GH_VERSION", from: "0.0.1", to: "9.9.9" }],
+    "the checkout being built moves");
+  assert.equal(await fs.readFile(path.join(checkout, "Dockerfile"), "utf8"),
+    "ARG GH_VERSION=9.9.9\n");
+  assert.deepEqual(got.foreign,
+    [{ arg: "GH_VERSION", from: "0.0.1", to: "9.9.9", file: foreign }],
+    "the other project's drift is reported");
+  assert.equal(await fs.readFile(foreign, "utf8"), "ARG GH_VERSION=0.0.1\n",
+    "and their file is left exactly as it was");
 });

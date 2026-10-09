@@ -15,7 +15,15 @@ import threading
 from . import config
 
 
-STATE_DIR = os.path.join(config.CONFIG_DIR, "box", "mcp")
+def state_dir():
+    """Where a listener records itself, asked EVERY time.
+
+    Not frozen at import, for the reason box/report.py gives at its own root():
+    config.CONFIG_DIR is moved at run time, and a value taken once writes into
+    the real home whatever the caller said. Third instance of the same mistake
+    in this package, found by codex-misc-p5 in the first.
+    """
+    return os.path.join(config.CONFIG_DIR, "box", "mcp")
 # A listener with nothing connected for this long has outlived the box that
 # asked for it. Without this every box ever started would leave a process behind.
 IDLE_TIMEOUT = int(os.environ.get("BROKER_MCP_IDLE_SECONDS") or 4 * 3600)
@@ -25,7 +33,7 @@ def _state_file(name, key=""):
     stem = name.replace("/", "_")
     if key:
         stem += "-" + key
-    return os.path.join(STATE_DIR, "%s.json" % stem)
+    return os.path.join(state_dir(), "%s.json" % stem)
 
 
 def _pump(src, dst, close_on_done=None):
@@ -128,7 +136,7 @@ def serve(name, command, key=""):
     listener.listen(16)
     port = listener.getsockname()[1]
 
-    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    os.makedirs(state_dir(), mode=0o700, exist_ok=True)
     state = {"host": host, "port": port, "token": token, "command": command,
              "pid": os.getpid(), "identity": key}
     path = _state_file(name, key)

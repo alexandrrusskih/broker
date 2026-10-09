@@ -27,7 +27,18 @@ from ..out import die, warn
 from .paths import _bind, window_key
 
 
-ROOT = os.path.join(config.CONFIG_DIR, "box", "reports")
+def root():
+    """Where the report directories live, asked EVERY time.
+
+    A function and not a constant computed at import. config.CONFIG_DIR is
+    moved at run time — a test points it at a temporary directory, and so does
+    anything that runs the engine against another home — and a value frozen at
+    import ignores that move. codex-misc-p5 found it as eleven tests failing
+    under a sandbox; on this machine the same runs quietly made
+    ~/.config/broker/box/reports/demo and .../work in the real home, which is
+    worse than failing.
+    """
+    return os.path.join(config.CONFIG_DIR, "box", "reports")
 # The name the hook reads. Chosen by the bus side; broker only has to agree.
 ENV = "AGNTBUS_SESSION_REPORT_DIR"
 NAME = "session.json"
@@ -46,7 +57,7 @@ LAUNCH = "%d-%s" % (os.getpid(), secrets.token_hex(4))
 def directory(box, launch=None):
     """This launch's directory, as the launcher sees it."""
     safe = re.sub(r"[^A-Za-z0-9_.-]", "-", box)
-    return os.path.join(ROOT, safe, window_key(), launch or LAUNCH)
+    return os.path.join(root(), safe, window_key(), launch or LAUNCH)
 
 
 def flags(box):

@@ -24,13 +24,20 @@ from ..out import warn
 from .paths import window_key
 
 
-ROOT = os.path.join(config.CONFIG_DIR, "box", "state")
+def root():
+    """Where the state files live, asked EVERY time.
+
+    Not a constant computed at import, for the reason box/report.py gives at
+    its own root(): config.CONFIG_DIR is moved at run time, and a frozen value
+    writes into the real home instead. The same mistake was here first.
+    """
+    return os.path.join(config.CONFIG_DIR, "box", "state")
 
 
 def path(box):
     """One file per box and window."""
     safe = re.sub(r"[^A-Za-z0-9_.-]", "-", box)
-    return os.path.join(ROOT, safe, window_key() + ".json")
+    return os.path.join(root(), safe, window_key() + ".json")
 
 
 def claim(box, provider, session, env=None, workdir=None):
@@ -65,7 +72,7 @@ def live():
     import glob as globmodule
 
     out = []
-    for found in sorted(globmodule.glob(os.path.join(ROOT, "*", "*.json"))):
+    for found in sorted(globmodule.glob(os.path.join(root(), "*", "*.json"))):
         try:
             with open(found, encoding="utf-8") as handle:
                 out.append(json.load(handle))

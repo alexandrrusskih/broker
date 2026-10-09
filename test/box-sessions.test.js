@@ -146,7 +146,6 @@ provider = SimpleNamespace(NAME="codex", HOME_ENV="CODEX_HOME",
                            SESSION_GLOB="%(config)s/sessions/*/*/*/rollout-*.jsonl")
 env = {"CODEX_HOME": ${JSON.stringify(dir)}}
 config.CONFIG_DIR = ${JSON.stringify(path.join(dir, "cfg"))}
-state.ROOT = os.path.join(config.CONFIG_DIR, "box", "state")
 
 state.claim("demo", provider, None, env, "/work")
 noted = state.live()[0]

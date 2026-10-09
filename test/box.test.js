@@ -40,6 +40,8 @@ import json, os
 from broker import box
 from broker.box import boxes, mcp, run, sync
 from broker.providers import claude
+from broker import config
+config.CONFIG_DIR = ${JSON.stringify(path.join(dir, "cfg"))}
 cmd = box.command(claude, "demo",
                   {"rw": [${JSON.stringify(project)}], "ro": [${JSON.stringify(reference)}]},
                   ["-p", "hi"],
@@ -84,6 +86,8 @@ import json
 from broker import box
 from broker.box import boxes, mcp, run, sync
 from broker.providers import codex
+from broker import config
+config.CONFIG_DIR = ${JSON.stringify(path.join(dir, "cfg"))}
 cmd = box.command(codex, "demo", {"rw": [${JSON.stringify(project)}]}, ["exec", "hi"],
                   {"CODEX_HOME": ${JSON.stringify(profile)}, "BROKER_ACTIVE": "codex:sk"})
 print(json.dumps(cmd))
@@ -164,6 +168,8 @@ test("the MCP logins of the machine are not the box's to empty", async (t) => {
 import json
 from broker import box
 from broker.providers import agy
+from broker import config
+config.CONFIG_DIR = ${JSON.stringify(path.join(dir, "cfg"))}
 cmd = box.command(agy, "demo", {"rw": [${JSON.stringify(project)}]}, ["hi"], {})
 print(json.dumps(cmd))
 `);
@@ -192,6 +198,8 @@ test("a box says that it is a box, and which one", async (t) => {
 import json
 from broker import box
 from broker.providers import claude
+from broker import config
+config.CONFIG_DIR = ${JSON.stringify(path.join(dir, "cfg"))}
 cmd = box.command(claude, "work", {"rw": [${JSON.stringify(project)}], "mcp": False}, [], {})
 print(json.dumps([cmd[i + 1] for i, part in enumerate(cmd) if part == "-e"]))
 `);

@@ -114,7 +114,7 @@ cmd = command(claude, "one", boxes.profiles()["one"], ["--version"], {})
 sources = [p.split("source=")[1].split(",")[0] for p in cmd if p.startswith("type=bind,source=")]
 print("OWN", report.directory("one") in sources)
 print("OTHER", any(s.startswith(os.path.dirname(report.directory("two"))) for s in sources))
-print("STATE", any(s.startswith(state.ROOT) for s in sources))
+print("STATE", any(s.startswith(state.root()) for s in sources))
 `, box(dir));
 
   assert.match(out, /OWN True/, "the box gets its own report directory");

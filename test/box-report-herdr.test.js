@@ -191,9 +191,13 @@ test("a managed pane does not start a box it could never wake", async (t) => {
   const out = engine(`
 import os, sys
 sys.stderr = sys.stdout
+from broker import config
 from broker.box import report, watch
-report.ROOT = os.path.join("${dir}", "blocked")
-open(report.ROOT, "w").write("")
+# The config directory is moved, as a test or another home moves it — the root
+# is asked for every time, so this is all it takes.
+config.CONFIG_DIR = os.path.join("${dir}", "cfg")
+os.makedirs(os.path.join(config.CONFIG_DIR, "box"), exist_ok=True)
+open(os.path.join(config.CONFIG_DIR, "box", "reports"), "w").write("")
 try:
     report.flags("joppa")
     print("STARTED ANYWAY")
@@ -210,8 +214,12 @@ except SystemExit as exit:
   const loose = engine(`
 import os, sys
 sys.stderr = sys.stdout
+from broker import config
 from broker.box import report, watch
-report.ROOT = os.path.join("${dir}", "blocked")
+config.CONFIG_DIR = os.path.join("${dir}", "cfg")
+os.makedirs(os.path.join(config.CONFIG_DIR, "box"), exist_ok=True)
+if not os.path.exists(os.path.join(config.CONFIG_DIR, "box", "reports")):
+    open(os.path.join(config.CONFIG_DIR, "box", "reports"), "w").write("")
 print("FLAGS", report.flags("joppa"))
 `, { HOME: dir, HERDR_PANE_ID: "" });
   // Outside a pane there is nothing to wake, so it is only worth saying.

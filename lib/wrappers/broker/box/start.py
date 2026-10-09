@@ -9,7 +9,7 @@ import time
 
 from .. import config
 from ..out import die, warn
-from . import boxes, state
+from . import boxes, report, state
 from .run import command
 from .sync import _sync_back
 from .sessions import _exit_note, _pin_session, _session_from_argv, _session_it_named
@@ -108,6 +108,10 @@ def exec_box(provider, name, argv, env, account=None):
     pinned, argv = _pin_session(provider, argv)
     # Which pane this box belongs to, and the chat in it when we named it.
     state.claim(name, provider, pinned, env)
+    # The box's own half of the same answer: it writes its session id into one
+    # directory of ours, and this reads it while the container lives. Started
+    # before `command`, because command mounts that directory.
+    watcher = report.Watcher(name, provider, pinned)
     cmd = command(provider, name, defined[name], argv, env, remote=bool(remote))
     shadow_root = os.path.join(config.CONFIG_DIR, "box", "profiles") + os.sep
     shadows = [part.partition("source=")[2].partition(",")[0]
@@ -122,6 +126,12 @@ def exec_box(provider, name, argv, env, account=None):
         cmd = _over_ssh(cmd, machine, remote)
     workdir = cmd[cmd.index("-w") + 1] if "-w" in cmd else os.getcwd()
     started = time.time()
+
+    # An id this process ALREADY knows goes at once: the hook inside fires only
+    # on a bus call, and a relaunched pane needs its answer before that. Both
+    # sources are facts — the id handed to the harness, or the one typed.
+    watcher.start()
+    watcher.announce(pinned or _session_from_argv(provider, argv))
 
     # Waited for rather than exec'd into, only so the box can add its own line
     # after the harness has printed its resume hint. Everything else about the
@@ -155,6 +165,8 @@ def exec_box(provider, name, argv, env, account=None):
             shutil.rmtree(shadow, ignore_errors=True)
         # The pane this box belonged to, and whatever it said about its chat.
         # Left behind, both would name a conversation that has ended.
+        watcher.stop()
+        report.release(name)
         state.release(name)
 
     # 125 is the one exit code docker keeps for itself: the CLI could not run the

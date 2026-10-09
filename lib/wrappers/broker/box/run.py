@@ -8,7 +8,7 @@ import sys
 from ..out import die, warn
 # Imported as modules, not as names: a test that replaces one of these replaces
 # it where it lives, and a bound name here would keep pointing at the original.
-from . import clones, environ, extras, harness, http_mcp, mcp, nested, shim
+from . import clones, environ, extras, harness, http_mcp, mcp, nested, report, shim
 from .mcp import HOST_GATEWAY
 from .paths import _bind, _mount, _paths, expand, home_dir
 
@@ -144,6 +144,10 @@ def command(provider, name, profile, argv, env, remote=False):
             # Docker Desktop resolves this name already; Colima and plain Linux
             # need to be told, and saying it twice costs nothing.
             cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
+
+    # The one place a box may say which chat is in it. See box/report.py:
+    # the directory is its whole authority, and the pane is never in it.
+    cmd += report.flags(name)
 
     cmd += environ.own(profile)
 

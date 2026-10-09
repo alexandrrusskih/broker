@@ -115,6 +115,32 @@ RUN set -eux; \
     agy --version; gh --version | head -1; glab --version | head -1; rtk --version; \
     gitleaks version
 
+# Browser tests need a browser, and the one this machine runs: the pin follows
+# the host like every other tool here, so a hand-written version can never ship
+# an image a release behind.
+#
+# PLAYWRIGHT_BROWSERS_PATH points AWAY from $HOME deliberately. $HOME in a box
+# is a tmpfs, so a browser unpacked into ~/.cache is invisible the moment the
+# box starts — the same trap that hid a binary installed under $HOME once
+# before. Here it lands in /usr/local/share, which the box only reads.
+#
+# --with-deps is what pulls the system libraries Chromium needs on a slim
+# image; without it the browser is present and refuses to start.
+ARG PLAYWRIGHT_VERSION=1.64.0
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright
+# The driver as well as the browsers. Installing only the browsers leaves
+# `require("playwright")` unresolvable, and a test that launches chromium dies
+# on its first line with the browser sitting right there. NODE_PATH is what
+# makes a global package requirable from a project directory; it is searched
+# AFTER node_modules, so a project that ships its own copy still wins.
+ENV NODE_PATH=/usr/local/lib/node_modules
+RUN npm install -g --no-fund --no-audit playwright@${PLAYWRIGHT_VERSION} \
+ && npx --yes playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
+ && rm -rf /var/lib/apt/lists/* /root/.npm \
+ && playwright --version \
+ && node -e "require('playwright')" \
+ && test -d "$PLAYWRIGHT_BROWSERS_PATH"
+
 # A personal machine keeps commands in ~/bin and ~/.local/bin, and things
 # mounted from there must be reachable by name. Set in the shell profile too,
 # not only by the entry point: a login shell re-reads /etc/profile and would

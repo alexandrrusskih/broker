@@ -1,5 +1,6 @@
 """The harness's own files and directories, as the box sees them."""
 
+import json
 import os
 import re
 import shutil
@@ -8,7 +9,34 @@ import uuid
 from .. import config
 from ..out import warn
 from . import http_mcp
-from .paths import _bind, _empty_file, _mount, expand
+from .paths import _bind, _empty_file, _mount, _paths, expand
+
+
+def _trust(path, profile):
+    """Answer the folder-trust question in the box's own copy of the config.
+
+    A box exists to work in the directories it was given, and the person gave
+    them: they are in its entry in boxes.json. Asking inside the box whether to
+    trust one of them stops the harness on its first screen, before it reads a
+    prompt — and the answer cannot even persist, because the file it would be
+    written to is a copy made for this box alone.
+
+    So it is answered here, in that copy, for those paths and nothing else. The
+    host's file is not touched, and a directory the box was not given is still
+    asked about.
+    """
+    targets = [target for _, target in _paths(profile, "rw")]
+    if not targets:
+        return
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        projects = data.setdefault("projects", {})
+        for target in targets:
+            projects.setdefault(target, {})["hasTrustDialogAccepted"] = True
+        config.write_json(path, data)
+    except (OSError, ValueError, AttributeError) as exc:
+        warn("could not pre-answer the trust prompt for this box (%s)" % exc)
 
 
 def own_home(provider, profile, env, name, mounted):
@@ -31,6 +59,8 @@ def own_home(provider, profile, env, name, mounted):
         if not os.path.exists(host):
             continue
         if http_config and host == http_config[1]:
+            if provider.NAME == "claude":
+                _trust(http_config[0], profile)
             args += _bind(http_config[0], host, http_mode)
             http_config_mounted = True
             settings_mounted.add(host)
@@ -47,6 +77,8 @@ def own_home(provider, profile, env, name, mounted):
         except OSError as exc:
             warn("could not stage %s for the box (%s) — it will be missing inside" % (host, exc))
             continue
+        if provider.NAME == "claude" and os.path.basename(host) == ".claude.json":
+            _trust(copy, profile)
         mode = "ro" if entry in getattr(provider, "BOX_SETTINGS", ()) else "rw"
         args += _bind(copy, host, mode)
         settings_mounted.add(host)

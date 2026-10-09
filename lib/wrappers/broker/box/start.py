@@ -9,7 +9,7 @@ import time
 
 from .. import config
 from ..out import die, warn
-from . import boxes
+from . import boxes, state
 from .run import command
 from .sync import _sync_back
 from .sessions import _exit_note, _pin_session, _session_from_argv, _session_it_named
@@ -106,6 +106,8 @@ def exec_box(provider, name, argv, env, account=None):
         if binary and not _daemon_is_up(binary):
             die("the %s daemon is not running — start it, then try again" % runtime)
     pinned, argv = _pin_session(provider, argv)
+    # Which pane this box belongs to, and the chat in it when we named it.
+    state.claim(name, provider, pinned)
     cmd = command(provider, name, defined[name], argv, env, remote=bool(remote))
     shadow_root = os.path.join(config.CONFIG_DIR, "box", "profiles") + os.sep
     shadows = [part.partition("source=")[2].partition(",")[0]
@@ -151,6 +153,9 @@ def exec_box(provider, name, argv, env, account=None):
         _restore_terminal(saved)
         for shadow in shadows:
             shutil.rmtree(shadow, ignore_errors=True)
+        # The pane this box belonged to, and whatever it said about its chat.
+        # Left behind, both would name a conversation that has ended.
+        state.release(name)
 
     # 125 is the one exit code docker keeps for itself: the CLI could not run the
     # container at all. Nothing ran in there, so there is no session to fold back

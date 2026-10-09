@@ -69,6 +69,7 @@ def command(provider, name, profile, argv, env, remote=False):
     mounted = []
     cmd += extras.tools(binary, image, name, profile, home)
 
+
     (own, http_config, http_config_mounted, http_mode,
      settings_mounted) = harness.own_home(provider, profile, env, name, mounted)
     cmd += own

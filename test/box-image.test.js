@@ -214,3 +214,18 @@ print(json.dumps(box.command(claude, "demo", {"rw": ["${project}"]${extra}}, [],
   // would find it taken and start with no daemon at all.
   assert.match(withDocker, /type=volume,source=broker-box-docker-demo[^,]*,target=\/var\/lib\/docker/);
 });
+
+// A box exists to reproduce this machine, so every version the image pins has
+// to be a version the sync knows how to read off the host. COMPOSE_VERSION was
+// pinned in the Dockerfile and missing from the table, so it mirrored nothing
+// and sat three minors behind for as long as anyone had looked.
+test("every pin in the image is one the machine can be read for", async () => {
+  const dockerfile = await fs.readFile(path.join(root, "box", "Dockerfile"), "utf8");
+  const { PINS } = require("../lib/box-pins");
+  const pinned = [...dockerfile.matchAll(/^ARG ([A-Z0-9_]*VERSION)=/gm)].map((m) => m[1]);
+  assert.ok(pinned.length > 5, "the base image pins its tools by version");
+  const orphans = pinned.filter((arg) => !PINS[arg]);
+  assert.deepEqual(orphans, [], "each ARG needs an entry in PINS to be mirrored");
+  // The other way round is allowed: TOFU_VERSION is pinned only by the boxes
+  // that touch infrastructure, in their own Dockerfiles, which are synced too.
+});

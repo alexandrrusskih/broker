@@ -53,7 +53,7 @@ RUN npm install -g --no-fund --no-audit \
 # compose is not packaged for bookworm, so the plugin comes from its release
 # directly. Pinned: a test suite that pulls a different compose between runs is
 # a test suite whose failures you cannot reproduce.
-ARG COMPOSE_VERSION=v5.5.1
+ARG COMPOSE_VERSION=v5.6.0
 # A project's own build may ask for buildx — and a box that has docker but not
 # buildx fails at the first `docker build` with a plugin that is simply absent.
 ARG BUILDX_VERSION=v0.38.0

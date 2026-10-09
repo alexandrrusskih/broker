@@ -9,7 +9,7 @@ import time
 
 from .. import config
 from ..out import die, warn
-from . import boxes, report, state
+from . import boxes, report, state, watch
 from .run import command
 from .sync import _sync_back
 from .sessions import _exit_note, _pin_session, _session_from_argv, _session_it_named
@@ -111,7 +111,7 @@ def exec_box(provider, name, argv, env, account=None):
     # The box's own half of the same answer: it writes its session id into one
     # directory of ours, and this reads it while the container lives. Started
     # before `command`, because command mounts that directory.
-    watcher = report.Watcher(name, provider, pinned)
+    watcher = watch.Watcher(name, provider, pinned)
     cmd = command(provider, name, defined[name], argv, env, remote=bool(remote))
     shadow_root = os.path.join(config.CONFIG_DIR, "box", "profiles") + os.sep
     shadows = [part.partition("source=")[2].partition(",")[0]

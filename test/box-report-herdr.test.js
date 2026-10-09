@@ -41,7 +41,7 @@ test("the first report goes through the call the manager will take", async (t) =
   const out = engine(`
 import json, os, time
 ${MANAGER}
-from broker.box import herdr, report
+from broker.box import herdr, report, watch
 from broker.providers import agy
 
 sock = os.path.join("${dir}", "herdr.sock")
@@ -81,7 +81,7 @@ test("a refusal is a refusal, and is not remembered as a report delivered", asyn
 import os, sys, time
 sys.stderr = sys.stdout  # every message to the operator goes to stderr
 ${MANAGER}
-from broker.box import herdr, report
+from broker.box import herdr, report, watch
 from broker.providers import agy
 
 sock = os.path.join("${dir}", "herdr.sock")
@@ -96,7 +96,7 @@ os.environ["HERDR_PANE_ID"] = "wA:p1"
 # The manager here refuses anything that is not pane.report_agent.
 herdr.tell = lambda pane, provider, box, session: herdr.accepted(
     '{"error":{"message":"session_not_accepted"}}')
-watcher = report.Watcher("joppa", agy, None)
+watcher = watch.Watcher("joppa", agy, None)
 watcher.announce("0199aaaa-bbbb-cccc-dddd-eeeeffff0000")
 print("SENT", repr(watcher.sent))
 watcher.stop()
@@ -147,7 +147,7 @@ test("a managed pane does not start a box it could never wake", async (t) => {
   const out = engine(`
 import os, sys
 sys.stderr = sys.stdout
-from broker.box import report
+from broker.box import report, watch
 report.ROOT = os.path.join("${dir}", "blocked")
 open(report.ROOT, "w").write("")
 try:
@@ -166,7 +166,7 @@ except SystemExit as exit:
   const loose = engine(`
 import os, sys
 sys.stderr = sys.stdout
-from broker.box import report
+from broker.box import report, watch
 report.ROOT = os.path.join("${dir}", "blocked")
 print("FLAGS", report.flags("joppa"))
 `, { HOME: dir, HERDR_PANE_ID: "" });

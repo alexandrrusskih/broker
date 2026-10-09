@@ -145,11 +145,18 @@ def command(provider, name, profile, argv, env, remote=False):
             # need to be told, and saying it twice costs nothing.
             cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
 
-    # The one place a box may say which chat is in it. See box/report.py:
-    # the directory is its whole authority, and the pane is never in it.
-    cmd += report.flags(name)
-
     cmd += environ.own(profile)
+
+    # The one place a box may say which chat is in it. See box/report.py: the
+    # directory is its whole authority, and the pane is never in it.
+    #
+    # AFTER environ.own, which is the box's own settings and documented to win
+    # over everything above it. Before it, a box could name
+    # AGNTBUS_SESSION_REPORT_DIR in its own "env" and send its reports
+    # somewhere else — or nowhere — and this is the one variable a box must not
+    # be able to choose. Docker takes the LAST -e for a repeated name, so this
+    # is the last word.
+    cmd += report.flags(name)
 
     cmd.append(image)
     cmd.append("broker-box-entry")

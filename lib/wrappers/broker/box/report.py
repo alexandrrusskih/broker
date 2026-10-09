@@ -173,6 +173,7 @@ class Watcher:
         self.sent = None
         self.refused = set()
         self._seen = None
+        self._mark = None
         self._stop = threading.Event()
         self._thread = None
 
@@ -204,8 +205,28 @@ class Watcher:
         except OSError:
             return None
 
+    def _changed(self):
+        """Whether the file is worth opening. One stat, not one read.
+
+        The hook rewrites this on EVERY bus call, which for a talkative agent is
+        often, and almost always with the id it wrote last time. A tick that
+        only stats costs nothing; reading and parsing on each one would be work
+        done to reach the same answer.
+        """
+        try:
+            info = os.stat(self.path)
+        except OSError:
+            return False
+        mark = (info.st_mtime_ns, info.st_size, info.st_ino)
+        if mark == self._mark:
+            return False
+        self._mark = mark
+        return True
+
     def _loop(self):
         while not self._stop.wait(POLL):
+            if not self._changed():
+                continue
             raw = self._read()
             if raw is None or raw == self._seen:
                 continue

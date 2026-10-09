@@ -156,3 +156,54 @@ print("SAID", said)
 `, box(dir));
   assert.match(out, /SAID \['0199aaaa-bbbb-cccc-dddd-eeeeffff0000'\]/);
 });
+
+test("the same id written again is not reported again", async (t) => {
+  const dir = await temp(t);
+  // The hook rewrites its file on every bus call, almost always with the id it
+  // wrote last time. The manager hears about an id once.
+  const out = engine(`
+import os, time
+from broker.box import report
+from broker.providers import agy
+
+report.POLL = 0.02
+said = []
+report._tell = lambda pane, provider, box, session: said.append(session) or True
+report.flags("demo")
+watcher = report.Watcher("demo", agy, None).start()
+here = report.directory("demo")
+for _ in range(4):
+    temporary = os.path.join(here, ".tmp")
+    open(temporary, "w").write('{"agent":"antigravity","id":"0199aaaa-bbbb-cccc-dddd-eeeeffff0000"}')
+    os.replace(temporary, os.path.join(here, report.NAME))
+    time.sleep(0.1)
+watcher.stop()
+print("SAID", said)
+`, box(dir));
+  assert.match(out, /SAID \['0199aaaa-bbbb-cccc-dddd-eeeeffff0000'\]/);
+});
+
+test("a chat replaced in the same box is reported as the new one", async (t) => {
+  const dir = await temp(t);
+  const out = engine(`
+import os, time
+from broker.box import report
+from broker.providers import agy
+
+report.POLL = 0.02
+said = []
+report._tell = lambda pane, provider, box, session: said.append(session) or True
+report.flags("demo")
+watcher = report.Watcher("demo", agy, None).start()
+here = report.directory("demo")
+for which in ("1111", "2222"):
+    temporary = os.path.join(here, ".tmp")
+    open(temporary, "w").write('{"agent":"antigravity","id":"0199aaaa-bbbb-cccc-dddd-eeeeffff%s"}' % which)
+    os.replace(temporary, os.path.join(here, report.NAME))
+    time.sleep(0.15)
+watcher.stop()
+print("SAID", said)
+`, box(dir));
+  // /clear starts another conversation in the same pane and the same box.
+  assert.match(out, /SAID \['0199aaaa-bbbb-cccc-dddd-eeeeffff1111', '0199aaaa-bbbb-cccc-dddd-eeeeffff2222'\]/);
+});

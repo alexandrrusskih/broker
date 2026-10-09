@@ -192,7 +192,10 @@ def exec_box(provider, name, argv, env, account=None):
     # thread id out of the harness's own log — and it came back with the middle
     # of a sentence. Anything that has to be checked for being nonsense before
     # it can be printed is not a source, it is a guess with paperwork.
-    session = (pinned
+    # The id the watcher last recorded comes first: after a /clear the pinned id
+    # names a chat the person has left, and the way back must name the new one.
+    session = (watcher.sent
+               or pinned
                or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None), provider)
                or _session_from_argv(provider, argv))
     _remember(provider, name, workdir, session, account, status)

@@ -162,13 +162,26 @@ def settings(provider, env, canonical, http_config, settings_mounted):
     args = []
     # Host settings stay read-only. Runtime state in the same home stays writable.
     config_target = http_config[1] if http_config else None
+    # Where the staged MCP copy will be mounted, compared by what it RESOLVES to.
+    # The staged copy goes to the real path of the config this run was pointed
+    # at; for a harness whose per-account profile is a mirror, that profile's
+    # file is a symlink to the canonical one, so the two names differ while the
+    # target is the same file. Comparing the names only, this mounted the
+    # canonical config twice, and docker refused the container outright:
+    # "Duplicate mount point: ~/.gemini/config/mcp_config.json". agy could not
+    # start in a box at all on a real run — only on a passthrough like
+    # --version, which picks no account and so has no profile.
+    staged = set()
+    if http_config:
+        staged = {os.path.realpath(http_config[1]), os.path.realpath(http_config[2])}
     protected = set(settings_mounted)
     sources = []
     for entry in getattr(provider, "BOX_SETTINGS", ()):
         host = expand(entry)
         if os.path.isfile(host):
             sources.append(host)
-        if os.path.isfile(host) and host != config_target and host not in settings_mounted:
+        if (os.path.isfile(host) and os.path.realpath(host) not in staged
+                and host not in settings_mounted):
             args += _mount(os.path.realpath(host), "ro", host)
             protected.add(host)
     if provider.NAME == "codex" and env.get("CODEX_HOME"):

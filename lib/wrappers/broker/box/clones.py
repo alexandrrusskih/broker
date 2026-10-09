@@ -77,7 +77,18 @@ def readonly(provider, mounted):
     args = []
     # Files a box may READ but must not touch. Not the same as a secret it may
     # not see at all: a harness inside needs these to work, and needs them to
-    # be the real ones. agy's MCP tokens are the case this exists for — started
+    # be the real ones.
+    #
+    # Each provider names what the HOST runs or reads as instruction from its
+    # own directory — hooks, skills, agents, commands, plugin code, prompt
+    # files, and for codex the binaries the host's own codex starts. That
+    # directory travels WRITABLE, because the harness keeps its state there, so
+    # without this list a box could rewrite one and the harness out here would
+    # run it at its next start. Prompt files are the quieter half of the same
+    # hole: a line added to one reaches every chat on this machine.
+    #
+    # Cache and state are deliberately NOT in those lists. A box that cannot
+    # write its own cache is a box that does not work. agy's MCP tokens are the case this exists for — started
     # in a box it rewrote that file EMPTY, and two logins granted an hour
     # earlier were gone, reported afterwards as "Unauthorized [Auth Needed]",
     # which reads as an expired token rather than as a file destroyed by a

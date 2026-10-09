@@ -107,7 +107,7 @@ def exec_box(provider, name, argv, env, account=None):
             die("the %s daemon is not running — start it, then try again" % runtime)
     pinned, argv = _pin_session(provider, argv)
     # Which pane this box belongs to, and the chat in it when we named it.
-    state.claim(name, provider, pinned)
+    state.claim(name, provider, pinned, env)
     cmd = command(provider, name, defined[name], argv, env, remote=bool(remote))
     shadow_root = os.path.join(config.CONFIG_DIR, "box", "profiles") + os.sep
     shadows = [part.partition("source=")[2].partition(",")[0]

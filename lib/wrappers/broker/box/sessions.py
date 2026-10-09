@@ -98,6 +98,46 @@ def _session_path(provider, session, workdir, env=None):
         if _session_id(path) == session:
             return path
     return None
+def _session_since(provider, workdir, since, env=None):
+    """The id of the newest session this harness began at or after `since`.
+
+    A harness that is not told its id makes one when it starts talking, and
+    writes it into the NAME of its own session file. That file lands in a
+    directory the host already shares, so the id can be read out here without
+    asking the container anything — no socket, no exec, no polling.
+
+    `since` is epoch seconds; the launcher notes it when the box starts. The
+    newest match wins, because a box makes at most one session per start.
+    """
+    pattern = getattr(provider, "SESSION_GLOB", None)
+    if not pattern:
+        return None
+    import glob as globmodule
+
+    home_env = getattr(provider, "HOME_ENV", None)
+    config = (env or {}).get(home_env) if home_env and home_env != "HOME" else None
+    fields = {
+        "key": (workdir or "").replace(os.sep, "-"),
+        "home": home_dir(),
+        "config": config or expand(getattr(provider, "CANONICAL_HOME", "~")),
+    }
+    best = (0, None)
+    for path in globmodule.glob(pattern % fields):
+        try:
+            born = _created(path)
+        except OSError:
+            continue
+        # Strictly after, with no slack. The launcher notes the time BEFORE it
+        # starts the container, so a session of this box can only be younger —
+        # while a slack of even a second lets in a session another box began at
+        # the same moment, and a wake would land in the wrong chat.
+        if born < since:
+            continue
+        if born > best[0]:
+            best = (born, _session_id(path))
+    return best[1]
+
+
 def _exit_note(provider, session, workdir, env=None):
     """Why the harness stopped, said again where it will still be readable.
 

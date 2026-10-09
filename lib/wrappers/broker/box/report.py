@@ -14,23 +14,23 @@ nothing to check — a mount reaches exactly one container, which is a stronger
 statement than any secret a box could be told and then have read out of it.
 
 What a box CAN still do is name an id of the same harness belonging to another
-window. For claude it cannot: the launcher chose that id before the container
-started, so the report has to match it or it is refused. For the harnesses that
-name their own id there is no such check, and the report is accepted on its
-shape alone. That is the boundary, and it is written down rather than hidden.
+window. It is refused for exactly one case: a run whose id this process CHOSE
+before the container started, which is claude on a fresh chat. Then the report
+has to match it. Everywhere else the id is the harness's own to invent or to
+pick — codex, agy, opencode always, and claude too when the person resumes
+through its picker instead of naming a chat, because then nothing out here ever
+learns which one they chose. Those reports are accepted on their shape alone.
+That is the boundary, and it is written down rather than hidden.
 """
 
 import json
 import os
-import random
 import re
-import shlex
-import socket
 import threading
-import time
 
 from .. import config
-from ..out import warn
+from ..out import die, warn
+from . import herdr
 from .paths import _bind, window_key
 
 
@@ -38,11 +38,6 @@ ROOT = os.path.join(config.CONFIG_DIR, "box", "reports")
 # The name the hook reads. Chosen by the bus side; broker only has to agree.
 ENV = "AGNTBUS_SESSION_REPORT_DIR"
 NAME = "session.json"
-# Said plainly, and never one of the manager's own names: a report from here is
-# a report from the broker, and a manager that does not know the broker should
-# refuse it rather than be fooled into trusting it.
-SOURCE = "broker:box"
-
 # What the hook calls a harness against what the manager and the broker call it.
 # The bus hook for agy reports "antigravity"; the canonical label is "agy", and
 # a report under the other name is simply dropped on arrival.
@@ -82,9 +77,14 @@ def flags(box):
         except FileNotFoundError:
             pass
     except OSError as exc:
-        # Never fatal: a box that cannot report is a box woken by hand, which is
-        # what every box did until now.
-        warn("the '%s' box cannot report its session (%s) — it will not wake by itself" % (box, exc))
+        # In a managed pane this is fatal. The box would start, work, and never
+        # be wakeable — and nothing on screen would say so until somebody tried
+        # to wake it and nothing happened. Outside a pane there is nothing to
+        # wake, so it is only worth saying.
+        said = "the '%s' box cannot make its report directory: %s" % (box, exc)
+        if os.environ.get("HERDR_PANE_ID"):
+            die("%s — this pane could not wake it, so it is not started" % said)
+        warn("%s — it will not wake by itself" % said)
         return []
     return ["-e", "%s=%s" % (ENV, host)] + _bind(host, host, "rw")
 
@@ -94,16 +94,6 @@ def release(box):
     import shutil
 
     shutil.rmtree(directory(box), ignore_errors=True)
-
-
-def _resume_argv(provider, box, session):
-    """What to run to open this chat again, built HERE.
-
-    Never taken from the report. A box that could hand out a command line would
-    be handing it to whatever reruns the pane, outside any container.
-    """
-    form = getattr(provider, "SESSION_RESUME", "--resume %s")
-    return [provider.BIN] + shlex.split(form % session) + ["--box", box]
 
 
 def _accept(raw, provider, pinned):
@@ -125,42 +115,6 @@ def _accept(raw, provider, pinned):
     if pinned and session != pinned:
         return None, "the id is not the one this run was given"
     return session, ""
-
-
-def _tell(pane, provider, box, session):
-    """Hand the manager the id and the way back, over its own socket."""
-    path = os.environ.get("HERDR_SOCKET_PATH")
-    if not path:
-        return False
-    request = {
-        "id": "%s:%d:%06d" % (SOURCE, int(time.time() * 1000), random.randrange(1_000_000)),
-        "method": "pane.report_agent_session",
-        "params": {
-            "pane_id": pane,
-            "source": SOURCE,
-            "agent": provider.NAME,
-            "seq": time.time_ns(),
-            "agent_session_id": session,
-            # The only reason any of this survives a restart of the manager:
-            # it kills the pane's terminal, the launcher and the container, so
-            # the chat is not resumed but RELAUNCHED, and only the manager can
-            # remember with what.
-            "resume_argv": _resume_argv(provider, box, session),
-        },
-    }
-    try:
-        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.settimeout(0.5)
-        client.connect(path)
-        client.sendall((json.dumps(request) + "\n").encode())
-        try:
-            client.recv(4096)
-        except OSError:
-            pass
-        client.close()
-    except OSError:
-        return False
-    return True
 
 
 class Watcher:
@@ -187,8 +141,12 @@ class Watcher:
         """
         if not (self.pane and session) or session == self.sent:
             return
-        if _tell(self.pane, self.provider, self.box, session):
+        taken, why = herdr.tell(self.pane, self.provider, self.box, session)
+        if taken:
             self.sent = session
+        elif why not in self.refused:
+            self.refused.add(why)
+            warn("the manager did not take the '%s' box's session: %s" % (self.box, why))
 
     def start(self):
         if not self.pane:

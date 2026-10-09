@@ -21,7 +21,6 @@ import os
 import re
 import secrets
 import shutil
-import time
 
 from .. import config
 from ..out import die, warn
@@ -44,41 +43,10 @@ NAME = "session.json"
 # command builder and the watcher still agree.
 LAUNCH = "%d-%s" % (os.getpid(), secrets.token_hex(4))
 
-# How long an orphan may sit before it is swept. Long enough that no live run is
-# ever a candidate: a report directory is removed when its box ends, so anything
-# left is from a run that was killed outright.
-ORPHAN_AGE = 24 * 60 * 60
-
-
 def directory(box, launch=None):
     """This launch's directory, as the launcher sees it."""
     safe = re.sub(r"[^A-Za-z0-9_.-]", "-", box)
     return os.path.join(ROOT, safe, window_key(), launch or LAUNCH)
-
-
-def _sweep(box):
-    """Drop directories left by runs that were killed before they could tidy.
-
-    By age only. Anything else — a pid check, "the newest is mine" — would be a
-    guess about somebody else's live run, and deleting a live run's directory is
-    the bug this is here to avoid in the first place.
-    """
-    window = os.path.dirname(directory(box))
-    try:
-        names = os.listdir(window)
-    except OSError:
-        return
-    now = time.time()
-    for name in names:
-        if name == LAUNCH:
-            continue
-        found = os.path.join(window, name)
-        try:
-            if now - os.path.getmtime(found) < ORPHAN_AGE:
-                continue
-        except OSError:
-            continue
-        shutil.rmtree(found, ignore_errors=True)
 
 
 def flags(box):
@@ -104,7 +72,6 @@ def flags(box):
             os.unlink(os.path.join(host, NAME))
         except FileNotFoundError:
             pass
-        _sweep(box)
     except OSError as exc:
         # In a managed pane this is fatal. The box would start, work, and never
         # be wakeable — and nothing on screen would say so until somebody tried
@@ -118,6 +85,14 @@ def flags(box):
     return ["-e", "%s=%s" % (ENV, host)] + _bind(host, host, "rw")
 
 
+# NOTHING SWEEPS THE OLD ONES, deliberately. A sweep by age was written here
+# and taken out the same hour: the directory's mtime only moves when something
+# is added to it or removed, so a live box sitting idle for a day keeps an old
+# one — and a second launch in the same pane would then delete the live mount
+# of the first. codex-misc-p5 caught it, and the comment justifying it was
+# simply false. A directory left by a run that was killed outright holds one
+# small file and harms nothing; removing it is a person's job, not a guess made
+# by whichever launch happens to be starting.
 def release(box):
     """It goes when the box does: a left report names a chat that has ended.
 

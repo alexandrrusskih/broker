@@ -160,24 +160,30 @@ print("SURVIVED", os.path.isdir(new))
   assert.match(out, /SURVIVED True/);
 });
 
-test("a directory left by a killed run is swept, and a fresh one is not", async (t) => {
+test("a launch never touches the directory of another launch", async (t) => {
   const dir = await temp(t);
+  // A sweep by age was written here and taken out the same hour. A directory's
+  // mtime only moves when something is added to it or removed, so a live box
+  // sitting idle for a day keeps an old one — and a second launch in the same
+  // pane would then delete the live mount of the first. codex-misc-p5 caught
+  // it. Nothing sweeps now, and that is the point of this test.
   const out = engine(`
 import os, time
 from broker.box import report
 
-stale = report.directory("demo", launch="1-stale")
-fresh = report.directory("demo", launch="2-fresh")
-for found in (stale, fresh):
-    os.makedirs(found, mode=0o700, exist_ok=True)
-old = time.time() - report.ORPHAN_AGE - 60
-os.utime(stale, (old, old))
-report.flags("demo")
-print("STALE", os.path.isdir(stale))
-print("FRESH", os.path.isdir(fresh))
+idle = report.directory("demo", launch="1-idle-but-alive")
+os.makedirs(idle, mode=0o700, exist_ok=True)
+open(os.path.join(idle, report.NAME), "w").write("{}")
+# A box that has said nothing for a week is still a box.
+old = time.time() - 7 * 24 * 60 * 60
+os.utime(idle, (old, old))
+
+report.flags("demo")          # a second launch in the same pane
+print("ALIVE", os.path.isdir(idle))
+report.release("demo")        # and it ends
+print("STILL", os.path.isdir(idle))
 `, box(dir));
 
-  // By age only: anything else would be a guess about somebody else's live run.
-  assert.match(out, /STALE False/);
-  assert.match(out, /FRESH True/);
+  assert.match(out, /ALIVE True/);
+  assert.match(out, /STILL True/);
 });

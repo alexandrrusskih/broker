@@ -145,3 +145,31 @@ test("the engine loads on a python without tomllib", () => {
     "from broker.cli import main\n" +
     "from broker.box import http_mcp, run\n"], { cwd: root, stdio: "pipe" });
 });
+
+// Asking what a command does must never do it. A peer ran `broker upgrade
+// --help` on a live machine and it UPGRADED the installation instead of
+// explaining it: --help reached the command, which ignored it.
+test("--help explains a command instead of running it", async () => {
+  const fs = require("node:fs/promises");
+  const source = (await fs.readFile(path.join(root, "cli.js"), "utf8"))
+    .replace("main().catch", "globalThis.done = main().catch");
+  for (const argv of [["upgrade", "--help"], ["upgrade", "-h"], ["install", "--help"]]) {
+    const printed = [];
+    const context = {
+      process: {
+        argv: ["node", "cli.js", ...argv], execPath: "/test/node",
+        stdout: { write(s) { printed.push(s); } },
+        stderr: { write(s) { throw new Error(s); } },
+        exit() { throw new Error("must not exit"); },
+      },
+      console: { log() {}, error() {} },
+      require(name) {
+        if (name === "./lib/help") return "HELP TEXT\n";
+        throw new Error(`${argv.join(" ")} reached ${name} — it must only print help`);
+      },
+    };
+    vm.runInNewContext(source, context);
+    await context.done;
+    assert.deepEqual(printed, ["HELP TEXT\n"], argv.join(" "));
+  }
+});

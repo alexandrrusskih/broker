@@ -28,6 +28,18 @@ async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   const { flags, positional } = parseFlags(rest);
 
+  // Asking what a command does must never do it. `--help` used to reach the
+  // command itself, and `broker upgrade --help` UPGRADED the installation
+  // instead of explaining it — reported by a peer who ran it on a live machine.
+  // Checked here, before the switch, so it holds for every command there is.
+  //
+  // `-h` only as the first word, because parseFlags gives a bare word after a
+  // flag to that flag: in `config --key -h` the -h is the key, not a question.
+  if ("help" in flags || rest[0] === "-h") {
+    process.stdout.write(HELP);
+    return;
+  }
+
   switch (cmd) {
     case "setup":
       await require("./lib/cmd/providers").setup(flags);

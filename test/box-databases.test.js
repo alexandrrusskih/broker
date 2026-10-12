@@ -208,3 +208,38 @@ print(json.dumps({
   // Everything else is shared the ordinary way.
   assert.equal(seen.conf_is_symlink, true);
 });
+
+test("a dead window's databases are swept, a live or recent one is not", async (t) => {
+  // Every scripted run of the harness is a new process group, so it got its own
+  // seeded copy and nothing took it away: 199 of them, 71 GB, on one host.
+  const base = await temp(t);
+  const out = engine(`
+import json, os, subprocess, time
+from broker.providers import codex_db
+
+base = ${JSON.stringify(base)}
+gone = subprocess.Popen(["sleep", "30"], start_new_session=True)
+dead = gone.pid
+gone.kill(); gone.wait()
+
+def make(name, age):
+    path = os.path.join(base, name)
+    os.makedirs(path)
+    f = os.path.join(path, "logs_2.sqlite")
+    open(f, "w").write("x")
+    then = time.time() - age
+    os.utime(f, (then, then)); os.utime(path, (then, then))
+
+make("pgid-%d" % dead, 3600)            # dead and old: goes
+make("pgid-%d" % os.getpgrp(), 3600)    # this group is alive: stays
+make("pgid-999999999", 5)               # dead but just written: stays
+make("pane-w1", 3600)                   # pane-keyed: never ours to sweep
+make("pgid-own", 3600)                  # not a number: left alone
+codex_db._sweep_dead_windows(base, os.path.join(base, "pgid-1"))
+print(json.dumps(sorted(os.listdir(base))))
+print(json.dumps("pgid-%d" % dead))
+`);
+  const [left, dead] = out.trim().split("\n").map((l) => JSON.parse(l));
+  assert.ok(!left.includes(dead), "the dead old window is swept");
+  assert.equal(left.length, 4, `the other four stay: ${left}`);
+});

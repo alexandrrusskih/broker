@@ -82,6 +82,7 @@ def harness_env(env, canonical, home_env):
     base = SQLITE_BASE if os.path.isdir(os.path.dirname(SQLITE_BASE)) else \
         os.path.expanduser("~/.cache/broker/codex-db")
     own = os.path.join(base, window_key())
+    _sweep_dead_windows(base, own)
     fresh = not os.path.isdir(own)
     try:
         os.makedirs(own, mode=0o700, exist_ok=True)
@@ -91,6 +92,57 @@ def harness_env(env, canonical, home_env):
         _seed_databases(own, canonical)
     env[SQLITE_ENV] = own
     _repair_rollout_paths(own, canonical)
+
+
+SWEEP_AFTER_S = 600
+
+
+def _sweep_dead_windows(base, own):
+    """Remove the databases of windows whose process group is gone.
+
+    A window without a pane is keyed by its process group, and every run of the
+    harness from a script is a new group — so each got its own seeded copy and
+    nothing ever took one away. Measured on a Linux host running agent lanes:
+    199 such directories in three days, 71 GB, all of dead groups.
+
+    Only "pgid-" directories go, and only when no process is left in that group
+    and nothing was written there for ten minutes: a pane-keyed one belongs to a
+    window a person may come back to, and a group that still exists may still
+    be writing. Anything that cannot be checked or removed is left alone.
+    """
+    import shutil
+    import time
+
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return
+    now = time.time()
+    for name in names:
+        if not name.startswith("pgid-"):
+            continue
+        path = os.path.join(base, name)
+        if path == own:
+            continue
+        try:
+            group = int(name[len("pgid-"):])
+        except ValueError:
+            continue
+        try:
+            os.killpg(group, 0)
+            continue  # someone is still in it
+        except ProcessLookupError:
+            pass
+        except OSError:
+            continue  # exists, but not ours to signal
+        try:
+            newest = max([os.path.getmtime(path)] + [
+                os.path.getmtime(os.path.join(path, f)) for f in os.listdir(path)])
+        except OSError:
+            continue
+        if now - newest < SWEEP_AFTER_S:
+            continue
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _repair_rollout_paths(directory, canonical):

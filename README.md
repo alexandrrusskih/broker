@@ -570,10 +570,18 @@ AGY_ACCOUNT=<name> agy …    # pin one run through the environment
 
 The repository does not ship a Google OAuth client credential. It belongs to the
 application rather than to whoever is adding an account, so it goes in the
-broker's own config once — `agy_client_id` and `agy_client_secret` — and every
-machine then seeds without holding it. `AGY_OAUTH_CLIENT_ID` and
-`AGY_OAUTH_CLIENT_SECRET` still override it for a single `broker seed agy`,
-and the broker stores whatever it was given with that account's token.
+broker's own config once and no machine holds it again:
+
+```sh
+broker config-set agy_client_id <id>
+broker config-set agy_client_secret <secret>
+broker config-get                       # agy_client_id_set / agy_client_secret_set
+```
+
+The value is never read back or echoed — `config-get` answers whether, not what.
+`AGY_OAUTH_CLIENT_ID` and `AGY_OAUTH_CLIENT_SECRET` still override it for a
+single `broker seed agy`, and the broker stores whatever it was given with that
+account's token.
 
 Seeding is admin-only: a client key may fetch tokens and not seed them, so a
 teammate given one can run everything except `broker seed`. Either the person

@@ -89,4 +89,19 @@ test("Firebase router keeps legacy key permissions and rollout default", async (
   assert.equal((await invoke("getToken", { provider: "codex", format: "authjson" })).body.tokens.refresh_token, "legacy-refresh");
   assert.equal((await invoke("configSet", {}, { key: "codex_handle_rollout", value: true })).code, 200);
   assert.match((await invoke("getToken", { provider: "codex", format: "authjson" })).body.tokens.refresh_token, /^[0-9a-f]{64}$/);
+
+  // agy's OAuth client pair belongs to the application, so it is set here once
+  // instead of living in the environment of every machine that seeds an agy
+  // account. Settable, never readable, and never echoed.
+  const set = await invoke("configSet", {}, { key: "agy_client_secret", value: "GOCSPX-not-a-real-secret" });
+  assert.equal(set.code, 200);
+  assert.equal(set.body.value, "<set>", "a secret is not echoed back to the caller");
+  assert.equal((await invoke("configSet", {}, { key: "agy_client_id", value: "1234-abc.apps.googleusercontent.com" })).code, 200);
+  const seen = (await invoke("configGet")).body;
+  assert.equal(seen.agy_client_id_set, true, "an operator can check it landed");
+  assert.equal(seen.agy_client_secret_set, true);
+  assert.equal(seen.agy_client_secret, undefined, "whether, not what");
+  // The guard the whitelist exists for is unchanged.
+  assert.equal((await invoke("configSet", {}, { key: "broker_key", value: "stolen" })).code, 400);
+  assert.equal((await invoke("configSet", {}, { key: "agy_client_secret", value: "" })).code, 400);
 });

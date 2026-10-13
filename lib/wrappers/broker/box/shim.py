@@ -144,7 +144,8 @@ def _write(path, name, live, lang="py"):
     return path
 
 
-def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py"):
+def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py",
+                identity=()):
     """A connector for a host MCP server, for a container that is not a box.
 
     Written for Crew, which builds its own container and needs the same bridge:
@@ -162,6 +163,11 @@ def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py"):
       lang     the language the connector is written in, "py" or "js". The
                wire is the same either way; pick the interpreter the
                container actually has.
+      identity names of variables that decide whether a live listener may be
+               reused, beyond those `env` already names. Pass the one that
+               carries the allowed root when it arrives through `roots`:
+               nothing else would tell two callers with different roots apart,
+               and they would share one listener answering about one of them.
 
     A live listener is reused only when its command AND its caller identity
     match — the identity folds in the pane, the workspace, the bus home, every
@@ -180,10 +186,24 @@ def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py"):
     from .mcp import _start_bridge
 
     server = {"command": list(command), "env": dict(env or {}), "inherit": list(inherit)}
-    # identity_env says which values decide whether a listener may be reused.
-    # The names from `env` are added by _start_bridge itself; the allowed root
-    # is named here because it can arrive through `roots` instead.
-    profile = {"env": dict(env or {}), "mcp": {name: {"identity_env": ["CBM_ALLOWED_ROOT"]}}}
+    # identity_env says which values decide whether a listener may be reused,
+    # and identity_key hashes the VALUES of the names it is given. So a root
+    # that arrives through `roots` is in no environment yet and would not be
+    # part of the identity at all: two callers differing only in their root
+    # would share one listener, and it would answer about one of them.
+    #
+    # This used to be solved by naming ["CBM_ALLOWED_ROOT"] here — one MCP
+    # server's variable, in the call every other server also goes through. It
+    # held only while that server was the only caller. The root goes into the
+    # environment under a name of OURS instead, which _start_bridge then folds
+    # in like any other, so the property holds for every server and the caller
+    # has no flag to remember. `identity` stays for anything else it wants
+    # counted.
+    bridge = dict(env or {})
+    if roots:
+        bridge.setdefault("BROKER_MCP_ROOT", os.path.realpath(str(roots[0])))
+    profile = {"env": bridge,
+               "mcp": {name: {"identity_env": [str(v) for v in identity]}}}
     live = _start_bridge(name, server, profile, [str(r) for r in roots])
     if not live:
         raise LookupError("no listener for the %r MCP server could be started" % name)

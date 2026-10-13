@@ -144,3 +144,31 @@ test("box connect refuses what it cannot do safely", async (t) => {
   // Nothing was written by any of those.
   await assert.rejects(fs.stat(path.join(home, "x")));
 });
+
+// Two callers differing ONLY in their root. The root arrives through --root and
+// is in no environment, so nothing would tell them apart unless the broker puts
+// it into the identity itself — and a shared listener would answer one caller's
+// questions about the other's code. This used to hold because one MCP server's
+// variable name was written into connect_mcp.
+test("a different root alone is a different caller, with no flag to remember", async (t) => {
+  const home = await temp(t);
+  t.after(() => stopListeners(home));
+  const port = async (file) =>
+    Number((await fs.readFile(file, "utf8")).match(/PORT(?:, TOKEN)? = (?:'[^']*', )?(\d+)/)[1]);
+
+  const here = path.join(home, "here");
+  const there = path.join(home, "there");
+  await fs.mkdir(here);
+  await fs.mkdir(there);
+  const run = (out, root) => cli(home, ["box", "connect", "probe", "--out", out,
+    "--lang", "js", "--root", root, "--", "cat"]);
+
+  run(path.join(home, "r1"), here);
+  run(path.join(home, "r2"), here);
+  run(path.join(home, "r3"), there);
+
+  assert.equal(await port(path.join(home, "r1")), await port(path.join(home, "r2")),
+    "same root, same listener");
+  assert.notEqual(await port(path.join(home, "r1")), await port(path.join(home, "r3")),
+    "a different root gets its own listener");
+});

@@ -568,9 +568,17 @@ broker-agy list             # what is left on each account
 AGY_ACCOUNT=<name> agy …    # pin one run through the environment
 ```
 
-The repository does not ship a Google OAuth client credential. Set
-`AGY_OAUTH_CLIENT_ID` and `AGY_OAUTH_CLIENT_SECRET` only for the
-`broker seed agy` command; the broker stores them with that account's token.
+The repository does not ship a Google OAuth client credential. It belongs to the
+application rather than to whoever is adding an account, so it goes in the
+broker's own config once — `agy_client_id` and `agy_client_secret` — and every
+machine then seeds without holding it. `AGY_OAUTH_CLIENT_ID` and
+`AGY_OAUTH_CLIENT_SECRET` still override it for a single `broker seed agy`,
+and the broker stores whatever it was given with that account's token.
+
+Seeding is admin-only: a client key may fetch tokens and not seed them, so a
+teammate given one can run everything except `broker seed`. Either the person
+who runs the broker seeds that account, or they hand over an admin config and
+you point `BROKER_CONFIG` at it.
 
 agy also updates itself in place, over the very path the shim occupies — so the
 wrapper sets `AGY_CLI_DISABLE_AUTO_UPDATE=1` on every run, and `broker-agy

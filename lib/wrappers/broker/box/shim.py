@@ -1,5 +1,6 @@
 """The stand-in a box runs in place of an MCP server that stayed on the host."""
 
+import json
 import os
 import stat
 
@@ -14,7 +15,7 @@ SHIM_TEMPLATE = "\n".join([
     "#!/usr/bin/env python3",
     "# Written by the broker: %(name)s runs on the host; this is the wire to it.",
     "import socket, sys, threading",
-    "HOST, PORT, TOKEN = %(host)r, %(port)d, %(token)r",
+    "HOST, PORT, TOKEN = %(host)s, %(port)d, %(token)s",
     "",
     "",
     "def pump(src, dst, done=None):",
@@ -60,6 +61,48 @@ SHIM_TEMPLATE = "\n".join([
 ])
 
 
+# The same wire for a container that has node and no python. Written for Crew,
+# which is removing python from its own image: a connector the box itself can
+# run is no use to them if it needs an interpreter they no longer ship. Same
+# protocol, same secret on the first line, so the listener cannot tell the two
+# apart — which is the point. Streams rather than a hand-written pump: node
+# does the backpressure the python version has to do by hand with read1.
+SHIM_TEMPLATE_JS = "\n".join([
+    "#!/usr/bin/env node",
+    "// Written by the broker: %(name)s runs on the host; this is the wire to it.",
+    '"use strict";',
+    'const net = require("net");',
+    "const HOST = %(host)s, PORT = %(port)d, TOKEN = %(token)s;",
+    "",
+    "// IPv4 explicitly, for the reason the python connector gives: the host's",
+    "// name resolves to both families in here, the v6 address has no route and",
+    "// is tried first, so a bridge that is simply not running reported an",
+    "// unreachable network instead of the refused connection that matters.",
+    "const conn = net.connect({host: HOST, port: PORT, family: 4});",
+    "",
+    'conn.on("connect", () => {',
+    '  conn.write(TOKEN + "\\n");',
+    "  // stdin's end half-closes the socket, which is the SHUT_WR the server",
+    "  // waits for; stdout is not ours to close, so the other way does not end.",
+    "  process.stdin.pipe(conn);",
+    "  conn.pipe(process.stdout, {end: false});",
+    "});",
+    "",
+    "// Never process.exit here: it would drop whatever stdout has still to",
+    "// flush. Releasing stdin lets the process end once the pipes are empty.",
+    'conn.on("close", () => process.stdin.destroy());',
+    'conn.on("error", (error) => {',
+    "  process.exitCode = 1;",
+    '  process.stderr.write("broker bridge: " + error.message + "\\n");',
+    "  process.stdin.destroy();",
+    "  conn.destroy();",
+    "});",
+    "",
+])
+
+SHIM_TEMPLATES = {"py": SHIM_TEMPLATE, "js": SHIM_TEMPLATE_JS}
+
+
 def _write_shim(provider, name, live):
     """A stand-in for the server's command, to be mounted at its own path.
 
@@ -79,10 +122,20 @@ def _write_shim(provider, name, live):
                   name, live)
 
 
-def _write(path, name, live):
+def _write(path, name, live, lang="py"):
     """The connector itself, written atomically and 0700."""
-    body = SHIM_TEMPLATE % {"name": name, "host": HOST_GATEWAY,
-                            "port": live["port"], "token": live["token"]}
+    try:
+        template = SHIM_TEMPLATES[lang]
+    except KeyError:
+        raise ValueError("unknown connector language %r — use 'py' or 'js'" % lang)
+    # Quoting belongs to the language the file is in, so the template asks for
+    # an already-quoted value. The name only reaches a comment, but a newline
+    # in it would end that comment and leave the rest of the name as code —
+    # and since the CLI took a name as an argument, that name is now input.
+    quote = repr if lang == "py" else json.dumps
+    body = template % {"name": name.replace("\n", " ").replace("\r", " "),
+                       "host": quote(HOST_GATEWAY),
+                       "port": live["port"], "token": quote(live["token"])}
     tmp = path + ".new"
     with open(tmp, "w") as fh:
         fh.write(body)
@@ -91,7 +144,7 @@ def _write(path, name, live):
     return path
 
 
-def connect_mcp(name, command, out, env=None, roots=(), inherit=()):
+def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py"):
     """A connector for a host MCP server, for a container that is not a box.
 
     Written for Crew, which builds its own container and needs the same bridge:
@@ -106,6 +159,9 @@ def connect_mcp(name, command, out, env=None, roots=(), inherit=()):
       roots    the paths it may be asked about; the first is the one a
                root-scoped server is pinned to, physical path, as for a box
       inherit  names of host variables the listener carries into the server
+      lang     the language the connector is written in, "py" or "js". The
+               wire is the same either way; pick the interpreter the
+               container actually has.
 
     A live listener is reused only when its command AND its caller identity
     match — the identity folds in the pane, the workspace, the bus home, every
@@ -131,4 +187,4 @@ def connect_mcp(name, command, out, env=None, roots=(), inherit=()):
     live = _start_bridge(name, server, profile, [str(r) for r in roots])
     if not live:
         raise LookupError("no listener for the %r MCP server could be started" % name)
-    return _write(out, name, live)
+    return _write(out, name, live, lang)

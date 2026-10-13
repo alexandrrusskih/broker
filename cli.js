@@ -99,7 +99,10 @@ async function main() {
       await require("./lib/cmd/upgrade")(flags);
       break;
     case "box":
-      require("./lib/cmd/box").box(flags, positional);
+      // `rest` as well: `box connect` takes repeatable flags and a `--` before
+      // the server's own argv, and the shared parser keeps neither — it folds a
+      // repeated flag onto its last value and has no idea what `--` means.
+      require("./lib/cmd/box").box(flags, positional, rest);
       break;
     case "version":
     case "--version":

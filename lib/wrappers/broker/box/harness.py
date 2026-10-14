@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import uuid
 
 from .. import config
@@ -110,6 +111,24 @@ def siblings(provider, canonical):
     return args
 
 
+def _uncopyable(directory, names):
+    """What a profile copy must skip: sockets and FIFOs are live runtime
+    plumbing, not files. Copying a socket fails outright (Errno 102) and
+    copying a FIFO blocks on open — and a box has no use for the host
+    daemon's socket anyway.
+    """
+    skip = []
+    for entry in names:
+        try:
+            mode = os.lstat(os.path.join(directory, entry)).st_mode
+        except OSError:
+            skip.append(entry)
+            continue
+        if stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode):
+            skip.append(entry)
+    return skip
+
+
 def chosen_home(provider, env, name, remote, mounted, canonical):
     """The config directory this run was pointed at, and the name for it."""
     args = []
@@ -128,7 +147,7 @@ def chosen_home(provider, env, name, remote, mounted, canonical):
                                     name.replace("/", "_"))
                 os.makedirs(root, mode=0o700, exist_ok=True)
                 source = os.path.join(root, uuid.uuid4().hex)
-                shutil.copytree(host, source, symlinks=True)
+                shutil.copytree(host, source, symlinks=True, ignore=_uncopyable)
             args += _mount(source, target=host)
             args += ["-e", "%s=%s" % (home_env, host)]
     return args

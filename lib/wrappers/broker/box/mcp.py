@@ -122,6 +122,7 @@ def _bridge_env(name, server, profile, projects):
 def _start_bridge(name, server, profile, projects):
     """Make sure a listener for this server is up, and say how to reach it."""
     from .. import mcpbridge
+    from .. import mcpserve
 
     # Same server, same caller identity — anything else gets its own listener.
     # Which listener this is. Same server and same caller is the same listener
@@ -142,6 +143,19 @@ def _start_bridge(name, server, profile, projects):
     matters += [v for v in (server.get("env") or {}) if v not in matters]
     matters += [v for v in (((profile.get("mcp") or {}).get(name) or {}).get("env") or {})
                 if v not in matters]
+
+    # What this box may ASK of the server, as opposed to what the server is
+    # started with. codebase-memory is the case: its allowed root governs
+    # indexing, not reading, so a box with a root of its own could still read
+    # every project in the shared base. The rule travels in the environment
+    # because the listener already inherits it, and its name joins `matters` —
+    # two boxes with different rules must never share a listener, or the
+    # second one would be answered under the first one's rule.
+    rule = ((profile.get("mcp") or {}).get(name) or {}).get("policy")
+    if rule:
+        bridge_env[mcpserve.POLICY_ENV] = json.dumps(rule, sort_keys=True)
+        matters.append(mcpserve.POLICY_ENV)
+
     key = mcpbridge.identity_key(env=bridge_env, extra=tuple(matters))
     live = mcpbridge.running(name, key)
     if live and live.get("command") == server["command"]:

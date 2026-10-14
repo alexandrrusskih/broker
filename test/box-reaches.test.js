@@ -127,14 +127,23 @@ print(json.dumps(box.command(claude, "demo",
   {"rw": ["${project}"], "args": ${JSON.stringify(args)}}, ${JSON.stringify(argv)}, {})))
 `, { HOME: dir }));
 
+  // The engine's own default first: a box is the externally sandboxed
+  // environment the danger flags are for. Then the box's own flags, then yours.
   // Per harness, because they spell the same idea differently.
-  assert.deepEqual(run({ claude: ["--box-flag"] }, ["-p", "hi"]).slice(-4), ["claude", "--box-flag", "-p", "hi"]);
-  assert.deepEqual(run({ codex: ["--other"] }, []).slice(-1), ["claude"], "another harness's flags are not ours");
+  assert.deepEqual(run({ claude: ["--box-flag"] }, ["-p", "hi"]).slice(-5),
+    ["claude", "--dangerously-skip-permissions", "--box-flag", "-p", "hi"]);
+  assert.deepEqual(run({ codex: ["--other"] }, []).slice(-2),
+    ["claude", "--dangerously-skip-permissions"], "another harness's flags are not ours");
   // A plain list is for every harness in the box.
-  assert.deepEqual(run(["--everywhere"], []).slice(-2), ["claude", "--everywhere"]);
+  assert.deepEqual(run(["--everywhere"], []).slice(-3),
+    ["claude", "--dangerously-skip-permissions", "--everywhere"]);
   // The box says it first, so the same flag typed by hand is the one that counts.
-  assert.deepEqual(run({ claude: ["--mode"] }, ["--mode", "plan"]).slice(-3), ["claude", "--mode", "plan"],
+  assert.deepEqual(run({ claude: ["--mode"] }, ["--mode", "plan"]).slice(-4),
+    ["claude", "--dangerously-skip-permissions", "--mode", "plan"],
     "a flag already typed is not added twice");
+  assert.deepEqual(run({}, ["--dangerously-skip-permissions"]).slice(-2),
+    ["claude", "--dangerously-skip-permissions"],
+    "the engine's default is not added twice either");
 });
 
 test("a box can run on another machine, and only its sources move", async (t) => {

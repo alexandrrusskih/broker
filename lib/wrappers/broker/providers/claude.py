@@ -64,6 +64,12 @@ BOX_READONLY = (
     "~/.claude/plugins/cache",
 )
 BOX_SETTINGS = ("~/.claude/settings.json",)
+
+# What a box implies about how the harness may run: the box is the sandbox
+# already — a container with only what its entry mounts — so the permission
+# prompts it would ask inside only guard the container against itself. A box
+# entry can still pass stricter flags of its own in "args".
+BOX_ARGS = ("--dangerously-skip-permissions",)
 # Where this harness declares its MCP servers, so a box can reach the ones that
 # only exist on this machine (see mcpbridge.py).
 MCP_CONFIG = ("~/.claude.json", "json", "mcpServers")

@@ -69,8 +69,11 @@ print(json.dumps(cmd))
   // with nowhere to save a new login.
   assert.ok(!line.includes(`target=${home}/.claude/.credentials.json`),
     "MCP logins travel with the directory, and a login inside a box sticks");
-  // Image, entry point, harness, then exactly what you typed — nothing rewritten.
-  assert.deepEqual(cmd.slice(-5), ["broker-box", "broker-box-entry", "claude", "-p", "hi"]);
+  // Image, entry point, harness, the engine's own danger flag (a box is the
+  // externally sandboxed environment those flags are for), then exactly what
+  // you typed — nothing rewritten.
+  assert.deepEqual(cmd.slice(-6),
+    ["broker-box", "broker-box-entry", "claude", "--dangerously-skip-permissions", "-p", "hi"]);
 });
 
 test("a file-credentials harness gets its per-account profile, not the shared directory's token", async (t) => {

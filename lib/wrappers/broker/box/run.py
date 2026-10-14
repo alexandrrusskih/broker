@@ -112,7 +112,8 @@ def command(provider, name, profile, argv, env, remote=False):
     if http_config and not http_config_mounted:
         cmd += _bind(http_config[0], http_config[2], http_mode)
 
-    cmd += harness.settings(provider, env, canonical, http_config, settings_mounted)
+    cmd += harness.settings(provider, profile, env, name, canonical, http_config,
+                            settings_mounted)
     cmd += environ.credentials(provider, env)
 
     # MCP servers that exist only on this machine. Half of them cannot come
@@ -165,20 +166,25 @@ def command(provider, name, profile, argv, env, remote=False):
         cmd += http_mcp.codex_args(provider, env)
 
     # Flags the box hands the harness, before what you typed — so a flag you
-    # pass on the command line still wins. This is where a box says how much it
-    # trusts what runs inside it: the broker does not decide that for you, and
-    # nothing here is implied by a box existing. Per harness, because they spell
-    # the same idea differently:
+    # pass on the command line still wins. First the engine's own defaults
+    # (provider BOX_ARGS): a broker box is the externally sandboxed environment
+    # the danger flags describe — its boundary is what it mounts, and a
+    # permission prompt inside it only asks the container. Then the box's own
+    # "args" on top of those, which may still tighten or widen per harness:
     #
-    #   "args": { "claude": ["--dangerously-skip-permissions"] }
+    #   "args": { "codex": ["--full-auto"], "claude": ["--permission-mode", "plan"] }
     #
     # A plain list applies to every harness in the box.
     extra = profile.get("args")
     if isinstance(extra, dict):
         extra = extra.get(provider.NAME) or []
-    for flag in extra or []:
-        if flag not in argv:
-            cmd.append(str(flag))
+    flags = [str(flag) for flag in getattr(provider, "BOX_ARGS", ())]
+    flags += [str(flag) for flag in extra or []]
+    added = set(argv)
+    for flag in flags:
+        if flag not in added:
+            cmd.append(flag)
+            added.add(flag)
 
     cmd += argv
     return cmd

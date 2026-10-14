@@ -29,8 +29,8 @@ claude.MCP_CONFIG = None
 box.boxes.PATH = "${path.join(dir, ".config", "broker", "boxes.json")}"
 p = box.profiles()
 print(json.dumps([
-  box.command(claude, "plain", p["plain"], [], {})[-3],
-  box.command(claude, "extended", p["extended"], [], {})[-3],
+  box.command(claude, "plain", p["plain"], [], {})[-4],
+  box.command(claude, "extended", p["extended"], [], {})[-4],
 ]))
 `, { HOME: dir });
   assert.deepEqual(JSON.parse(out), ["broker-box", "broker-box-extended"]);

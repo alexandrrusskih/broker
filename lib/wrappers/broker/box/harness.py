@@ -208,7 +208,73 @@ def _named_scripts(sources, protected):
     return args
 
 
-def settings(provider, env, canonical, http_config, settings_mounted):
+def _trust_toml(path, targets):
+    """codex's trust entries, appended for paths not yet trusted.
+
+    TOML cannot be rewritten the way claude's JSON is without a writer the
+    engine does not carry — but it needs none: `[projects."path"]` is a table,
+    and appending a table that does not exist yet is valid TOML however the
+    file is laid out. What exists already is found by scanning for the table
+    header rather than by parsing: the engine must load on a python without
+    tomllib (see test/installer.test.js), and a table that exists must never
+    be appended twice — a duplicate table definition makes the whole file
+    unparseable and takes codex down with it. A path the host has already
+    decided on, either way, keeps its decision. Returns True when anything
+    was added.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        missing = [t for t in targets
+                   if not re.search(r'^\[projects\."%s"\]' % re.escape(t), text, re.M)]
+        if not missing:
+            return False
+        with open(path, "a", encoding="utf-8") as handle:
+            for target in missing:
+                handle.write('\n[projects."%s"]\ntrust_level = "trusted"\n' % target)
+    except OSError as exc:
+        warn("could not pre-answer codex folder trust for this box (%s)" % exc)
+        return False
+    return True
+
+
+def _trusted_config(provider, profile, name):
+    """A staged copy of codex's config.toml with the box's folders trusted.
+
+    codex asks folder trust on its first screen, and inside a box the answer
+    cannot be saved: config.toml travels read-only (BOX_SETTINGS), the write
+    dies with -32603, and the session never starts. The folders are the box's
+    own rw list, given by the same person the question is meant for — so the
+    answer is written into the copy the box is mounted, and the host's file
+    is not touched. None when there is nothing to add: the real file will do.
+    """
+    if provider.NAME != "codex":
+        return None
+    targets = [target for _, target in _paths(profile, "rw")]
+    if not targets:
+        return None
+    host = None
+    for entry in getattr(provider, "BOX_SETTINGS", ()):
+        candidate = expand(entry)
+        if os.path.basename(candidate) == "config.toml" and os.path.isfile(candidate):
+            host = candidate
+            break
+    if not host:
+        return None
+    copy = os.path.join(config.CONFIG_DIR, "box", "files", name.replace("/", "_"),
+                        "config.toml")
+    try:
+        os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
+        shutil.copy2(host, copy)
+    except OSError as exc:
+        warn("could not stage config.toml to trust the box's folders (%s)" % exc)
+        return None
+    if not _trust_toml(copy, targets):
+        return None
+    return copy
+
+
+def settings(provider, profile, env, name, canonical, http_config, settings_mounted):
     """What the host decided and the box may read but not rewrite."""
     args = []
     # Host settings stay read-only. Runtime state in the same home stays writable.
@@ -227,13 +293,20 @@ def settings(provider, env, canonical, http_config, settings_mounted):
         staged = {os.path.realpath(http_config[1]), os.path.realpath(http_config[2])}
     protected = set(settings_mounted)
     sources = []
+    # codex's folder-trust answer rides in a staged copy of config.toml, and
+    # every config.toml mount below serves that copy instead of the host's
+    # file — read-only either way, so the box still cannot rewrite what the
+    # host decided. See _trusted_config above.
+    trusted = _trusted_config(provider, profile, name)
     for entry in getattr(provider, "BOX_SETTINGS", ()):
         host = expand(entry)
         if os.path.isfile(host):
             sources.append(host)
         if (os.path.isfile(host) and os.path.realpath(host) not in staged
                 and host not in settings_mounted):
-            args += _mount(os.path.realpath(host), "ro", host)
+            source = trusted if trusted and os.path.basename(host) == "config.toml" \
+                else os.path.realpath(host)
+            args += _mount(source, "ro", host)
             protected.add(host)
     if provider.NAME == "codex" and env.get("CODEX_HOME"):
         profile_home = os.path.abspath(expand(env["CODEX_HOME"]))
@@ -241,7 +314,9 @@ def settings(provider, env, canonical, http_config, settings_mounted):
             for filename in ("config.toml", "hooks.json"):
                 host = os.path.join(profile_home, filename)
                 if os.path.isfile(host):
-                    args += _mount(os.path.realpath(host), "ro", host)
+                    source = trusted if trusted and filename == "config.toml" \
+                        else os.path.realpath(host)
+                    args += _mount(source, "ro", host)
                     protected.add(host)
                     sources.append(host)
     if config_target:

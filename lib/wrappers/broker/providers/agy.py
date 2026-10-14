@@ -36,6 +36,11 @@ BOX_HOME = ("~/.gemini",)
 BOX_SETTINGS = ("~/.gemini/settings.json", "~/.gemini/config/mcp_config.json",
                 "~/.gemini/config/hooks.json")
 
+# What a box implies about how the harness may run — same reasoning as the
+# other harnesses: the box is the sandbox, a permission prompt inside it asks
+# the container, and a box entry can still tighten it in its own "args".
+BOX_ARGS = ("--dangerously-skip-permissions",)
+
 # agy has no config-dir variable of its own — it goes to $HOME/.gemini and that
 # is that. So the profile IS a home directory, handed to the child through HOME,
 # and mirrored from the real one (see layout.mirror) so it differs in exactly

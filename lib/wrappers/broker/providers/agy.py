@@ -58,25 +58,30 @@ MCP_CONFIG = ("~/.gemini/config/mcp_config.json", "json", "mcpServers")
 SESSION_GLOB = "%(home)s/.gemini/antigravity-cli/conversations/*.db"
 SESSION_RESUME = "--conversation %s"
 
-# The MCP tokens do not go into a box at all.
+# The MCP tokens travel as a CLONE, which is neither of the two things tried
+# before. The history matters, because both earlier answers were wrong in a way
+# the next reader would repeat.
 #
-# This harness does not merge that file: it writes what its own session knows
-# and drops everything else. A box has no keyring and no browser, so it knows
-# nothing and writes an empty object — and the logins on this machine are gone.
-# Four times in one afternoon, reported each time as "Unauthorized [Auth
-# Needed]", which reads as an expired token rather than as a file emptied by a
-# program next door.
+# Mounted straight through, a box destroyed them. This harness does not merge
+# that file: it writes what its own session knows and drops everything else. A
+# box has no keyring and no browser, so it knows nothing and writes an empty
+# object — and the logins on this machine were gone. Four times in one
+# afternoon, reported each time as "Unauthorized [Auth Needed]", which reads as
+# an expired token rather than as a file emptied by a program next door.
 #
-# Giving each box its own copy was tried and is worse in the way that matters:
-# the copy cannot be refreshed from outside, so it rots, and a box that
-# authenticates for itself has to do it again in every other box. There are a
-# dozen of them.
+# Then a blank copy, and that cost the thing boxes exist for: every box started
+# logged out of ntk and joppa, which are exactly the servers an agent in a box
+# is sent to read. "The box cannot see the tree" is not a smaller loss than a
+# lost login; it is the same loss, moved onto whoever is working.
 #
-# So: one place holds these, and it is this machine. A box gets its own empty
-# one, may ruin it as it likes, and the logins here survive. What a box loses
-# is the http servers that need OAuth — ntk and joppa — which is a real loss,
-# and a smaller one than losing the login itself.
-BOX_BLANK = ((os.path.join("~", ".gemini", "antigravity-cli", "mcp_oauth_tokens.json"), "{}"),)
+# A clone is both: the box opens the REAL tokens, so ntk and joppa answer, and
+# what it writes lands in its own copy, so the logins out here survive. claude
+# shares the real file because it MERGES; this one cannot, so it gets its own.
+#
+# BOX_PRIVATE re-clones at every start, which also answers the old objection
+# that a copy rots: it is only ever as old as the box. A login a box makes for
+# itself still dies with the box, and that is the remaining cost.
+BOX_PRIVATE = (os.path.join(".gemini", "antigravity-cli", "mcp_oauth_tokens.json"),)
 
 # What the HOST runs or reads as instruction, and a box must not change. Why
 # this list and not its opposite: see box/clones.py, readonly().

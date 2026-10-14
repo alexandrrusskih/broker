@@ -16,7 +16,9 @@ function secretsFor(cfg, provider) {
   if (provider === "gemini") {
     return { client_id: cfg.gemini_client_id, client_secret: cfg.gemini_client_secret };
   }
-  // agy carries working defaults in its own module; config only overrides them.
+  // agy's client credential is the APPLICATION's, shared by every account.
+  // The repository ships none on purpose (README), so this config is where a
+  // fleet puts it once — and seeding may omit it entirely.
   if (provider === "agy") {
     return { client_id: cfg.agy_client_id, client_secret: cfg.agy_client_secret };
   }

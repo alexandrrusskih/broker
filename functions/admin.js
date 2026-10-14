@@ -46,7 +46,18 @@ function createAdminHandlers(store, { logger = console, handlesOnly = false } = 
   // bootstrap owns those, and this endpoint must never overwrite the auth key. This
   // is how the codex handle rollout is flipped and its secret provisioned without a
   // Firestore console (see docs/codex-refresh-authority.md §6.8).
-  const CONFIG_SETTABLE = { codex_handle_rollout: "boolean", codex_handle_secret: "string" };
+  //
+  // agy's OAuth client pair is here because it belongs to the APPLICATION and
+  // not to any account or machine: the refresh needs it, and every machine
+  // seeding an agy account was carrying its own copy in the environment to get
+  // one started. Set once here and no machine holds it again. A string, so it
+  // takes the redaction below like the handle secret does.
+  const CONFIG_SETTABLE = {
+    codex_handle_rollout: "boolean",
+    codex_handle_secret: "string",
+    agy_client_id: "string",
+    agy_client_secret: "string"
+  };
 
   // POST /configSet { key, value } — set one whitelisted broker_config field. broker-key gated.
   async function configSet(req, res) {
@@ -82,7 +93,11 @@ function createAdminHandlers(store, { logger = console, handlesOnly = false } = 
     const cfg = await store.readConfig();
     return res.status(200).json({
       codex_handle_rollout: handlesOnly || cfg.codex_handle_rollout === true,
-      codex_handle_secret_set: Boolean(cfg.codex_handle_secret)
+      codex_handle_secret_set: Boolean(cfg.codex_handle_secret),
+      // Whether, not what: this is how an operator checks that the agy pair
+      // landed without reading it back out of anywhere.
+      agy_client_id_set: Boolean(cfg.agy_client_id),
+      agy_client_secret_set: Boolean(cfg.agy_client_secret)
     });
   }
 

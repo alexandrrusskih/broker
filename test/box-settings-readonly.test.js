@@ -158,3 +158,38 @@ print(json.dumps([cmd[i + 1] for i, part in enumerate(cmd) if part == "--mount"]
   const targets = mounts.map((m) => m.split("target=")[1].split(",")[0]);
   assert.equal(new Set(targets).size, targets.length, "no mount target twice");
 });
+
+// agy's MCP logins. Two earlier answers were wrong in opposite directions: the
+// real file mounted through, and a box emptied it because this harness rewrites
+// that file whole; then a blank copy, and every box started logged out of ntk
+// and joppa, which are the servers a box is sent to read. A clone is both.
+test("an agy box reads the real MCP logins and cannot damage them", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "broker-agytok-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const real = path.join(home, ".gemini", "antigravity-cli", "mcp_oauth_tokens.json");
+  const content = JSON.stringify({ ntk: { access_token: "REAL-NTK" } });
+  await fs.mkdir(path.join(home, "project"));
+  await fs.mkdir(path.dirname(real), { recursive: true });
+  await fs.writeFile(real, content, { mode: 0o600 });
+
+  const line = () => execFileSync("python3", ["-c", `
+import json, sys
+sys.path.insert(0, "lib/wrappers")
+from broker import box
+from broker.providers import agy
+print(" ".join(box.command(agy, "demo", {"rw": [${JSON.stringify(path.join(home, "project"))}]}, [], {})))
+`], { cwd: __dirname + "/..", encoding: "utf8",
+      env: { ...process.env, HOME: home, BROKER_REAL_HOME: home, PYTHONDONTWRITEBYTECODE: "1" } });
+
+  const mount = line().match(new RegExp(`source=(\\S*box/private/demo/agy/mcp_oauth_tokens\\.json),target=${real}(,|\\s|$)`));
+  assert.ok(mount, "the token file reaches the box as its own clone");
+  assert.doesNotMatch(mount[0], /readonly/, "writable: the harness expects its write to succeed");
+  assert.equal(await fs.readFile(mount[1], "utf8"), content, "and it carries the REAL logins");
+  assert.equal((await fs.stat(mount[1])).mode & 0o777, 0o600, "a login is not world-readable");
+
+  // What a box writes stays inside, and the next start heals the box's copy.
+  await fs.writeFile(mount[1], "{}");
+  assert.equal(await fs.readFile(real, "utf8"), content, "the host's logins survive the box");
+  line();
+  assert.equal(await fs.readFile(mount[1], "utf8"), content, "re-cloned fresh at every start");
+});

@@ -119,6 +119,42 @@ def _bridge_env(name, server, profile, projects):
     return env
 
 
+def _declared(name, server, profile):
+    """The names this box or this harness SET for the server, not what it inherits.
+
+    os.environ is most of a listener's environment and none of its declaration,
+    so only what somebody wrote down is checked below.
+    """
+    names = list(server.get("env") or {})
+    names += [v for v in (profile.get("env") or {}) if v not in names]
+    names += [v for v in (((profile.get("mcp") or {}).get(name) or {}).get("env") or {})
+              if v not in names]
+    return names
+
+
+def _complain(name, server, profile, bridge_env):
+    """Say out loud what will make this server fail, instead of letting it die quiet.
+
+    A server that cannot start leaves the harness showing one red entry and no
+    reason. Measured: agy pointed codebase-memory at a snapshot directory that
+    did not exist, the server exited with 'daemon session context was rejected'
+    — which names a daemon, not a path — and it stayed broken for a month
+    because nothing on the way said anything.
+
+    A warning only. The server may well create the directory it was given, and
+    a box that starts without one message is worth more than a box that refuses
+    to start because we guessed wrong.
+    """
+    binary = (server.get("command") or [""])[0]
+    if binary and os.sep in binary and not os.path.exists(binary):
+        warn("%s: its command %s does not exist — the server cannot start" % (name, binary))
+    for variable in _declared(name, server, profile):
+        value = bridge_env.get(variable)
+        if value and value.startswith(os.sep) and not os.path.exists(value):
+            warn("%s: %s=%s does not exist — the server may refuse to start"
+                 % (name, variable, value))
+
+
 def _start_bridge(name, server, profile, projects):
     """Make sure a listener for this server is up, and say how to reach it."""
     from .. import mcpbridge
@@ -155,6 +191,8 @@ def _start_bridge(name, server, profile, projects):
     if rule:
         bridge_env[mcpserve.POLICY_ENV] = json.dumps(rule, sort_keys=True)
         matters.append(mcpserve.POLICY_ENV)
+
+    _complain(name, server, profile, bridge_env)
 
     key = mcpbridge.identity_key(env=bridge_env, extra=tuple(matters))
     live = mcpbridge.running(name, key)

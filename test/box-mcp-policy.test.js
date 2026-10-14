@@ -100,3 +100,53 @@ test("without a rule the bridge carries everything, as it always did", async (t)
   const back = await exchange(state, [call(1, "delete_project", { project: "anything" })]);
   assert.equal(back[0].params.name, "delete_project", "no rule, no filtering");
 });
+
+// A server that cannot start leaves the harness showing one red entry and no
+// reason. agy pointed codebase-memory at a snapshot directory that did not
+// exist; the server exited saying 'daemon session context was rejected', which
+// names a daemon rather than a path, and it stayed broken for a month because
+// nothing on the way said anything. This is the broker saying it.
+test("the bridge says out loud what will stop a server from starting", async (t) => {
+  const { spawnSync } = require("node:child_process");
+  const home = await temp(t);
+  // spawnSync, because a warning arrives on the path that SUCCEEDS: execFileSync
+  // hands stderr back only when the call throws, which is how the first version
+  // of this test passed an empty string to itself and proved nothing.
+  const run = (args) => {
+    const env = { ...process.env, HOME: home, BROKER_REAL_HOME: home, PYTHONDONTWRITEBYTECODE: "1" };
+    for (const name of Object.keys(env)) if (name.startsWith("HERDR_")) delete env[name];
+    const ran = spawnSync("node", [path.join(root, "cli.js"), "box", "connect", ...args],
+      { cwd: root, encoding: "utf8", env });
+    return { stdout: String(ran.stdout || ""), stderr: String(ran.stderr || "") };
+  };
+
+  // A declared path that is not there. The connector is still written: the
+  // server may create the directory, and a guess must not refuse a box.
+  const said = run(["probe", "--out", path.join(home, "c1"),
+                    "--env", "PROBE_ROOT=/nowhere/at/all", "--", "cat"]);
+  assert.match(said.stderr, /PROBE_ROOT=\/nowhere\/at\/all does not exist/,
+    "it names the variable, the value, and that it does not exist");
+  assert.ok(said.stdout.trim().endsWith("c1"), "and writes the connector anyway");
+
+  // A command that is not on this machine at all.
+  const gone = run(["probe2", "--out", path.join(home, "c2"), "--", "/usr/local/bin/not-here"]);
+  assert.match(gone.stderr, /its command \/usr\/local\/bin\/not-here does not exist/,
+    "a missing binary is said plainly too");
+
+  // And nothing is said when everything is where it was declared to be.
+  const quiet = run(["probe3", "--out", path.join(home, "c3"),
+                     "--env", "PROBE_ROOT=" + home, "--", "cat"]);
+  assert.doesNotMatch(quiet.stderr, /does not exist/, "no complaint when there is nothing to complain about");
+
+  stopListeners(home);
+});
+
+function stopListeners(home) {
+  const { execFileSync } = require("node:child_process");
+  try {
+    execFileSync("python3", ["-c",
+      "import glob, json, os, signal, sys;" +
+      "[os.kill(json.load(open(f))['pid'], signal.SIGTERM) for f in glob.glob(sys.argv[1])]",
+      path.join(home, ".config", "broker", "box", "mcp", "*.json")], { stdio: "ignore" });
+  } catch (_e) { /* a listener that is already gone needs no stopping */ }
+}

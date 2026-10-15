@@ -62,10 +62,54 @@ def session_error(path):
 # itself from all 13,774 rollouts on first start, so nothing is lost by a
 # window starting with none.
 #
-# On the big disk, not in the home: a filled index is some 600 MB, and there
-# are a dozen windows.
+# In the home, on the same volume as the canonical databases. This used to be
+# the big disk, to keep 600 MB per window out of the home — and that is what
+# made every window pay for it. A clone needs ONE filesystem: the canonical
+# set is on the internal volume, the big disk is another one, so clonefile
+# could not be used and _seed_databases fell back to copying 600 MB across
+# volumes, once per window. Measured here: cloning the 604 MB state database
+# within the internal volume takes 0.02 s and no space, while the cross-volume
+# copy ran at about 8 MB a minute against a machine busy with sixteen
+# containers — a window sat on "Waiting for startup" for ten minutes and was
+# not a sixth of the way through. The same mistake filled the big disk with 39
+# GB in 52 directories, because over there every copy is a real one.
 SQLITE_ENV = "CODEX_SQLITE_HOME"
-SQLITE_BASE = "/Volumes/hdd/broker-box/codex-db"
+#
+# Under broker-box rather than broker: `broker remove` deletes ~/.cache/broker
+# whole, and taking the indexes with it would buy back every slow start we just
+# paid off. The slot files already live beside this, for the same reason.
+SQLITE_BASE = os.path.expanduser("~/.cache/broker-box/codex-db")
+
+
+def _device(path):
+    """The volume `path` is on, looking up to the first parent that exists."""
+    while True:
+        try:
+            return os.stat(path).st_dev
+        except OSError:
+            parent = os.path.dirname(path)
+            if parent == path:
+                return None
+            path = parent
+
+
+def _warn_if_other_volume(base, canonical):
+    """Say so when the seed cannot be a clone, instead of starting slowly.
+
+    clonefile(2) works within one filesystem. Put the window databases on a
+    volume other than the canonical set and _seed_databases silently becomes a
+    600 MB copy, once per window — which reads as the harness hanging on
+    startup, with nothing to point at. Saying it costs one line and this cost
+    three weeks of slow starts.
+    """
+    from ..out import warn
+
+    here, there = _device(base), _device(canonical)
+    if here is None or there is None or here == there:
+        return
+    warn("codex databases go to %s, which is not the volume %s is on — the "
+         "600 MB seed cannot be cloned and is copied instead, once per window"
+         % (base, canonical))
 
 
 def harness_env(env, canonical, home_env):
@@ -79,8 +123,8 @@ def harness_env(env, canonical, home_env):
         return
     from ..box.paths import window_key
 
-    base = SQLITE_BASE if os.path.isdir(os.path.dirname(SQLITE_BASE)) else \
-        os.path.expanduser("~/.cache/broker/codex-db")
+    base = SQLITE_BASE
+    _warn_if_other_volume(base, canonical)
     own = os.path.join(base, window_key())
     _sweep_dead_windows(base, own)
     fresh = not os.path.isdir(own)

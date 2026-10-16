@@ -52,6 +52,12 @@ CANONICAL_HOME = os.path.expanduser("~")
 PROFILE_BASE = os.path.expanduser("~/.agy")
 AUTH_NAME = os.path.join(".gemini", "antigravity-cli", "antigravity-oauth-token")
 
+# Kept from the file already there when the broker's answer has none. The
+# refresh endpoint never returns an id_token, and this harness will not start
+# without one, so it can only come from whoever logged in — see
+# credentials.py, _keep_what_the_broker_cannot_send.
+AUTH_KEEP = ("id_token",)
+
 # Where this harness declares its MCP servers. Its own file, not beside the
 # settings: without this a box bridged nothing for agy at all, and the agent
 # inside simply reported that agentbus was not there.

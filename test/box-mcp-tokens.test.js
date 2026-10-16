@@ -26,6 +26,11 @@ function engine(home, code) {
 
 const entry = (expiry) => ({ token: { access_token: "a", expiry } });
 
+// Two servers whose logins MAY be held in more than one place — see SHAREABLE
+// in clones.py. The last test covers one that may not.
+const one = "https://ntk.otion.us/mcp-claude";
+const two = "https://ntk.otion.us/mcp-agy";
+
 async function store(file, entries) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, JSON.stringify(entries));
@@ -37,22 +42,22 @@ test("a login made inside a box reaches the host, and the host's wins when it is
   const clone = (box) => path.join(home, "cfg", "box", "private", box, "agy",
     "mcp_oauth_tokens.json");
 
-  await store(host, { ntk: entry("2026-10-16T20:00:00Z") });
+  await store(host, { [one]: entry("2026-10-16T20:00:00Z") });
   // One box logged into a server the host never had, and refreshed another
   // LATER than the host holds it.
   await store(clone("joppa"), {
-    joppa: entry("2026-10-17T10:00:00Z"),
-    ntk: entry("2026-10-16T23:00:00Z")
+    [two]: entry("2026-10-17T10:00:00Z"),
+    [one]: entry("2026-10-16T23:00:00Z")
   });
   // A second box holds an OLDER ntk, which must not be pushed backwards.
-  await store(clone("m"), { ntk: entry("2026-10-15T01:00:00Z") });
+  await store(clone("m"), { [one]: entry("2026-10-15T01:00:00Z") });
 
   engine(home, `clones._carry_back(${JSON.stringify(host)}, 'agy')`);
 
   const merged = JSON.parse(await fs.readFile(host, "utf8"));
-  assert.deepEqual(Object.keys(merged).sort(), ["joppa", "ntk"],
+  assert.deepEqual(Object.keys(merged).sort(), [one, two].sort(),
     "a server only a box knew about is now the host's too");
-  assert.equal(merged.ntk.token.expiry, "2026-10-16T23:00:00Z",
+  assert.equal(merged[one].token.expiry, "2026-10-16T23:00:00Z",
     "of two entries for one server, the later expiry is kept");
 });
 
@@ -62,8 +67,8 @@ test("a box already running sees a new login without being restarted", async (t)
   const running = path.join(home, "cfg", "box", "private", "m", "agy",
     "mcp_oauth_tokens.json");
 
-  await store(host, { ntk: entry("2026-10-16T20:00:00Z"), joppa: entry("2026-10-17T10:00:00Z") });
-  await store(running, { ntk: entry("2026-10-16T20:00:00Z") });
+  await store(host, { [one]: entry("2026-10-16T20:00:00Z"), [two]: entry("2026-10-17T10:00:00Z") });
+  await store(running, { [one]: entry("2026-10-16T20:00:00Z") });
   // The inode is the whole point: a bind mount holds the one it was given, so
   // replacing the file would leave the running box bound to the old one and
   // blind to this.
@@ -72,7 +77,7 @@ test("a box already running sees a new login without being restarted", async (t)
   engine(home, `clones._mirror_out(${JSON.stringify(host)}, 'agy', None)`);
 
   const seen = JSON.parse(await fs.readFile(running, "utf8"));
-  assert.deepEqual(Object.keys(seen).sort(), ["joppa", "ntk"], "the new login arrived");
+  assert.deepEqual(Object.keys(seen).sort(), [one, two].sort(), "the new login arrived");
   assert.equal((await fs.stat(running)).ino, before,
     "written in place, so the box's mount still points at this file");
 });
@@ -95,4 +100,32 @@ test("neither half touches anything that is not a store of logins", async (t) =>
   const was = await fs.readFile(db);
   engine(home, `clones._carry_back(${JSON.stringify(db)}, 'agy')`);
   assert.deepEqual(await fs.readFile(db), was, "the database is byte-for-byte untouched");
+});
+
+// A refresh token that is single-use cannot be copied: the second holder
+// presents one the server has already consumed, and joppa revokes the whole
+// family for it — "Replaying a refresh token revokes the entire family,
+// including its successor" (src/mcp_oauth.rs). So sharing is an allowlist, and
+// a server that is not on it keeps its login where it was made.
+test("a login that cannot be held twice is left where it was made", async (t) => {
+  const home = await temp(t);
+  const host = path.join(home, "mcp_oauth_tokens.json");
+  const clone = path.join(home, "cfg", "box", "private", "joppa", "agy",
+    "mcp_oauth_tokens.json");
+  const ntk = "https://ntk.otion.us/mcp-claude";
+  const joppa = "https://joppa.otion.us/mcp";
+
+  await store(host, { [ntk]: entry("2026-10-16T20:00:00Z"), [joppa]: entry("2026-10-16T20:00:00Z") });
+  await store(clone, { [ntk]: entry("2026-10-16T23:00:00Z"), [joppa]: entry("2026-10-17T10:00:00Z") });
+
+  engine(home, `clones._carry_back(${JSON.stringify(host)}, 'agy')`);
+  const after = JSON.parse(await fs.readFile(host, "utf8"));
+  assert.equal(after[ntk].token.expiry, "2026-10-16T23:00:00Z", "ntk travels");
+  assert.equal(after[joppa].token.expiry, "2026-10-16T20:00:00Z",
+    "joppa does not: a second holder would revoke the family");
+
+  engine(home, `clones._mirror_out(${JSON.stringify(host)}, 'agy', None)`);
+  const inBox = JSON.parse(await fs.readFile(clone, "utf8"));
+  assert.equal(inBox[joppa].token.expiry, "2026-10-17T10:00:00Z",
+    "and the box keeps the joppa login it made itself, rather than losing it to the host's");
 });

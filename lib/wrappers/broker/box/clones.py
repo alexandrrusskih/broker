@@ -34,6 +34,37 @@ def _clone(source, destination):
             shutil.copy2(source, destination)
 
 
+# Which servers may have their login held in more than one place at once.
+#
+# This is not a preference. A refresh token that is SINGLE-USE cannot be
+# copied: the first holder to spend it gets a successor, the second presents a
+# token the server has already consumed, and a server that detects that revokes
+# the whole family — so sharing a login would log everybody out of it instead
+# of carrying it around.
+#
+#   ntk     safe. crates/ntk-api/src/mcp_oauth.rs does not consume the token it
+#           was shown. Rotation with reuse-detection was tried there on
+#           2026-09-23 and rolled back four hours later: it fired eight times
+#           and threw working people out, with no theft behind any of it. The
+#           reason given is this exact situation — "параллельные процессы с
+#           одной копией".
+#   joppa   NOT safe. src/mcp_oauth.rs inserts the presented token into
+#           oauth_consumed and, when that insert finds it already there,
+#           inserts the family into oauth_revoked: "Replaying a refresh token
+#           revokes the entire family, including its successor."
+#
+# So the list is an allowlist and the default is to leave a login where it was
+# made. Adding a server means reading its token endpoint first, not guessing.
+# The real answer for the rest is for the broker to hold the refresh token
+# itself and hand out only access tokens, which is one holder by construction.
+SHAREABLE = ("https://ntk.otion.us/",)
+
+
+def _shareable(server):
+    """Whether this server's login may exist in two places at once."""
+    return isinstance(server, str) and server.startswith(SHAREABLE)
+
+
 def _entries(path):
     """The file as a store of named entries, or None if it is not one.
 
@@ -98,6 +129,8 @@ def _carry_back(real, name):
         if not theirs:
             continue
         for server, entry in theirs.items():
+            if not _shareable(server):
+                continue  # its login stays where it was made; see SHAREABLE
             if server not in merged or _later(entry, merged[server]):
                 merged[server] = entry
                 changed.append("%s from %s" % (server, box))
@@ -133,20 +166,33 @@ def _mirror_out(real, name, mine):
 
     The box whose clone was just made is skipped: it has the file already.
     """
-    merged = _entries(real)
-    if merged is None:
+    host = _entries(real)
+    if host is None:
         return
-    body = json.dumps(merged, indent=2, sort_keys=True)
+    offer = {server: entry for server, entry in host.items() if _shareable(server)}
+    if not offer:
+        return
     root = os.path.join(config.CONFIG_DIR, "box", "private")
     for box in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         clone = os.path.join(root, box, name, os.path.basename(real))
         if clone == mine or not os.path.exists(clone):
             continue
-        if _entries(clone) == merged:
-            continue  # already says this; a write would only risk a torn read
+        theirs = _entries(clone)
+        if theirs is None:
+            continue
+        # Merged INTO the clone, never over it. A box may hold a login for a
+        # server that is not shareable — its own, made inside — and writing the
+        # host's file wholesale would delete exactly the thing a box cannot get
+        # back.
+        wanted = dict(theirs)
+        for server, entry in offer.items():
+            if server not in wanted or _later(entry, wanted[server]):
+                wanted[server] = entry
+        if wanted == theirs:
+            continue  # nothing new; a write would only risk a torn read
         try:
             with open(clone, "w") as handle:
-                handle.write(body)
+                handle.write(json.dumps(wanted, indent=2, sort_keys=True))
         except OSError as exc:
             warn("could not mirror %s into the %s box (%s)"
                  % (os.path.basename(real), box, exc))

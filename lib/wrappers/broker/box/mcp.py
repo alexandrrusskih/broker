@@ -198,16 +198,30 @@ def _start_bridge(name, server, profile, projects):
     live = mcpbridge.running(name, key)
     if live and live.get("command") == server["command"]:
         return live
+    # Where the package is imported FROM — this file sits in broker/box/, so
+    # three levels up. It was two before the engine was split into modules,
+    # and the bridge silently stopped starting: "the bridge did not come up",
+    # with every MCP server missing inside the box.
+    engine = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # It used to be the cwd, which made it the SERVER's working directory too,
+    # because the server inherits it. codebase-memory then took the engine
+    # directory for its workspace, could not watch a path outside its allowed
+    # root, and logged daemon.workspace.skipped on every request — so file
+    # watching was off in every bridged session, silently, and the symptom was
+    # an index that never noticed an edit. The import keeps working through
+    # PYTHONPATH, and the directory a server starts in is the one it is meant
+    # to be looking at.
+    bridge_env = dict(bridge_env)
+    bridge_env["PYTHONPATH"] = os.pathsep.join(
+        [engine] + ([bridge_env["PYTHONPATH"]] if bridge_env.get("PYTHONPATH") else []))
+    workspace = os.path.realpath(projects[0]) if projects else engine
+    if not os.path.isdir(workspace):
+        workspace = engine
     try:
         subprocess.Popen(
             [sys.executable, "-m", "broker.mcpbridge", "serve", name, "--key", key, "--"]
             + server["command"],
-            # The directory the package is imported FROM: this file sits in
-            # broker/box/, so that is three levels up. It was two before the
-            # engine was split into modules, and the bridge silently stopped
-            # starting — "the bridge did not come up", with every MCP server
-            # missing inside the box.
-            cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            cwd=workspace,
             env=bridge_env,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True,  # it outlives this process: the box is its client

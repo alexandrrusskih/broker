@@ -46,8 +46,14 @@ def identity_key(env=None, extra=()):
     return digest
 
 
-def running(name, key=""):
-    """The live listener for this server AND this caller identity, or None."""
+def running(name, key="", verify=True):
+    """The live listener for this server AND this caller identity, or None.
+
+    `verify` asks the system whether that pid is still the process that wrote
+    the file, which costs a subprocess. Pass False where the answer is already
+    known — waiting for a listener this very call has just spawned — so that
+    a fifty-step poll does not become fifty extra processes per server.
+    """
     try:
         with open(_state_file(name, key)) as fh:
             state = json.load(fh)
@@ -70,7 +76,7 @@ def running(name, key=""):
     from .mcpserve import started
 
     was = state.get("started")
-    if was and started(state["pid"]) != was:
+    if verify and was and started(state["pid"]) != was:
         return None
     return state
 

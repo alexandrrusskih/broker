@@ -230,7 +230,10 @@ def _start_bridge(name, server, profile, projects):
         warn("could not bridge the %s MCP server: %s" % (name, exc))
         return None
     for _ in range(50):
-        live = mcpbridge.running(name, key)
+        # Not verified: we are waiting for the listener this call just
+        # started, so asking the system about its pid fifty times over would
+        # only spend processes on an answer we already have.
+        live = mcpbridge.running(name, key, verify=False)
         if live:
             return live
         time.sleep(0.1)

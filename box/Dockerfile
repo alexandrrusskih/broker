@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `broker box build --claude <v> --codex <v>` overrides these.
 # Pinned rather than floating: an image whose harness version changes between
 # builds is an image you cannot reproduce a bug in. Raise them deliberately.
-ARG CLAUDE_VERSION=2.1.287
+ARG CLAUDE_VERSION=2.1.296
 ARG CODEX_VERSION=0.162.1
 # bun is a project dependency, not a harness one: repositories pin it in
 # "packageManager", and without it `bun install` and every script that shells out
@@ -77,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
 ARG RTK_VERSION=0.51.0
-ARG AGY_VERSION=1.3.3
+ARG AGY_VERSION=1.3.5
 ARG GH_VERSION=2.102.0
 ARG GLAB_VERSION=1.121.0
 ARG GITLEAKS_VERSION=8.30.1
@@ -140,6 +140,26 @@ RUN npm install -g --no-fund --no-audit playwright@${PLAYWRIGHT_VERSION} \
  && playwright --version \
  && node -e "require('playwright')" \
  && test -d "$PLAYWRIGHT_BROWSERS_PATH"
+
+# medulla, so a harness in a box can run a workflow and read what it did — the
+# box is already the sandbox medulla's own --docker would give it, so it runs
+# here directly. The machine's own copy cannot come in: it lives in a venv under
+# ~/.medulla whose interpreter is the host's, and $HOME in a box is a tmpfs.
+#
+# The repository has no release tags, but every commit raises the version in
+# pyproject.toml, so the commit that first declared this version is the one the
+# machine reports. Installed outside $HOME for the same reason as the browsers.
+ARG MEDULLA_VERSION=4.98.1
+RUN set -eux; \
+    git clone -q https://github.com/skopanev/medulla.git /tmp/medulla; \
+    commit="$(git -C /tmp/medulla log --format=%H -G "^version = \"${MEDULLA_VERSION}\"\$" -- pyproject.toml | tail -1)"; \
+    test -n "$commit"; \
+    git -C /tmp/medulla checkout -q "$commit"; \
+    python3 -m venv /opt/medulla; \
+    /opt/medulla/bin/pip install -q --no-cache-dir /tmp/medulla; \
+    ln -s /opt/medulla/bin/medulla /usr/local/bin/medulla; \
+    rm -rf /tmp/medulla; \
+    medulla --version | grep -F "medulla ${MEDULLA_VERSION}"
 
 # A personal machine keeps commands in ~/bin and ~/.local/bin, and things
 # mounted from there must be reachable by name. Set in the shell profile too,

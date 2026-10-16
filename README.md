@@ -134,7 +134,7 @@ every permission a harness asks for — write files, run commands, install thing
 while the blast radius stays the directories you named.
 
 ```sh
-broker box build                 # the image: claude, codex, agy, gh, glab, node, bun, docker
+broker box build                 # the image: claude, codex, agy, gh, glab, node, bun, docker, medulla
 claude --box work                # interactive, with only what 'work' lists
 claude --box work --resume abc   # past sessions are still there
 codex --box work exec "..."      # same box, other harness

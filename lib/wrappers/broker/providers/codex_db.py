@@ -139,6 +139,11 @@ def harness_env(env, canonical, home_env):
 
 
 SWEEP_AFTER_S = 600
+# Five days, the same horizon the session archive uses: one rule to remember
+# rather than two. Coming back to last week's window still finds its index;
+# after that it is rebuilt, which costs a start and no data — the index is
+# derived from the rollouts, and those are shared.
+SWEEP_OLD_S = 5 * 24 * 3600
 
 
 def _sweep_dead_windows(base, own):
@@ -162,10 +167,29 @@ def _sweep_dead_windows(base, own):
     except OSError:
         return
     now = time.time()
+
+    def untouched(path):
+        """Seconds since anything in here was written, or None if unreadable."""
+        try:
+            return now - max([os.path.getmtime(path)] + [
+                os.path.getmtime(os.path.join(path, f)) for f in os.listdir(path)])
+        except OSError:
+            return None
+
     for name in names:
+        path = os.path.join(base, name)
+        # Old age takes anything, whatever its key. The group check below only
+        # ever reached "pgid-" directories, so a pane-keyed one was kept for
+        # ever against the chance that somebody comes back to that window — and
+        # they do come back, but not after a fortnight, while the databases are
+        # hundreds of megabytes each and one per window.
+        if path != own:
+            idle = untouched(path)
+            if idle is not None and idle > SWEEP_OLD_S:
+                shutil.rmtree(path, ignore_errors=True)
+                continue
         if not name.startswith("pgid-"):
             continue
-        path = os.path.join(base, name)
         if path == own:
             continue
         try:

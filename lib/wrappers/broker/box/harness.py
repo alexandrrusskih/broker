@@ -90,7 +90,60 @@ def own_home(provider, profile, env, name, mounted):
         if any(host.startswith(m + os.sep) for m in mounted):
             blank = blank or _empty_file()
             args += _bind(blank, host, "ro")
+    args += _account_credentials(provider, env, name, mounted)
     return (args, http_config, http_config_mounted, http_mode, settings_mounted)
+
+
+def _account_credentials(provider, env, name, mounted):
+    """The token the broker wrote, where a harness whose profile IS a home looks.
+
+    Every account gets its own profile, and for a provider with a config-dir
+    variable the box is handed that profile directly — codex gets its
+    CODEX_HOME mounted, so the token the wrapper wrote is the token it reads.
+    agy has no such variable: its profile is a whole HOME, and a box cannot be
+    given a different one, so the box mounts the CANONICAL ~/.gemini instead.
+    The wrapper writes the token into ~/.agy-<account>, nothing put it on the
+    canonical path, and inside the box agy found no credentials at all and
+    offered to sign in — on a machine whose account the broker was serving
+    perfectly. Measured on a second machine, where the canonical file does not
+    exist because nobody ever logged in there by hand.
+
+    Copied in, not bound: the wrapper rewrites that file atomically, beside
+    and then renamed over, and a bind mount holds the inode it was given. The
+    box would be left pointing at an inode nothing links to any more — the
+    reason the single-file branch above copies too. So the box gets the token
+    as it stood when it started, which is the same freshness every other
+    private copy has.
+    """
+    args = []
+    if getattr(provider, "CREDENTIALS", "file") == "env":
+        return args
+    # Only when nothing else will mount the profile: a provider with its own
+    # config-dir variable is already handled, by chosen_home.
+    if getattr(provider, "HOME_ENV", None) != "HOME":
+        return args
+    from ..profile import profile_dir
+
+    active = (env or {}).get("BROKER_ACTIVE") or ""
+    account = active.split(":", 1)[1] if ":" in active else ""
+    if not account:
+        return args
+    source = os.path.join(profile_dir(provider, account), provider.AUTH_NAME)
+    host = os.path.join(expand("~"), provider.AUTH_NAME)
+    if not os.path.exists(source) or os.path.realpath(source) == os.path.realpath(host):
+        return args
+    if not any(host.startswith(m + os.sep) for m in mounted):
+        return args  # the home it lives in did not come into this box
+    copy = os.path.join(config.CONFIG_DIR, "box", "files", name.replace("/", "_"),
+                        "auth-" + os.path.basename(source))
+    try:
+        os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
+        shutil.copy2(source, copy)
+        os.chmod(copy, 0o600)  # it is a credential
+    except OSError as exc:
+        warn("could not give the box its %s credentials (%s)" % (provider.NAME, exc))
+        return args
+    return _bind(copy, host)
 
 
 def siblings(provider, canonical):

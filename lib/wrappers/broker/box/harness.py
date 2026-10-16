@@ -122,6 +122,10 @@ def _account_credentials(provider, env, name, mounted):
     # config-dir variable is already handled, by chosen_home.
     if getattr(provider, "HOME_ENV", None) != "HOME":
         return args
+    # Not every harness keeps its credentials in a file of its own — opencode
+    # has no AUTH_NAME at all, and a box may carry it as a companion.
+    if not getattr(provider, "AUTH_NAME", None):
+        return args
     from ..profile import profile_dir
 
     active = (env or {}).get("BROKER_ACTIVE") or ""

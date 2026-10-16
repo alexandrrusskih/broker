@@ -1,5 +1,6 @@
 """Copies a box keeps to itself, so that writing inside changes nothing outside."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -31,6 +32,124 @@ def _clone(source, destination):
             shutil.copytree(source, destination, symlinks=True)
         else:
             shutil.copy2(source, destination)
+
+
+def _entries(path):
+    """The file as a store of named entries, or None if it is not one.
+
+    Deliberately narrow. A clone may be a four-gigabyte database, and nothing
+    here should try to be clever about one: only a small JSON object whose
+    every value is an object counts, which is the shape of an MCP token store
+    — one entry per server URL.
+    """
+    if not path.endswith(".json"):
+        return None
+    try:
+        if os.path.getsize(path) > 1024 * 1024:
+            return None
+        with open(path) as handle:
+            loaded = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(loaded, dict) or not loaded:
+        return None
+    if any(not isinstance(value, dict) for value in loaded.values()):
+        return None
+    return loaded
+
+
+def _later(mine, theirs):
+    """Whether `mine` holds the fresher token of two entries for one server."""
+    def when(entry):
+        stamp = (entry.get("token") or {}).get("expiry")
+        return stamp if isinstance(stamp, str) else ""
+
+    # String order is time order for ISO-8601 instants with the same shape, and
+    # when it is not — a missing or odd stamp — the answer is "no", which keeps
+    # whatever is already on the host.
+    return when(mine) > when(theirs)
+
+
+def _carry_back(real, name):
+    """Fold what boxes authorized into the host's own store.
+
+    A box gets a CLONE of this file, because the harness rewrites it whole and
+    a shared one let a box next door empty everybody's logins. The cost was
+    the other direction: a login made inside a box died with the box, and a
+    person who authorized a server in the box they were working in had to do
+    it again outside, and again in the next box. Said plainly, authorization
+    was not transparent, and that is the complaint this answers.
+
+    Nothing is replaced. Entries the host does not have are added; an entry
+    both sides have is taken from whichever holds the later expiry. So a login
+    made anywhere reaches the host, and from there every box's next clone,
+    while a token the host refreshed is never pushed backwards by a box's
+    older copy. A file that is not a store of entries is left alone entirely.
+    """
+    host = _entries(real)
+    if host is None:
+        return
+    root = os.path.join(config.CONFIG_DIR, "box", "private")
+    merged = dict(host)
+    changed = []
+    for box in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        clone = os.path.join(root, box, name, os.path.basename(real))
+        theirs = _entries(clone) if os.path.exists(clone) else None
+        if not theirs:
+            continue
+        for server, entry in theirs.items():
+            if server not in merged or _later(entry, merged[server]):
+                merged[server] = entry
+                changed.append("%s from %s" % (server, box))
+    if not changed:
+        return
+    try:
+        config.write_json(real, merged, prefix=".tokens-")
+    except OSError as exc:
+        warn("could not carry a box's logins back into %s (%s)"
+             % (os.path.basename(real), exc))
+        return
+    warn("carried %d login(s) back into %s: %s"
+         % (len(changed), os.path.basename(real), ", ".join(changed)))
+
+
+def _mirror_out(real, name, mine):
+    """Put the host's store into the clone of every box already running.
+
+    The other half of transparency. A clone is taken when a box starts, so a
+    login granted out here reached a box that was ALREADY running only after
+    that box was restarted — which is most of what "authorization does not
+    arrive" meant. There is no watcher and no daemon: every broker run pushes
+    the current file outwards, and a broker run is what starting any harness
+    or any bridge already is, so a box sees a new login within moments rather
+    than at its next start.
+
+    Written IN PLACE, not replaced. A bind mount holds the inode it was given:
+    writing a new file and renaming it over the clone — which is what the
+    atomic writer does, correctly, everywhere else — would leave every running
+    box bound to the old inode and blind to this. The file is a few hundred
+    bytes and goes out in one write; a box reading at that instant is the
+    accepted cost of not breaking its mount.
+
+    The box whose clone was just made is skipped: it has the file already.
+    """
+    merged = _entries(real)
+    if merged is None:
+        return
+    body = json.dumps(merged, indent=2, sort_keys=True)
+    root = os.path.join(config.CONFIG_DIR, "box", "private")
+    for box in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        clone = os.path.join(root, box, name, os.path.basename(real))
+        if clone == mine or not os.path.exists(clone):
+            continue
+        if _entries(clone) == merged:
+            continue  # already says this; a write would only risk a torn read
+        try:
+            with open(clone, "w") as handle:
+                handle.write(body)
+        except OSError as exc:
+            warn("could not mirror %s into the %s box (%s)"
+                 % (os.path.basename(real), box, exc))
 
 
 def blank(provider, name, mounted):
@@ -129,9 +248,19 @@ def private(provider, profile, env, name):
                                             os.path.basename(real))
                         try:
                             os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
+                            # Before the clone is replaced, whatever any box
+                            # authorized goes home: the clone about to be
+                            # overwritten is this box's own from last time,
+                            # and the others belong to boxes that have since
+                            # exited. This is what makes a login transparent
+                            # in both directions.
+                            _carry_back(real, provider.NAME)
                             # Fresh every start: cloning costs nothing, and a
                             # stale copy is worse than none.
                             _clone(real, copy)
+                            # And outwards, to the boxes already running, so a
+                            # login does not wait for their next start.
+                            _mirror_out(real, provider.NAME, copy)
                         except OSError as exc:
                             warn("could not give the box its own %s (%s)" % (os.path.basename(real), exc))
                             continue

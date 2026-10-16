@@ -30,6 +30,20 @@ def state_dir():
 IDLE_TIMEOUT = int(os.environ.get("BROKER_MCP_IDLE_SECONDS") or 4 * 3600)
 
 
+def started(pid):
+    """When this process began, as the system reports it, or "" if unknown.
+
+    Only needs to be comparable with itself: two readings of one live process
+    match, and a pid that has been handed to somebody else since does not.
+    """
+    try:
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip()
+
+
 def _state_file(name, key=""):
     stem = name.replace("/", "_")
     if key:
@@ -318,7 +332,12 @@ def serve(name, command, key=""):
 
     os.makedirs(state_dir(), mode=0o700, exist_ok=True)
     state = {"host": host, "port": port, "token": token, "command": command,
-             "pid": os.getpid(), "identity": key, "filtered": bool(policy)}
+             "pid": os.getpid(), "identity": key, "filtered": bool(policy),
+             # The pid alone does not identify a process: pids are reused, and
+             # a state file outlives the listener it describes. Its start time
+             # does, so a reader can tell "still running" from "somebody else
+             # now holds that number". See mcpbridge.running.
+             "started": started(os.getpid())}
     path = _state_file(name, key)
     tmp = path + ".new"
     with open(tmp, "w") as fh:

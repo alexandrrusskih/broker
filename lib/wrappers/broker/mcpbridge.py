@@ -57,6 +57,21 @@ def running(name, key=""):
         os.kill(state["pid"], 0)
     except (OSError, KeyError, TypeError):
         return None
+    # Alive is not the same as OURS. A state file outlives the listener it
+    # describes, pids are handed out again, and a box wired to a recycled one
+    # talks to a stranger's process or to a port nobody is answering — which
+    # reads as a server that accepts the connection and never replies. The
+    # start time recorded when the listener came up settles it: it matches for
+    # the process that wrote the file and for no other.
+    #
+    # Written by a listener that did not record one yet, the field is missing,
+    # and then the pid is all there is — the old behaviour, for the few minutes
+    # it takes those to be replaced.
+    from .mcpserve import started
+
+    was = state.get("started")
+    if was and started(state["pid"]) != was:
+        return None
     return state
 
 

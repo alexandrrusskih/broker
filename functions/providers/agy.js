@@ -42,6 +42,11 @@ async function refresh(prev, secrets) {
     expires_at: Date.now() + (t.expires_in || 3600) * 1000,
     token_type: t.token_type || "Bearer",
     scope: t.scope || prev.scope,
+    // Google's refresh answers with no id_token, so the seeded one has to be
+    // carried forward or it is lost at the first renewal — which is codex's
+    // reason for the same line, and agy needs it more: its consumer auth
+    // refuses a token file without one.
+    id_token: t.id_token || prev.id_token,
     auth_method: prev.auth_method || "consumer"
   };
 }
@@ -51,6 +56,11 @@ async function refresh(prev, secrets) {
 function toAuthFile(tokenData) {
   return {
     auth_method: tokenData.auth_method || "consumer",
+    // Beside `token`, not inside it: that is where the CLI's own login writes
+    // it, and where it reads it back. A machine that never logged in locally
+    // has no other source, so leaving it out gave an account that looked
+    // authorized and would not start.
+    ...(tokenData.id_token ? { id_token: tokenData.id_token } : {}),
     token: {
       access_token: tokenData.access_token,
       refresh_token: tokenData.refresh_token,

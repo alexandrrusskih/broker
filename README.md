@@ -181,6 +181,27 @@ also the starting point of every named box:
 A box's own value wins: objects merge key by key, lists add to the template's.
 `rw` and `dockerfile` are refused there, since they would apply to every box.
 
+### Other harnesses in the same box
+
+A box is built around the harness that starts it. Everything else in the image
+is a binary with no login — so medulla in an agy box could not run a claude or
+codex node. A box that names them carries them too:
+
+```jsonc
+"__defaults": {
+  "harnesses": ["claude", "codex", "agy", "opencode"]
+}
+```
+
+Each comes along as it would as the box's own: its directory, an account picked
+for it on the host the way a run of it would pick one, its credentials, its MCP
+servers. The harness that started the box is not carried twice. One that has no
+account to give is left out with a line saying why; the box still starts. Say
+`"harnesses": false` in a box to carry none of them there.
+
+Every one of them is another set of credentials inside the container — that is
+the price, and why nothing is carried unless a box says so.
+
 A box that needs more than the base image brings its own Dockerfile:
 
 ```jsonc

@@ -10,6 +10,7 @@ import time
 from .. import config
 from ..out import die, warn
 from . import boxes, report, state, watch
+from .companions import companions
 from .run import command
 from .sync import _sync_back
 from .sessions import _exit_note, _pin_session, _session_from_argv, _session_it_named
@@ -105,6 +106,8 @@ def exec_box(provider, asked, argv, env, account=None):
         binary = shutil.which(runtime)
         if binary and not _daemon_is_up(binary):
             die("the %s daemon is not running — start it, then try again" % runtime)
+    # The other harnesses the box carries, with their accounts picked here.
+    others = companions(provider, profile, env)
     pinned, argv = _pin_session(provider, argv)
     # Which pane this box belongs to, and the chat in it when we named it.
     state.claim(name, provider, pinned, env)
@@ -112,7 +115,7 @@ def exec_box(provider, asked, argv, env, account=None):
     # directory of ours, and this reads it while the container lives. Started
     # before `command`, because command mounts that directory.
     watcher = watch.Watcher(name, provider, pinned)
-    cmd = command(provider, name, profile, argv, env, remote=remote)
+    cmd = command(provider, name, profile, argv, env, remote=remote, companions=others)
     shadow_root = os.path.join(config.CONFIG_DIR, "box", "profiles") + os.sep
     shadows = [part.partition("source=")[2].partition(",")[0]
                for part in cmd if part.startswith("type=bind,source=")

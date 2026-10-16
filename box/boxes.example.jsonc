@@ -6,6 +6,11 @@
   // A box's own value wins; objects merge key by key, lists add to these.
   // "rw" and "dockerfile" are refused here: they would apply to every box.
   "__defaults": {
+    // The harnesses a box carries besides the one that starts it, each with its
+    // own account — so medulla inside can run any of them. A box that says
+    // "harnesses": false carries none.
+    "harnesses": ["claude", "codex", "agy", "opencode"],
+
     // ~/.gitconfig does not come along, so commits need an author.
     "env": {"GIT_AUTHOR_NAME": "Me", "GIT_AUTHOR_EMAIL": "me@example.org",
             "GIT_COMMITTER_NAME": "Me", "GIT_COMMITTER_EMAIL": "me@example.org"}

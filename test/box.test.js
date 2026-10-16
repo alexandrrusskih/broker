@@ -93,6 +93,101 @@ print(json.dumps({
   assert.deepEqual(seen.names, ["listed"], "the template and the machines are not boxes");
 });
 
+test("a box carries the other harnesses it names, each as it would carry its own", async (t) => {
+  const dir = await fs.realpath(await temp(t));
+  const project = path.join(dir, "project");
+  const codexProfile = path.join(dir, ".codex-main");
+  await fs.mkdir(project);
+  await fs.mkdir(path.join(dir, ".claude"));
+  await fs.writeFile(path.join(dir, ".claude.json"), "{}");
+  await fs.mkdir(path.join(dir, ".codex"));
+  await fs.writeFile(path.join(dir, ".codex", "config.toml"), "");
+  await fs.mkdir(codexProfile);
+  await fs.writeFile(path.join(codexProfile, "auth.json"), "{}");
+  await fs.mkdir(path.join(dir, ".gemini", "antigravity-cli"), { recursive: true });
+  await fs.mkdir(path.join(dir, ".local", "share", "opencode"), { recursive: true });
+  await fs.writeFile(path.join(dir, ".local", "share", "opencode", "auth.json"), "{}");
+
+  const out = engine(`
+import json, os
+from broker import box, config
+from broker.box import run
+from broker.providers import claude, codex, agy, opencode
+config.CONFIG_DIR = ${JSON.stringify(path.join(dir, "cfg"))}
+base = {"BROKER_ACTIVE": "claude:main", "CLAUDE_CODE_OAUTH_TOKEN": "claude-token"}
+cmd = run.command(claude, "demo", {"rw": [${JSON.stringify(project)}], "mcp": False}, ["-p", "hi"], base,
+                  companions=[(codex, dict(base, CODEX_HOME=${JSON.stringify(codexProfile)},
+                                           CODEX_REFRESH_TOKEN_URL_OVERRIDE="https://broker.example.ts.net/oauthRefresh?account=main")),
+                              (agy, dict(base, HOME=${JSON.stringify(path.join(dir, ".agy", "main"))})),
+                              (opencode, dict(base))])
+print(json.dumps(cmd))
+`, { HOME: dir, BROKER_REAL_HOME: dir });
+  const cmd = JSON.parse(out);
+  const line = cmd.join(" ");
+
+  assert.ok(line.includes(`target=${dir}/.claude,`) || line.includes(`target=${dir}/.claude `), "its own home");
+  assert.ok(line.includes(`target=${dir}/.codex`), "codex's directory comes along");
+  assert.ok(line.includes(`target=${codexProfile}`), "with the account's profile");
+  assert.ok(line.includes(`-e CODEX_HOME=${codexProfile}`), "and codex is pointed at it");
+  assert.ok(line.includes(`target=${dir}/.gemini`), "agy's directory comes along");
+  assert.ok(line.includes(`target=${dir}/.local/share/opencode/auth.json`), "opencode's login, as a copy");
+  assert.ok(line.includes("-e CLAUDE_CODE_OAUTH_TOKEN=claude-token"));
+  // What a companion's account set reaches the box, so codex can renew there...
+  assert.ok(line.includes("-e CODEX_REFRESH_TOKEN_URL_OVERRIDE=https://broker.example.ts.net/oauthRefresh?account=main"));
+  // ...but not the profile agy is handed as $HOME: inside, $HOME is your home.
+  assert.ok(!line.includes(`-e HOME=${dir}/.agy/main`));
+
+  // Docker refuses a container that names one mount point twice.
+  const targets = [];
+  cmd.forEach((part, i) => {
+    if (cmd[i - 1] === "--mount") targets.push(part.match(/target=([^,]+)/)[1]);
+    if (cmd[i - 1] === "--tmpfs") targets.push(part.split(":")[0]);
+  });
+  assert.deepEqual(targets.filter((x, i) => targets.indexOf(x) !== i), [], "no mount point twice");
+
+  // The box still runs the harness that started it.
+  assert.deepEqual(cmd.slice(-5), ["broker-box-entry", "claude", "--dangerously-skip-permissions", "-p", "hi"]);
+});
+
+test("each companion gets its own account, and one without an account is left out", async (t) => {
+  const dir = await fs.realpath(await temp(t));
+  const out = engine(`
+import json, sys
+from broker import config, select
+from broker.box import companions
+from broker.providers import claude
+config.load = lambda die: {"url": "https://broker.example.ts.net", "key": "k"}
+def resolve(cfg, provider, explicit=None, preferred=None):
+    if provider.NAME == "agy":
+        from broker.out import die
+        die("no agy accounts seeded")
+    return "main", {"tokens": {"access_token": "a", "refresh_token": "f" * 64, "id_token": "i"}}
+select.resolve = resolve
+def ask(names):
+    try:
+        found = companions.companions(claude, {"harnesses": names}, {"HOME": ${JSON.stringify(dir)}})
+    except SystemExit:
+        return "refused"
+    return [[p.NAME, sorted(k for k in env if k.startswith(("CODEX_", "BROKER_ACTIVE")))] for p, env in found]
+print(json.dumps({
+    "all": ask(["claude", "codex", "agy", "opencode"]),
+    "none": ask(None),
+    "off": ask(False),
+    "bogus": ask(["codex", "gpt"]),
+}))
+`, { HOME: dir, BROKER_REAL_HOME: dir });
+  const seen = JSON.parse(out);
+  // The box's own harness is not carried twice; agy has no account and is
+  // left out; opencode holds its own login and needs none from the broker.
+  assert.deepEqual(seen.all.map(([name]) => name), ["codex", "opencode"]);
+  assert.ok(seen.all[0][1].includes("BROKER_ACTIVE"), "codex knows it is brokered");
+  assert.ok(seen.all[0][1].includes("CODEX_HOME"), "codex is pointed at its account's profile");
+  assert.ok(seen.all[0][1].includes("CODEX_REFRESH_TOKEN_URL_OVERRIDE"), "and renews through the broker");
+  assert.deepEqual(seen.none, [], "nothing named, nothing carried");
+  assert.deepEqual(seen.off, [], "false carries nothing either");
+  assert.equal(seen.bogus, "refused");
+});
+
 test("__defaults may not name a place to write or a Dockerfile", async (t) => {
   const dir = await temp(t);
   for (const key of ["rw", "dockerfile"]) {

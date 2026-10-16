@@ -13,8 +13,12 @@ from .mcp import HOST_GATEWAY
 from .paths import _bind, _mount, _paths, expand, home_dir
 
 
-def command(provider, name, profile, argv, env, remote=False):
-    """The full container command line for this run."""
+def command(provider, name, profile, argv, env, remote=False, companions=()):
+    """The full container command line for this run.
+
+    `companions` are the other harnesses the box carries (box/companions.py),
+    each with the environment its own account was installed into.
+    """
     runtime = profile.get("runtime") or "docker"
     binary = shutil.which(runtime)
     if not binary:
@@ -57,26 +61,9 @@ def command(provider, name, profile, argv, env, remote=False):
         cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
                 % (expand(directory), os.getuid(), os.getgid())]
 
-    # ...and anywhere else this harness insists on writing. Mounting a file
-    # deep under $HOME makes the container create its parents as root, and the
-    # harness — which runs as you — then cannot make a sibling directory next
-    # to its own database: "EACCES: permission denied, mkdir". Naming the
-    # directory here gets it owned by you before anything is mounted into it.
-    for directory in getattr(provider, "BOX_WRITABLE", ()):
-        cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
-                % (expand(directory), os.getuid(), os.getgid())]
-
     mounted = []
     cmd += extras.tools(binary, image, name, profile, home)
-
-
-    (own, http_config, http_config_mounted, http_mode,
-     settings_mounted) = harness.own_home(provider, profile, env, name, mounted)
-    cmd += own
-    cmd += extras.databases(provider, env)
     cmd += extras.gitlab(profile, env, name, home)
-    cmd += clones.blank(provider, name, mounted)
-    cmd += clones.readonly(provider, mounted)
 
     writable = list(_paths(profile, "rw"))
     for host, target in writable:
@@ -103,48 +90,24 @@ def command(provider, name, profile, argv, env, remote=False):
     cmd += ["-w", cwd if inside else (os.path.realpath(projects[0]) if projects else home)]
 
     cmd += extras.own_copies(provider, profile, name)
-    cmd += clones.private(provider, profile, env, name)
 
-    canonical = expand(getattr(provider, "CANONICAL_HOME", "~"))
-    cmd += harness.siblings(provider, canonical)
+    inherited, claimed = {}, {}
+    cmd += _harness(provider, profile, env, name, remote, mounted, projects, claimed, inherited)
+    # The other harnesses this box carries, each set up exactly as it would be
+    # as the box's own. Two of them may want the same thing at the same place —
+    # the same MCP server, the same writable cache — and docker refuses a
+    # container with a mount point named twice, so the second asking is dropped.
+    for other, other_env in companions:
+        cmd += environ.companion(env, other_env)
+        cmd += _unclaimed(cmd, _harness(other, profile, other_env, name, remote, mounted,
+                                        projects, claimed, inherited))
 
-    cmd += harness.chosen_home(provider, env, name, remote, mounted, canonical)
-    if http_config and not http_config_mounted:
-        cmd += _bind(http_config[0], http_config[2], http_mode)
-
-    cmd += harness.settings(provider, profile, env, name, canonical, http_config,
-                            settings_mounted)
-    cmd += environ.credentials(provider, env, remote)
-
-    # MCP servers that exist only on this machine. Half of them cannot come
-    # along at all — some are native macOS binaries — so the server
-    # stays on the host and only its stdio is carried across. The shim is
-    # mounted AT THE COMMAND'S OWN PATH, which means the harness's own config
-    # needs no rewriting: it already points there. Servers reached over http are
-    # left alone; the box can dial them itself.
-    inherited = {}
-    if profile.get("mcp") is not False:
-        claimed = {}
-        for server_name, server in sorted(mcp.mcp_servers(provider, env).items()):
-            target = server["command"][0]
-            if target in claimed:
-                warn("%s and %s start from the same command (%s) — only the first is bridged"
-                     % (claimed[target], server_name, target))
-                continue
-            live = mcp._start_bridge(server_name, server, profile, projects)
-            if not live:
-                continue
-            for variable in server.get("inherit") or []:
-                if os.environ.get(variable) and variable not in inherited:
-                    inherited[variable] = os.environ[variable]
-            claimed[target] = server_name
-            cmd += _bind(shim._write_shim(provider, server_name, live), target, "ro")
-        for variable, value in sorted(inherited.items()):
-            cmd += ["-e", "%s=%s" % (variable, value)]
-        if claimed:
-            # Docker Desktop resolves this name already; Colima and plain Linux
-            # need to be told, and saying it twice costs nothing.
-            cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
+    for variable, value in sorted(inherited.items()):
+        cmd += ["-e", "%s=%s" % (variable, value)]
+    if claimed:
+        # Docker Desktop resolves this name already; Colima and plain Linux
+        # need to be told, and saying it twice costs nothing.
+        cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
 
     cmd += environ.own(profile)
 
@@ -188,3 +151,86 @@ def command(provider, name, profile, argv, env, remote=False):
 
     cmd += argv
     return cmd
+
+
+def _harness(provider, profile, env, name, remote, mounted, projects, claimed, inherited):
+    """Everything one harness needs in the box: its home, its account, its MCP."""
+    args = []
+    # ...and anywhere else this harness insists on writing. Mounting a file
+    # deep under $HOME makes the container create its parents as root, and the
+    # harness — which runs as you — then cannot make a sibling directory next
+    # to its own database: "EACCES: permission denied, mkdir". Naming the
+    # directory here gets it owned by you before anything is mounted into it.
+    for directory in getattr(provider, "BOX_WRITABLE", ()):
+        args += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
+                 % (expand(directory), os.getuid(), os.getgid())]
+
+    (own, http_config, http_config_mounted, http_mode,
+     settings_mounted) = harness.own_home(provider, profile, env, name, mounted)
+    args += own
+    args += extras.databases(provider, env)
+    args += clones.blank(provider, name, mounted)
+    args += clones.readonly(provider, mounted)
+    args += clones.private(provider, profile, env, name)
+
+    canonical = expand(getattr(provider, "CANONICAL_HOME", "~"))
+    args += harness.siblings(provider, canonical)
+
+    args += harness.chosen_home(provider, env, name, remote, mounted, canonical)
+    if http_config and not http_config_mounted:
+        args += _bind(http_config[0], http_config[2], http_mode)
+
+    args += harness.settings(provider, profile, env, name, canonical, http_config,
+                             settings_mounted)
+    args += environ.credentials(provider, env, remote)
+
+    # MCP servers that exist only on this machine. Half of them cannot come
+    # along at all — some are native macOS binaries — so the server
+    # stays on the host and only its stdio is carried across. The shim is
+    # mounted AT THE COMMAND'S OWN PATH, which means the harness's own config
+    # needs no rewriting: it already points there. Servers reached over http are
+    # left alone; the box can dial them itself.
+    if profile.get("mcp") is False:
+        return args
+    for server_name, server in sorted(mcp.mcp_servers(provider, env).items()):
+        target = server["command"][0]
+        if target in claimed:
+            # The same server declared by another harness in this box is the
+            # same server: its shim is already there.
+            if claimed[target] != server_name:
+                warn("%s and %s start from the same command (%s) — only the first is bridged"
+                     % (claimed[target], server_name, target))
+            continue
+        live = mcp._start_bridge(server_name, server, profile, projects)
+        if not live:
+            continue
+        for variable in server.get("inherit") or []:
+            if os.environ.get(variable) and variable not in inherited:
+                inherited[variable] = os.environ[variable]
+        claimed[target] = server_name
+        args += _bind(shim._write_shim(provider, server_name, live), target, "ro")
+    return args
+
+
+def _target(flag, value):
+    if flag == "--tmpfs":
+        return value.split(":", 1)[0]
+    if flag == "--mount":
+        for part in value.split(","):
+            if part.startswith("target="):
+                return part[len("target="):]
+    return None
+
+
+def _unclaimed(cmd, args):
+    """`args` without the mounts `cmd` already has at the same place."""
+    taken = {_target(flag, value) for flag, value in zip(cmd, cmd[1:])} - {None}
+    kept = []
+    for flag, value in zip(args[::2], args[1::2]):
+        target = _target(flag, value)
+        if target in taken:
+            continue
+        if target:
+            taken.add(target)
+        kept += [flag, value]
+    return kept

@@ -15,6 +15,11 @@ from .paths import window_key
 TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
                 "LANG", "LC_ALL", "LC_CTYPE")
 
+# Left out of what a box carries: see carried() below.
+OWN = {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "PWD", "OLDPWD", "TMPDIR",
+       "SHLVL", "_", "XPC_SERVICE_NAME", "XPC_FLAGS", "__CF_USER_TEXT_ENCODING",
+       "DISPLAY", "SSH_AUTH_SOCK", "SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY"}
+
 
 def carried(profile, env, home, box):
     """Everything the box gets from outside, plus what names this run."""
@@ -32,9 +37,6 @@ def carried(profile, env, home, box):
     # SSH_AUTH_SOCK at a socket that does not cross. Carrying them in does not
     # pass a setting along, it breaks the box in its first second. The list is
     # short and technical on purpose.
-    OWN = {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "PWD", "OLDPWD", "TMPDIR",
-           "SHLVL", "_", "XPC_SERVICE_NAME", "XPC_FLAGS", "__CF_USER_TEXT_ENCODING",
-           "DISPLAY", "SSH_AUTH_SOCK", "SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY"}
     # ...and whatever else this box would rather not see, said in its own file:
     #
     #   "unset": ["AWS_PROFILE", "EQUILL_*"]
@@ -128,6 +130,25 @@ def credentials(provider, env, remote=None):
         moved = True
     if moved:
         args += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
+    return args
+
+
+def companion(base, env):
+    """What a companion harness's account put in its environment.
+
+    The box's own harness has its account installed in the environment the
+    box is started from, and carried() takes all of it in. A companion's lives
+    in a copy, so without this the box got its directories and none of what
+    points into them — codex had a profile and no CODEX_HOME telling it where,
+    no database of its own, nowhere to renew its token.
+    """
+    args = []
+    for variable, value in sorted(env.items()):
+        if base.get(variable) == value or variable in OWN or variable.startswith("BROKER_"):
+            continue
+        if "\n" in value or "\0" in value:
+            continue
+        args += ["-e", "%s=%s" % (variable, value)]
     return args
 
 

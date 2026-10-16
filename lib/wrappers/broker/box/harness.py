@@ -94,6 +94,51 @@ def own_home(provider, profile, env, name, mounted):
     return (args, http_config, http_config_mounted, http_mode, settings_mounted)
 
 
+def _expiry(path):
+    """When the token in this auth file runs out, as the string it is stored as.
+
+    Comparable with itself and nothing else: ISO-8601 instants of one shape
+    sort as time, and anything unreadable sorts before everything, which means
+    "do not prefer this one".
+    """
+    try:
+        with open(path) as handle:
+            loaded = json.load(handle)
+    except (OSError, ValueError):
+        return ""
+    token = loaded.get("token") if isinstance(loaded, dict) else None
+    when = token.get("expiry") if isinstance(token, dict) else None
+    return when if isinstance(when, str) else ""
+
+
+def _carry_credentials_back(copy, source):
+    """Fold a token the box refreshed back into the account's profile.
+
+    The box gets a COPY, because the file is rewritten atomically and a bind
+    mount holds the inode it was given. The cost was the other direction: a
+    harness inside refreshes its own token, writes it to its copy, and that
+    copy is replaced at the box's next start — so the work was lost and the
+    profile went on handing out the older one. It is the same shape as the MCP
+    token store, and the same answer: carry it home before replacing it.
+
+    Only when the box's copy expires LATER. A copy that was never written is
+    byte for byte the profile's own, and one the broker has since refreshed
+    must not be pushed backwards by a box holding yesterday's.
+    """
+    if not os.path.exists(copy):
+        return
+    if _expiry(copy) <= _expiry(source):
+        return
+    try:
+        shutil.copy2(copy, source)
+        os.chmod(source, 0o600)  # it is a credential
+    except OSError as exc:
+        warn("could not carry the box's %s token back (%s)"
+             % (os.path.basename(source), exc))
+        return
+    warn("carried a newer %s token back from the box" % os.path.basename(source))
+
+
 def _account_credentials(provider, env, name, mounted):
     """The token the broker wrote, where a harness whose profile IS a home looks.
 
@@ -142,6 +187,7 @@ def _account_credentials(provider, env, name, mounted):
                         "auth-" + os.path.basename(source))
     try:
         os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
+        _carry_credentials_back(copy, source)
         shutil.copy2(source, copy)
         os.chmod(copy, 0o600)  # it is a credential
     except OSError as exc:

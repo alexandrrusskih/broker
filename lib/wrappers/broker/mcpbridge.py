@@ -64,11 +64,20 @@ def connect(host, port, token):
     """The client end, run INSIDE the box: become a pipe to the host's server."""
     with socket.create_connection((host, int(port))) as conn:
         conn.sendall(token.encode() + b"\n")
-        out = threading.Thread(
-            target=_pump, args=(conn, sys.stdout.buffer), daemon=True)
-        out.start()
-        _pump(sys.stdin.buffer, conn, lambda: conn.shutdown(socket.SHUT_WR))
-        out.join(timeout=5)
+        # The SERVER's end is what the main thread waits on, and stdin is the
+        # daemon. The other way round hangs: when the server dies, the thread
+        # carrying its output finishes quietly, while the main thread sits in
+        # sys.stdin.read1() for as long as the client keeps stdin open — and a
+        # client waiting for an answer keeps it open forever. So the pipe never
+        # ended, stdout was never closed, and a server that had gone read as
+        # one still thinking. This way both ends finish: the server's EOF ends
+        # the main thread, and stdin's EOF shuts the write side down.
+        inp = threading.Thread(
+            target=_pump,
+            args=(sys.stdin.buffer, conn, lambda: conn.shutdown(socket.SHUT_WR)),
+            daemon=True)
+        inp.start()
+        _pump(conn, sys.stdout.buffer)
     return 0
 
 

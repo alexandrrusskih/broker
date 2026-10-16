@@ -252,6 +252,26 @@ def _session(conn, command, token, policy=None):
             up.start()
             _pump(child.stdout, client)
         finally:
+            # Shut the socket down before `with conn` closes it, or the client
+            # is never told the server is gone.
+            #
+            # The upstream thread sits in conn.recv() for as long as the box has
+            # the connection open. When the server exits, the downstream pump
+            # returns, this block runs, and close() happens with that recv()
+            # still pending — and on macOS a close() in one thread neither
+            # wakes a recv() blocked in another nor sends the FIN. So the shim
+            # inside the box waited for an EOF that was never coming: the
+            # harness showed a server that had already died as merely silent,
+            # for as long as the box lived. Found by the equill setup on an
+            # `ssh -T` that dropped mid-session, where the server is remote and
+            # dying is ordinary.
+            #
+            # shutdown() does both jobs: it wakes the blocked reader and it
+            # sends the FIN the shim is waiting for.
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass  # already gone the other way; close() is enough
             child.terminate()
             try:
                 child.wait(timeout=5)

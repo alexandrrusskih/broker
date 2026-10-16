@@ -187,6 +187,49 @@ print(json.dumps(cmd))
   assert.ok(line.includes(`target=${os.homedir()}/.codex/auth.json,readonly`), "the shared directory's own token is covered");
 });
 
+test("codex renews its token at a broker the box can reach", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  const profile = path.join(dir, "codex-main");
+  await fs.mkdir(project);
+  await fs.mkdir(profile);
+  await fs.writeFile(path.join(profile, "auth.json"), "{}");
+  const run = (url, remote) => JSON.parse(engine(`
+import json
+from broker import box
+from broker.providers import codex
+from broker import config
+config.CONFIG_DIR = ${JSON.stringify(path.join(dir, "cfg"))}
+q = "?provider=codex&account=main"
+cmd = box.command(codex, "demo", {"rw": [${JSON.stringify(project)}]}, ["exec", "hi"],
+                  {"CODEX_HOME": ${JSON.stringify(profile)}, "BROKER_ACTIVE": "codex:main",
+                   "CODEX_REFRESH_TOKEN_URL_OVERRIDE": ${JSON.stringify(url)} + "/oauthRefresh" + q,
+                   "CODEX_REVOKE_TOKEN_URL_OVERRIDE": ${JSON.stringify(url)} + "/oauthRevoke" + q},
+                  remote=${remote ? JSON.stringify(remote) : "False"})
+print(json.dumps(cmd))
+`, { CODEX_REFRESH_TOKEN_URL_OVERRIDE: "", CODEX_REVOKE_TOKEN_URL_OVERRIDE: "" }));
+  // Docker keeps the LAST -e of a name, so that is what the harness sees.
+  const last = (cmd, name) => cmd.filter((part) => part.startsWith(`${name}=`)).pop();
+
+  // A broker on this machine's loopback is the container's own inside a box.
+  const local = run("http://127.0.0.1:8787");
+  assert.equal(last(local, "CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
+    "CODEX_REFRESH_TOKEN_URL_OVERRIDE=http://host.docker.internal:8787/oauthRefresh?provider=codex&account=main");
+  assert.equal(last(local, "CODEX_REVOKE_TOKEN_URL_OVERRIDE"),
+    "CODEX_REVOKE_TOKEN_URL_OVERRIDE=http://host.docker.internal:8787/oauthRevoke?provider=codex&account=main");
+  assert.ok(local.join(" ").includes("--add-host host.docker.internal:host-gateway"));
+
+  // A tailnet name already reaches it from anywhere, and is left as it is.
+  const tailnet = run("https://broker.example.ts.net");
+  assert.equal(last(tailnet, "CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
+    "CODEX_REFRESH_TOKEN_URL_OVERRIDE=https://broker.example.ts.net/oauthRefresh?provider=codex&account=main");
+
+  // On another machine the host gateway is THAT machine: nothing to rewrite to.
+  const far = run("http://127.0.0.1:8787", "big");
+  assert.equal(last(far, "CODEX_REFRESH_TOKEN_URL_OVERRIDE"),
+    "CODEX_REFRESH_TOKEN_URL_OVERRIDE=http://127.0.0.1:8787/oauthRefresh?provider=codex&account=main");
+});
+
 test("two hosts may share one key without the box refusing to start", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");

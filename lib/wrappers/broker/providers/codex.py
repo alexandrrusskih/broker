@@ -33,6 +33,8 @@ AUTH_NAME = "auth.json"
 # credentials this run uses live.
 BOX_HOME = ("~/.codex",)
 BOX_SECRETS = ("~/.codex/auth.json",)
+# Set by route_refresh to the broker's url; a box must be able to dial them.
+BOX_REFRESH_URLS = ("CODEX_REFRESH_TOKEN_URL_OVERRIDE", "CODEX_REVOKE_TOKEN_URL_OVERRIDE")
 
 # What the HOST runs or reads as instruction, and a box must not change. Why
 # this list and not its opposite: see box/clones.py, readonly().

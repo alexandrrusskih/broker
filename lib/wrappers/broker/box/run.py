@@ -114,7 +114,7 @@ def command(provider, name, profile, argv, env, remote=False):
 
     cmd += harness.settings(provider, profile, env, name, canonical, http_config,
                             settings_mounted)
-    cmd += environ.credentials(provider, env)
+    cmd += environ.credentials(provider, env, remote)
 
     # MCP servers that exist only on this machine. Half of them cannot come
     # along at all — some are native macOS binaries — so the server

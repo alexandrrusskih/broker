@@ -112,7 +112,7 @@ def exec_box(provider, asked, argv, env, account=None):
     # directory of ours, and this reads it while the container lives. Started
     # before `command`, because command mounts that directory.
     watcher = watch.Watcher(name, provider, pinned)
-    cmd = command(provider, name, profile, argv, env, remote=bool(remote))
+    cmd = command(provider, name, profile, argv, env, remote=remote)
     shadow_root = os.path.join(config.CONFIG_DIR, "box", "profiles") + os.sep
     shadows = [part.partition("source=")[2].partition(",")[0]
                for part in cmd if part.startswith("type=bind,source=")

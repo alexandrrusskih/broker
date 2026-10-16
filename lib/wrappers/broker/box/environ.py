@@ -2,6 +2,9 @@
 
 import os
 
+from ..out import warn
+from .http_mcp import _box_url
+from .mcp import HOST_GATEWAY
 from .paths import window_key
 
 
@@ -79,7 +82,7 @@ def carried(profile, env, home, box):
     return args
 
 
-def credentials(provider, env):
+def credentials(provider, env, remote=None):
     """The token for this run, and the git check no mount can satisfy."""
     args = []
     # git refuses to touch a repository it thinks belongs to someone else, and
@@ -101,6 +104,30 @@ def credentials(provider, env):
     for key in carried:
         if env.get(key):
             args += ["-e", "%s=%s" % (key, env[key])]
+
+    # Where the harness renews its token, when the broker does it. That is the
+    # broker's own url, and a broker on this machine is usually configured as
+    # http://127.0.0.1:8787 — which inside a box is the container itself. codex
+    # failed every refresh in a box with "error sending request for url
+    # (http://127.0.0.1:8787/oauthRefresh…)". A box here reaches the host by its
+    # gateway name, as the MCP bridges do; a box on another machine reaches
+    # nothing at that address, and only a url both machines can see (a tailnet
+    # name) will do. Later -e wins, so this replaces what was carried above.
+    moved = False
+    for key in getattr(provider, "BOX_REFRESH_URLS", ()):
+        url = env.get(key)
+        box_url = _box_url(url)
+        if not box_url:
+            continue
+        if remote:
+            warn("%s renews its token at %s, which a box on %s cannot reach — "
+                 "point the broker url at a name both machines see: broker config --url <url>"
+                 % (provider.NAME, url.split("?")[0], remote))
+            break
+        args += ["-e", "%s=%s" % (key, box_url)]
+        moved = True
+    if moved:
+        args += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
     return args
 
 

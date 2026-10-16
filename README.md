@@ -155,6 +155,32 @@ rewritten by the broker (comments are fine):
 The [complete box example](box/boxes.example.jsonc) lists every supported
 profile setting, including Docker, SSH, MCP, path mapping and remote machines.
 
+### `--box .`: the project you are in
+
+```sh
+cd ~/Projects/new-thing
+agy --box .                      # no entry needed
+```
+
+`.` is the git repository around the current directory (or the directory itself
+outside one), read-write and nothing else. A box whose `rw` already holds it is
+used as it is, `ssh` and all; any other project gets a box made on the spot,
+and nothing is written to the file. The way back it prints is `--box .` again,
+from the same project. A home directory, or anything above one, is refused.
+
+What such a box carries besides the project comes from `__defaults` — which is
+also the starting point of every named box:
+
+```jsonc
+"__defaults": {
+  "env": { "GIT_AUTHOR_NAME": "Me", "GIT_COMMITTER_NAME": "Me" },
+  "mcp": { "codebase-memory": { "identity_env": ["CBM_ALLOWED_ROOT"] } }
+}
+```
+
+A box's own value wins: objects merge key by key, lists add to the template's.
+`rw` and `dockerfile` are refused there, since they would apply to every box.
+
 A box that needs more than the base image brings its own Dockerfile:
 
 ```jsonc

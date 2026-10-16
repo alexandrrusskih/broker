@@ -76,13 +76,13 @@ def _over_ssh(cmd, machine, name):
     return ssh + ["--"] + [shlex.quote(part) for part in out]
 
 
-def exec_box(provider, name, argv, env, account=None):
+def exec_box(provider, asked, argv, env, account=None):
     """Run the container, then say how to come back to it."""
-    defined = boxes.profiles()
-    if name not in defined:
-        die("no box called '%s' in %s%s" % (
-            name, boxes.PATH,
-            (" — defined: " + ", ".join(sorted(defined))) if defined else " (the file does not exist yet)"))
+    # `asked` is what was typed, and what the way back will say; `name` is what
+    # the box's state is kept under. They differ only for `--box .`.
+    name, profile, asked = boxes.resolve(asked)
+    if asked == boxes.HERE:
+        warn("--box . writes to %s" % ", ".join(profile["rw"]))
     # A terminal manager watches the pane's foreground process to know what runs
     # in it. From here on that process is `docker`, which hides the harness
     # behind it — Herdr documents the way out: a wrapper says which agent it
@@ -101,7 +101,7 @@ def exec_box(provider, name, argv, env, account=None):
     # Only for a local run: a remote box's daemon is on the far machine, and the
     # one here may well be stopped and irrelevant.
     if not remote:
-        runtime = defined[name].get("runtime") or "docker"
+        runtime = profile.get("runtime") or "docker"
         binary = shutil.which(runtime)
         if binary and not _daemon_is_up(binary):
             die("the %s daemon is not running — start it, then try again" % runtime)
@@ -112,7 +112,7 @@ def exec_box(provider, name, argv, env, account=None):
     # directory of ours, and this reads it while the container lives. Started
     # before `command`, because command mounts that directory.
     watcher = watch.Watcher(name, provider, pinned)
-    cmd = command(provider, name, defined[name], argv, env, remote=bool(remote))
+    cmd = command(provider, name, profile, argv, env, remote=bool(remote))
     shadow_root = os.path.join(config.CONFIG_DIR, "box", "profiles") + os.sep
     shadows = [part.partition("source=")[2].partition(",")[0]
                for part in cmd if part.startswith("type=bind,source=")
@@ -174,7 +174,7 @@ def exec_box(provider, name, argv, env, account=None):
     # and nothing to resume — and everything below this line is about a box that
     # held a conversation. Said as a failure instead, which is what it is.
     if status == 125 and not printed.strip():
-        _remember(provider, name, workdir, None, account, status)
+        _remember(provider, asked, workdir, None, account, status)
         die("the '%s' box did not start — the reason is above" % name, status)
 
     # What the harness itself recorded, where it could not be confused with
@@ -198,7 +198,7 @@ def exec_box(provider, name, argv, env, account=None):
                or pinned
                or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None), provider)
                or _session_from_argv(provider, argv))
-    _remember(provider, name, workdir, session, account, status)
+    _remember(provider, asked, workdir, session, account, status)
     if session is None:
         session = _session_from_store(provider, name, started)
     # Said whatever happened, including when there is no id to say: a box that
@@ -243,7 +243,7 @@ def exec_box(provider, name, argv, env, account=None):
     note = _exit_note(provider, session, workdir, env)
     if note:
         warn("the harness stopped with: %s" % " ".join(note.split()))
-    hint = _resume_hint(provider, name, workdir, env, started, account, session)
+    hint = _resume_hint(provider, asked, workdir, env, started, account, session)
     atexit.register(say, hint)
     say(hint)
     if session:

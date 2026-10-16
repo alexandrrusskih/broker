@@ -28,6 +28,88 @@ print(json.dumps([
   ]);
 });
 
+test("--box . is the repository you stand in, or the box that already lists it", async (t) => {
+  const dir = await fs.realpath(await temp(t));
+  const git = (...args) => require("node:child_process").execFileSync("git", args, { stdio: "ignore" });
+  const repo = path.join(dir, "Work", "new-thing");
+  const listed = path.join(dir, "Work", "listed");
+  const plain = path.join(dir, "Scratch", "notes");
+  await fs.mkdir(path.join(repo, "src"), { recursive: true });
+  await fs.mkdir(listed, { recursive: true });
+  await fs.mkdir(plain, { recursive: true });
+  git("-C", repo, "init", "-q");
+  git("-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x");
+  const worktree = path.join(dir, "wt", "feature");
+  git("-C", repo, "worktree", "add", "-q", worktree);
+  await fs.writeFile(path.join(dir, "boxes.json"), `{
+    // comments stay fine
+    "__defaults": {"env": {"GIT_AUTHOR_NAME": "Me", "SHARED": "template"}, "ro": ["~/ref"]},
+    "listed": {"rw": [${JSON.stringify(listed)}], "env": {"SHARED": "box"}, "ro": ["~/more"]},
+    "machines": {"build": {"ssh": "me@build"}}
+  }`);
+
+  const out = engine(`
+import json
+from broker.box import boxes
+boxes.PATH = ${JSON.stringify(path.join(dir, "boxes.json"))}
+def ask(name, cwd):
+    try:
+        return list(boxes.resolve(name, cwd))
+    except SystemExit:
+        return "refused"
+print(json.dumps({
+    "sub": ask(".", ${JSON.stringify(path.join(repo, "src"))}),
+    "listed": ask(".", ${JSON.stringify(listed)}),
+    "named": ask("listed", ${JSON.stringify(plain)}),
+    "plain": ask(".", ${JSON.stringify(plain)}),
+    "worktree": ask(".", ${JSON.stringify(worktree)}),
+    "home": ask(".", ${JSON.stringify(dir)}),
+    "names": sorted(boxes.profiles()),
+}))
+`, { HOME: dir, BROKER_REAL_HOME: dir });
+  const seen = JSON.parse(out);
+
+  // From a subdirectory, the whole repository — the same box as from its root.
+  const [name, profile, asked] = seen.sub;
+  assert.match(name, /^new-thing-[0-9a-f]{6}$/);
+  assert.equal(asked, ".", "the way back is typed as it was asked");
+  assert.deepEqual(profile.rw, [repo]);
+  assert.deepEqual(profile.env, { GIT_AUTHOR_NAME: "Me", SHARED: "template" });
+  assert.deepEqual(profile.ro, ["~/ref"]);
+
+  // A project a box already lists is that box, under its own name.
+  assert.equal(seen.listed[0], "listed");
+  assert.equal(seen.listed[2], "listed");
+  // Every named box starts from the template: its own value wins per key, and
+  // its lists add to the template's.
+  assert.deepEqual(seen.named[1].env, { GIT_AUTHOR_NAME: "Me", SHARED: "box" });
+  assert.deepEqual(seen.named[1].ro, ["~/ref", "~/more"]);
+
+  assert.deepEqual(seen.plain[1].rw, [plain], "outside a repository, the directory itself");
+  // A worktree's history lives in the main repository's .git.
+  assert.deepEqual(seen.worktree[1].rw, [worktree, path.join(repo, ".git")]);
+  assert.notEqual(seen.worktree[0], name, "another checkout is another box");
+  assert.equal(seen.home, "refused", "never the whole home");
+  assert.deepEqual(seen.names, ["listed"], "the template and the machines are not boxes");
+});
+
+test("__defaults may not name a place to write or a Dockerfile", async (t) => {
+  const dir = await temp(t);
+  for (const key of ["rw", "dockerfile"]) {
+    await fs.writeFile(path.join(dir, "boxes.json"), JSON.stringify({ __defaults: { [key]: ["~/x"] }, a: {} }));
+    const out = engine(`
+from broker.box import boxes
+boxes.PATH = ${JSON.stringify(path.join(dir, "boxes.json"))}
+try:
+    boxes.profiles()
+    print("accepted")
+except SystemExit:
+    print("refused")
+`, { HOME: dir });
+    assert.equal(out.trim(), "refused", key);
+  }
+});
+
 test("the box carries the harness's own directory and the project, with the token only in the environment", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");

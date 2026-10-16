@@ -1,6 +1,16 @@
 // All supported box settings. Copy to ~/.config/broker/boxes.json and edit.
 // The broker creates that file only when absent; it never rewrites your edits.
 {
+  // What every box starts from — and all there is to a `--box .`, which needs
+  // no entry: it is the repository you are standing in, read-write, plus this.
+  // A box's own value wins; objects merge key by key, lists add to these.
+  // "rw" and "dockerfile" are refused here: they would apply to every box.
+  "__defaults": {
+    // ~/.gitconfig does not come along, so commits need an author.
+    "env": {"GIT_AUTHOR_NAME": "Me", "GIT_AUTHOR_EMAIL": "me@example.org",
+            "GIT_COMMITTER_NAME": "Me", "GIT_COMMITTER_EMAIL": "me@example.org"}
+  },
+
   // Each path is mounted at the SAME path inside the container, so session
   // history and --resume keep working. A symlinked path comes in under both
   // its own name and the physical one. An object can mount a private host

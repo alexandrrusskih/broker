@@ -8,7 +8,7 @@ import sys
 from ..out import die, warn
 # Imported as modules, not as names: a test that replaces one of these replaces
 # it where it lives, and a bound name here would keep pointing at the original.
-from . import clones, environ, extras, harness, http_mcp, mcp, nested, report, shim
+from . import clones, environ, extras, harness, herdr, http_mcp, mcp, nested, report, shim
 from .mcp import HOST_GATEWAY
 from .paths import _bind, _mount, _paths, expand, home_dir
 
@@ -83,6 +83,10 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     mounted = []
     cmd += extras.tools(binary, image, name, profile, home)
     cmd += extras.gitlab(profile, env, name, home)
+    # The terminal manager, for a box that was told it may reach it. Its own
+    # socket cannot cross into a container on this platform, so the command
+    # crosses instead — see box/herdr.py.
+    cmd += herdr.mount(provider, profile, name)
 
     writable = list(_paths(profile, "rw"))
     for host, target in writable:

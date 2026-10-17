@@ -1,9 +1,13 @@
-"""The terminal manager, reachable from inside a box without its socket.
+"""The terminal manager, reachable from inside a box.
 
-A box that could talk to herdr directly would need its unix socket, and
-Docker Desktop does not carry one of those across the boundary of its virtual
-machine: the mount is refused with "bind source path does not exist" against
-a path that plainly exists. That is its limit, not ours.
+The socket is not the obstacle. Measured, against the claim that stood in this
+docstring before: Docker Desktop does carry herdr's unix socket into a
+container, it arrives as a socket, and a process inside connects to it.
+
+The CLIENT is the obstacle. herdr is a Mach-O arm64 executable, and a Linux
+container has nothing to run it with. So a box holding that socket would have
+nothing able to speak to it, and the alternative — teaching a stand-in herdr's
+own wire protocol — buys a copy of somebody else's protocol to keep in step.
 
 So the socket stays on the host and only the COMMAND crosses, which is the
 shape the MCP bridge already uses. A box gets a stand-in at herdr's own path;
@@ -66,14 +70,35 @@ def _state_file(name):
 
 
 def live(name):
-    """The listener already serving this box, or None."""
+    """The listener already serving this box, or None.
+
+    Alive is not the same as ours: a state file outlives the process it
+    describes and pids come round again, so a box wired to a recycled one
+    would send its arguments to a stranger. The start time recorded when the
+    listener came up settles it.
+    """
+    from ..mcpserve import started
+
     try:
         with open(_state_file(name)) as handle:
             state = json.load(handle)
         os.kill(state["pid"], 0)
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    was = state.get("started")
+    if was and started(state["pid"]) != was:
+        return None
     return state
+
+
+def _stop(state):
+    """Put down a listener of ours, for a box whose rule has changed."""
+    import signal
+
+    try:
+        os.kill(state["pid"], signal.SIGTERM)
+    except (OSError, KeyError, TypeError):
+        pass
 
 
 def allowed(argv, groups):
@@ -125,8 +150,20 @@ def _answer(conn, binary, groups):
 
 
 def serve(name, binary, groups):
-    """Listen on loopback for one box, until nobody comes back for an hour."""
+    """Listen on loopback for one box, for as long as that box may call.
+
+    It used to give up after an hour of silence. That looks thrifty and is
+    wrong: the port and the secret are written INTO the stand-in when the box
+    starts, so a listener that goes away leaves the box holding a dead port
+    with no way to learn a new one. Measured: a box ran from the morning,
+    first asked herdr in the afternoon and got "connection refused" — the
+    listener had closed at 13:32, four hours before the question.
+
+    Living on costs one idle process per box NAME, not per container, because
+    mount() reuses the one it finds. That is a handful on a machine.
+    """
     import secrets
+    from ..mcpserve import started
 
     token = secrets.token_urlsafe(24)
     _answer.token = token
@@ -141,16 +178,14 @@ def serve(name, binary, groups):
     tmp = path + ".new"
     with open(tmp, "w") as handle:
         json.dump({"port": port, "token": token, "pid": os.getpid(),
-                   "groups": sorted(groups)}, handle)
+                   "started": started(os.getpid()), "groups": sorted(groups)},
+                  handle)
     os.chmod(tmp, 0o600)  # it carries the connection secret
     os.replace(tmp, path)
 
-    listener.settimeout(3600)
     while True:
         try:
             conn, _ = listener.accept()
-        except socket.timeout:
-            break  # the box is gone, or has not asked in an hour
         except OSError:
             break
         threading.Thread(target=_answer, args=(conn, binary, groups),
@@ -179,12 +214,30 @@ def mount(provider, profile, name):
         return []
     groups = [ALL] if want is True else [str(g) for g in want]
 
-    binary = expand("~/.local/bin/herdr")
-    if not os.path.exists(binary):
-        warn("this box asks for herdr, which is not installed at %s" % binary)
+    # Ask the system where herdr is, rather than writing a path down here. A
+    # literal is wrong twice over: it is one machine's layout, and it goes
+    # stale the day the tool moves. PATH is extended with the usual place a
+    # user installs into, because the broker may be started by something with
+    # a bare PATH.
+    import shutil
+
+    where = os.pathsep.join([os.environ.get("PATH", ""), expand("~/.local/bin"),
+                             "/opt/homebrew/bin", "/usr/local/bin"])
+    binary = shutil.which("herdr", path=where)
+    if not binary:
+        warn("this box asks for herdr, which is not on the path (%s)" % where)
         return []
 
     state = live(name)
+    # A listener keeps the rule it was started with. Now that it also lives as
+    # long as the machine does, a rule the owner NARROWS in boxes.json would
+    # otherwise never take effect — the old listener would go on answering
+    # under the wider one. So a changed rule replaces the listener. Boxes
+    # already running hold the old port and lose herdr, which is the right
+    # direction to fail when access is being taken away.
+    if state and sorted(state.get("groups") or []) != sorted(groups):
+        _stop(state)
+        state = None
     if not state:
         try:
             subprocess.Popen(

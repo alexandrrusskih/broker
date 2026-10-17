@@ -10,13 +10,14 @@ host a listener accepts one connection per client and hands it a freshly spawned
 server; inside the box a tiny client connects and becomes a pipe. The harness
 sees exactly what it saw before: a command that speaks MCP on stdin and stdout.
 
-Why TCP and not a unix socket: Docker Desktop shares files through a filesystem
-layer that does not carry socket semantics, so a bind-mounted socket cannot be
-connected to from a container. A loopback port can — through
-host.docker.internal — but a loopback port is reachable by every process on the
-machine, so the first line a client sends is a secret handed to it in the
-environment, and a connection that does not match is closed before a server is
-spawned.
+Why TCP and not a unix socket: not because a socket cannot cross. It can, and
+that was measured after this file first claimed otherwise. It is that there is
+no socket to share in the first place — a stdio server is spawned per client,
+one process per connection, so the host end has to listen for connections
+anyway. A loopback port does that, through host.docker.internal, and it is
+reachable by every process on the machine. So the first line a client sends is
+a secret handed to it in the environment, and a connection that does not match
+is closed before a server is spawned.
 """
 
 import hashlib

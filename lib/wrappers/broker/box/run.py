@@ -13,6 +13,25 @@ from .mcp import HOST_GATEWAY
 from .paths import _bind, _mount, _paths, expand, home_dir
 
 
+def _must_exist(name, host):
+    """Refuse a listed path that is not there, and say which it is.
+
+    Directories are the ordinary case, but not the only one a box has a use
+    for: a single file, and a unix socket — the terminal manager's, for a box
+    that is meant to reach it. The check was os.path.isdir, so both were
+    refused with "does not exist" about a path that plainly did, which sends
+    whoever reads it looking for the wrong thing.
+
+    A file bound in this way carries the warning the harness home already
+    carries: a bind mount holds the inode it was given, so a file rewritten
+    atomically out here goes stale inside. For a socket that means a box
+    started before the server restarted is talking to nothing.
+    """
+    if os.path.exists(host):
+        return
+    die("the '%s' box lists %s, which does not exist" % (name, host))
+
+
 def command(provider, name, profile, argv, env, remote=False, companions=()):
     """The full container command line for this run.
 
@@ -67,12 +86,10 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
 
     writable = list(_paths(profile, "rw"))
     for host, target in writable:
-        if not os.path.isdir(host):
-            die("the '%s' box lists %s, which does not exist" % (name, host))
+        _must_exist(name, host)
         cmd += _mount(host, "rw", target)
     for host, target in _paths(profile, "ro"):
-        if not os.path.isdir(host):
-            die("the '%s' box lists %s, which does not exist" % (name, host))
+        _must_exist(name, host)
         cmd += _mount(host, "ro", target)
 
     # Where work happens: the paths as the box sees them.

@@ -53,16 +53,23 @@ def _clone(source, destination):
 #           inserts the family into oauth_revoked: "Replaying a refresh token
 #           revokes the entire family, including its successor."
 #
-# So the list is an allowlist and the default is to leave a login where it was
-# made. Adding a server means reading its token endpoint first, not guessing.
+# So it is an allowlist, the default is to leave a login where it was made,
+# and it belongs to the BOX rather than to this file: which servers a given
+# box may carry a login for is a decision about that box, and hard-coding one
+# project's URL in the engine was wrong. Declare it per box:
+#
+#   "shareLogins": ["https://your-server.example/"]
+#
+# Adding a server there means reading its token endpoint first, not guessing.
 # The real answer for the rest is for the broker to hold the refresh token
 # itself and hand out only access tokens, which is one holder by construction.
-SHAREABLE = ("https://ntk.otion.us/",)
+def _shareable(server, allowed):
+    """Whether this server's login may exist in two places at once.
 
-
-def _shareable(server):
-    """Whether this server's login may exist in two places at once."""
-    return isinstance(server, str) and server.startswith(SHAREABLE)
+    `allowed` is what the box declared. Nothing is shared unless it says so,
+    and it names URL prefixes because that is how the store keys its entries.
+    """
+    return bool(allowed) and isinstance(server, str) and server.startswith(tuple(allowed))
 
 
 def _entries(path):
@@ -101,7 +108,7 @@ def _later(mine, theirs):
     return when(mine) > when(theirs)
 
 
-def _carry_back(real, name):
+def _carry_back(real, name, allowed):
     """Fold what boxes authorized into the host's own store.
 
     A box gets a CLONE of this file, because the harness rewrites it whole and
@@ -129,8 +136,8 @@ def _carry_back(real, name):
         if not theirs:
             continue
         for server, entry in theirs.items():
-            if not _shareable(server):
-                continue  # its login stays where it was made; see SHAREABLE
+            if not _shareable(server, allowed):
+                continue  # its login stays where it was made; see _shareable
             if server not in merged or _later(entry, merged[server]):
                 merged[server] = entry
                 changed.append("%s from %s" % (server, box))
@@ -146,7 +153,7 @@ def _carry_back(real, name):
          % (len(changed), os.path.basename(real), ", ".join(changed)))
 
 
-def _mirror_out(real, name, mine):
+def _mirror_out(real, name, mine, allowed):
     """Put the host's store into the clone of every box already running.
 
     The other half of transparency. A clone is taken when a box starts, so a
@@ -169,7 +176,7 @@ def _mirror_out(real, name, mine):
     host = _entries(real)
     if host is None:
         return
-    offer = {server: entry for server, entry in host.items() if _shareable(server)}
+    offer = {server: entry for server, entry in host.items() if _shareable(server, allowed)}
     if not offer:
         return
     root = os.path.join(config.CONFIG_DIR, "box", "private")
@@ -274,6 +281,8 @@ def private(provider, profile, env, name):
     # file — every profile's copy is a symlink to the same one — mounted at each
     # name the harness might open it by.
     private = getattr(provider, "BOX_PRIVATE", ())
+    # Which servers this box may carry a login for, declared by the box.
+    share = [str(u) for u in ((profile or {}).get("shareLogins") or [])]
     home_env_now = getattr(provider, "HOME_ENV", None)
     in_use = (env or {}).get(home_env_now) if home_env_now and home_env_now != "HOME" else None
     if private:
@@ -300,13 +309,13 @@ def private(provider, profile, env, name):
                             # and the others belong to boxes that have since
                             # exited. This is what makes a login transparent
                             # in both directions.
-                            _carry_back(real, provider.NAME)
+                            _carry_back(real, provider.NAME, share)
                             # Fresh every start: cloning costs nothing, and a
                             # stale copy is worse than none.
                             _clone(real, copy)
                             # And outwards, to the boxes already running, so a
                             # login does not wait for their next start.
-                            _mirror_out(real, provider.NAME, copy)
+                            _mirror_out(real, provider.NAME, copy, share)
                         except OSError as exc:
                             warn("could not give the box its own %s (%s)" % (os.path.basename(real), exc))
                             continue

@@ -26,8 +26,9 @@ function engine(home, code) {
 
 const entry = (expiry) => ({ token: { access_token: "a", expiry } });
 
-// Two servers whose logins MAY be held in more than one place — see SHAREABLE
-// in clones.py. The last test covers one that may not.
+// Two servers whose logins MAY be held in more than one place. Which ones
+// those are is declared by the BOX, as shareLogins; the tests pass that list
+// in. The last test covers a server the box did not name.
 const one = "https://ntk.otion.us/mcp-claude";
 const two = "https://ntk.otion.us/mcp-agy";
 
@@ -52,7 +53,7 @@ test("a login made inside a box reaches the host, and the host's wins when it is
   // A second box holds an OLDER ntk, which must not be pushed backwards.
   await store(clone("m"), { [one]: entry("2026-10-15T01:00:00Z") });
 
-  engine(home, `clones._carry_back(${JSON.stringify(host)}, 'agy')`);
+  engine(home, `clones._carry_back(${JSON.stringify(host)}, 'agy', ['https://ntk.otion.us/'])`);
 
   const merged = JSON.parse(await fs.readFile(host, "utf8"));
   assert.deepEqual(Object.keys(merged).sort(), [one, two].sort(),
@@ -74,7 +75,7 @@ test("a box already running sees a new login without being restarted", async (t)
   // blind to this.
   const before = (await fs.stat(running)).ino;
 
-  engine(home, `clones._mirror_out(${JSON.stringify(host)}, 'agy', None)`);
+  engine(home, `clones._mirror_out(${JSON.stringify(host)}, 'agy', None, ['https://ntk.otion.us/'])`);
 
   const seen = JSON.parse(await fs.readFile(running, "utf8"));
   assert.deepEqual(Object.keys(seen).sort(), [one, two].sort(), "the new login arrived");
@@ -98,15 +99,14 @@ test("neither half touches anything that is not a store of logins", async (t) =>
   }
   // And a run over them changes nothing.
   const was = await fs.readFile(db);
-  engine(home, `clones._carry_back(${JSON.stringify(db)}, 'agy')`);
+  engine(home, `clones._carry_back(${JSON.stringify(db)}, 'agy', ['https://ntk.otion.us/'])`);
   assert.deepEqual(await fs.readFile(db), was, "the database is byte-for-byte untouched");
 });
 
 // A refresh token that is single-use cannot be copied: the second holder
-// presents one the server has already consumed, and joppa revokes the whole
-// family for it — "Replaying a refresh token revokes the entire family,
-// including its successor" (src/mcp_oauth.rs). So sharing is an allowlist, and
-// a server that is not on it keeps its login where it was made.
+// presents one the server has already consumed, and a server that detects
+// that revokes the whole family. So sharing is an allowlist the box declares,
+// and a server it does not name keeps its login where it was made.
 test("a login that cannot be held twice is left where it was made", async (t) => {
   const home = await temp(t);
   const host = path.join(home, "mcp_oauth_tokens.json");
@@ -118,13 +118,13 @@ test("a login that cannot be held twice is left where it was made", async (t) =>
   await store(host, { [ntk]: entry("2026-10-16T20:00:00Z"), [joppa]: entry("2026-10-16T20:00:00Z") });
   await store(clone, { [ntk]: entry("2026-10-16T23:00:00Z"), [joppa]: entry("2026-10-17T10:00:00Z") });
 
-  engine(home, `clones._carry_back(${JSON.stringify(host)}, 'agy')`);
+  engine(home, `clones._carry_back(${JSON.stringify(host)}, 'agy', ['https://ntk.otion.us/'])`);
   const after = JSON.parse(await fs.readFile(host, "utf8"));
   assert.equal(after[ntk].token.expiry, "2026-10-16T23:00:00Z", "ntk travels");
   assert.equal(after[joppa].token.expiry, "2026-10-16T20:00:00Z",
     "joppa does not: a second holder would revoke the family");
 
-  engine(home, `clones._mirror_out(${JSON.stringify(host)}, 'agy', None)`);
+  engine(home, `clones._mirror_out(${JSON.stringify(host)}, 'agy', None, ['https://ntk.otion.us/'])`);
   const inBox = JSON.parse(await fs.readFile(clone, "utf8"));
   assert.equal(inBox[joppa].token.expiry, "2026-10-17T10:00:00Z",
     "and the box keeps the joppa login it made itself, rather than losing it to the host's");

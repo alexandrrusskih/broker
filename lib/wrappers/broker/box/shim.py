@@ -109,6 +109,68 @@ SHIM_TEMPLATE_JS = "\n".join([
     "",
 ])
 
+# One command, several servers. mcp-remote is the case this exists for: every
+# remote MCP server is reached by the same binary and differs only in the URL
+# it is given, so a shim mounted at that binary's path has to serve them all.
+# It picks by the arguments it is called with, which is exactly what the
+# harness already passes.
+SHIM_TEMPLATE_MANY = "\n".join([
+    "#!/usr/bin/env python3",
+    "# Written by the broker: these servers run on the host; this is the wire.",
+    "import json, socket, sys, threading",
+    "HOST = %(host)s",
+    "# argv of the server, as the harness calls it -> the listener for it.",
+    "ROUTES = json.loads(%(routes)s)",
+    "",
+    "",
+    "def pump(src, dst, done=None):",
+    "    try:",
+    "        while True:",
+    "            if hasattr(src, 'recv'):",
+    "                chunk = src.recv(65536)",
+    "            else:",
+    "                chunk = src.read1(65536) if hasattr(src, 'read1') else src.read(65536)",
+    "            if not chunk:",
+    "                break",
+    "            if hasattr(dst, 'sendall'):",
+    "                dst.sendall(chunk)",
+    "            else:",
+    "                dst.write(chunk)",
+    "                dst.flush()",
+    "    except (OSError, ValueError):",
+    "        pass",
+    "    finally:",
+    "        if done:",
+    "            try:",
+    "                done()",
+    "            except OSError:",
+    "                pass",
+    "",
+    "",
+    "want = json.dumps(sys.argv[1:])",
+    "route = ROUTES.get(want)",
+    "if route is None and len(ROUTES) == 1:",
+    "    # Called with arguments nobody declared, and only one server lives",
+    "    # here: that is who was meant, and guessing beats refusing.",
+    "    route = list(ROUTES.values())[0]",
+    "if route is None:",
+    "    sys.stderr.write('broker bridge: no server declared for %%s\\n' %% want)",
+    "    raise SystemExit(1)",
+    "",
+    "addresses = socket.getaddrinfo(HOST, route['port'], socket.AF_INET, socket.SOCK_STREAM)",
+    "family, kind, proto, _, address = addresses[0]",
+    "with socket.socket(family, kind, proto) as conn:",
+    "    conn.connect(address)",
+    "    conn.sendall(route['token'].encode() + b'\\n')",
+    "    inp = threading.Thread(target=pump,",
+    "                           args=(sys.stdin.buffer, conn,",
+    "                                 lambda: conn.shutdown(socket.SHUT_WR)),",
+    "                           daemon=True)",
+    "    inp.start()",
+    "    pump(conn, sys.stdout.buffer)",
+    "",
+])
+
 SHIM_TEMPLATES = {"py": SHIM_TEMPLATE, "js": SHIM_TEMPLATE_JS}
 
 
@@ -149,6 +211,33 @@ def _write(path, name, live, lang="py"):
     with open(tmp, "w") as fh:
         fh.write(body)
     os.chmod(tmp, 0o700)  # it carries the connection secret
+    os.replace(tmp, path)
+    return path
+
+
+
+def _write_shim_many(provider, target, routes):
+    """One shim for every server that shares a command, keyed by its argv.
+
+    `routes` maps a server name to (argv-after-the-command, live listener).
+    The file is named after the command rather than a server, because that is
+    what it stands in for, and still carries the window key for the reason
+    _write_shim gives.
+    """
+    from .paths import window_key
+
+    directory = os.path.join(config.CONFIG_DIR, "box", "shims", provider.NAME)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    table = {json.dumps(list(argv)): {"port": live["port"], "token": live["token"]}
+             for _, (argv, live) in sorted(routes.items())}
+    body = SHIM_TEMPLATE_MANY % {"host": repr(HOST_GATEWAY),
+                                 "routes": repr(json.dumps(table, sort_keys=True))}
+    path = os.path.join(directory, "%s-%s"
+                        % (os.path.basename(target).replace("/", "_"), window_key()))
+    tmp = path + ".new"
+    with open(tmp, "w") as fh:
+        fh.write(body)
+    os.chmod(tmp, 0o700)  # it carries the connection secrets
     os.replace(tmp, path)
     return path
 

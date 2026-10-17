@@ -209,23 +209,37 @@ def _harness(provider, profile, env, name, remote, mounted, projects, claimed, i
     # left alone; the box can dial them itself.
     if profile.get("mcp") is False:
         return args
+    # Several servers can share one command and differ only in its arguments —
+    # every remote MCP server reached through mcp-remote does. A shim is
+    # mounted at the command's path, so there is one shim for all of them, and
+    # it tells them apart by the arguments it is handed.
+    by_command = {}
     for server_name, server in sorted(mcp.mcp_servers(provider, env).items()):
-        target = server["command"][0]
+        by_command.setdefault(server["command"][0], []).append((server_name, server))
+
+    for target, group in sorted(by_command.items()):
         if target in claimed:
             # The same server declared by another harness in this box is the
             # same server: its shim is already there.
-            if claimed[target] != server_name:
-                warn("%s and %s start from the same command (%s) — only the first is bridged"
-                     % (claimed[target], server_name, target))
             continue
-        live = mcp._start_bridge(server_name, server, profile, projects)
-        if not live:
+        routes = {}
+        for server_name, server in group:
+            live = mcp._start_bridge(server_name, server, profile, projects)
+            if not live:
+                continue
+            for variable in server.get("inherit") or []:
+                if os.environ.get(variable) and variable not in inherited:
+                    inherited[variable] = os.environ[variable]
+            routes[server_name] = (tuple(server["command"][1:]), live)
+        if not routes:
             continue
-        for variable in server.get("inherit") or []:
-            if os.environ.get(variable) and variable not in inherited:
-                inherited[variable] = os.environ[variable]
-        claimed[target] = server_name
-        args += _bind(shim._write_shim(provider, server_name, live), target, "ro")
+        claimed[target] = ", ".join(sorted(routes))
+        if len(routes) == 1:
+            only = list(routes)[0]
+            written = shim._write_shim(provider, only, routes[only][1])
+        else:
+            written = shim._write_shim_many(provider, target, routes)
+        args += _bind(written, target, "ro")
     return args
 
 

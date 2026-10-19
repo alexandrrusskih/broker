@@ -152,6 +152,18 @@ def companion(base, env):
     return args
 
 
+def harness_box(provider):
+    """What a harness needs set only INSIDE a box, declared by the provider.
+
+    The counterpart of BOX_ARGS, for a harness whose permission model has no
+    flag to pass. Before own() below, so a box can still override it by name.
+    """
+    args = []
+    for key, value in sorted((getattr(provider, "BOX_ENV", None) or {}).items()):
+        args += ["-e", "%s=%s" % (key, value)]
+    return args
+
+
 def own(profile):
     """What the box sets for itself. Last, so it wins over everything above."""
     args = []

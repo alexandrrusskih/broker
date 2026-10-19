@@ -128,6 +128,12 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
         # need to be told, and saying it twice costs nothing.
         cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
 
+    # What each harness needs set only inside a box — a flag for most of them,
+    # a variable for one that has no flag. See environ.harness_box.
+    cmd += environ.harness_box(provider)
+    for other, _carried in companions:
+        cmd += environ.harness_box(other)
+
     cmd += environ.own(profile)
 
     # The one place a box may say which chat is in it. See box/report.py: the

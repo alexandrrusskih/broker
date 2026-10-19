@@ -73,12 +73,10 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     # and refuses to run at all. Read-only mounts land on top of this.
     cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
             % (os.path.join(home, ".config"), os.getuid(), os.getgid())]
-    # Bun's shared cache is mounted at ~/.bun/install/cache. Without these
-    # parent tmpfs mounts Docker creates ~/.bun and ~/.bun/install as root,
-    # leaving `bun link` unable to create install/global as the box user.
-    for directory in ("~/.bun", "~/.bun/install"):
-        cmd += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
-                % (expand(directory), os.getuid(), os.getgid())]
+    # Every other directory a mount point needs above it — ~/.bun for a bun
+    # cache at ~/.bun/install/cache, ~/.cache for a session database below it —
+    # is derived from the mounts themselves at the end of this function. See
+    # _parents: named by hand, one of them is always the one nobody named yet.
 
     mounted = []
     cmd += extras.tools(binary, image, name, profile, home)
@@ -142,6 +140,10 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     # be able to choose. Docker takes the LAST -e for a repeated name, so this
     # is the last word.
     cmd += report.flags(name)
+
+    # ...and the directories the mounts above would otherwise have the container
+    # create for itself. Last, so it sees every mount any part of this made.
+    cmd += _parents(cmd, home)
 
     cmd.append(image)
     cmd.append("broker-box-entry")
@@ -244,6 +246,56 @@ def _harness(provider, profile, env, name, remote, mounted, projects, claimed, i
         else:
             written = shim._write_shim_many(provider, target, routes)
         args += _bind(written, target, "ro")
+    return args
+
+
+def _parents(cmd, home):
+    """Claim each directory a mount point's own parents would create as root.
+
+    Docker makes a missing mount point and every parent above it itself, owned
+    by root. Under a box's home that is a directory the box then cannot write
+    to, and the failure names the child rather than the cause: "EACCES:
+    permission denied, mkdir".
+
+    Measured on finik, where six boxes of twelve had ~/.cache owned by
+    root:root — the codex session database is mounted at
+    ~/.cache/broker-box/codex-db/<id>, so the container made ~/.cache on the
+    way to it, and a gate that wanted ~/.cache/finik/pre-push-gates could not
+    have it.
+
+    This was being cured one path at a time: ~/.bun and ~/.bun/install above,
+    ~/.config above that, and a provider's own BOX_WRITABLE list. Every new
+    mount deep under home is then the same bug again, found by whoever it
+    breaks. The parents are derivable from the mounts themselves, so derive
+    them.
+
+    Only under home, and only where nothing is mounted already: a directory
+    inside a bind-mounted project is the HOST's, and a tmpfs over it would hide
+    what is really there. Everything else below home sits on the home tmpfs and
+    is empty regardless, so claiming it hides nothing.
+    """
+    binds, taken = set(), set()
+    for flag, value in zip(cmd, cmd[1:]):
+        target = _target(flag, value)
+        if not target:
+            continue
+        taken.add(target)
+        if flag == "--mount":
+            binds.add(target)
+
+    want = set()
+    for target in taken:
+        parent = os.path.dirname(target)
+        while parent.startswith(home + os.sep):
+            want.add(parent)
+            parent = os.path.dirname(parent)
+
+    args = []
+    for directory in sorted(want - taken):
+        if any(directory.startswith(bind + os.sep) for bind in binds):
+            continue
+        args += ["--tmpfs", "%s:uid=%d,gid=%d,mode=0700,exec"
+                 % (directory, os.getuid(), os.getgid())]
     return args
 
 

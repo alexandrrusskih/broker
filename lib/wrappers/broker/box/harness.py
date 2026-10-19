@@ -67,7 +67,12 @@ def own_home(provider, profile, env, name, mounted):
             settings_mounted.add(host)
             continue
         if os.path.isdir(host):
-            args += _mount(host)
+            # A directory named in BOX_SETTINGS travels read-only, same as a
+            # file does below. That is for a directory of CODE the host runs
+            # too: opencode loads ~/.config/opencode/plugins by convention, so
+            # a box able to write there could leave a line for the host's own
+            # opencode to run at its next start.
+            args += _mount(host, "ro" if entry in getattr(provider, "BOX_SETTINGS", ()) else "rw")
             mounted.append(host)
             continue
         copy = os.path.join(config.CONFIG_DIR, "box", "files", name.replace("/", "_"),

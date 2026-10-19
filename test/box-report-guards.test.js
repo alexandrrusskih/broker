@@ -187,3 +187,51 @@ print("STILL", os.path.isdir(idle))
   assert.match(out, /ALIVE True/);
   assert.match(out, /STILL True/);
 });
+
+test("a box is not told which pane launched it, however the launcher was started", async (t) => {
+  const dir = await temp(t);
+  const project = path.join(dir, "project");
+  await fs.mkdir(project, { recursive: true });
+  await fs.mkdir(path.join(dir, ".claude"), { recursive: true });
+
+  // The whole family, as a real herdr pane sets them, plus the multiplexers.
+  // This is the same guarantee the test above makes about the report
+  // directory, from the other side: there the box must not CHOOSE a pane, here
+  // it must not be HANDED one. It was handed one — an opencode box registered
+  // on the bus reporting "pane": "wA:p3", the pane of the chat that ran it.
+  const place = { HERDR_PANE_ID: "wA:p3", HERDR_TAB_ID: "wA:t3", HERDR_WORKSPACE_ID: "wA" };
+  // What is NOT withheld, and the absence is the point. The socket does not
+  // cross into a container, so inside this is a dead path; and no other
+  // multiplexer runs on these machines, so there is nothing to measure and
+  // nothing to withhold. A list of guesses is the list that gets ignored.
+  const harmless = { HERDR_SOCKET_PATH: path.join(dir, "herdr.sock"), TMUX_PANE: "%7" };
+
+  // The real launcher hands command() os.environ (box.exec_box does), so the
+  // test has to as well: given a small dict instead, carried() has nothing to
+  // carry and every assertion below passes without the code doing anything.
+  const out = engine(`
+import json, os
+from broker.box import boxes
+from broker.box.run import command
+from broker.providers import claude
+os.chdir("${project}")
+env = dict(os.environ)
+env["CLAUDE_CODE_OAUTH_TOKEN"] = "t"
+cmd = command(claude, "demo", {"rw": ["${project}"]}, ["--version"], env)
+print(json.dumps([p for i, p in enumerate(cmd) if cmd[i - 1] == "-e"]))
+`, { ...box(dir), ...place, ...harmless, BROKER_REAL_HOME: dir });
+
+  const carried = JSON.parse(out);
+  for (const name of Object.keys(place)) {
+    assert.ok(!carried.some((p) => p.startsWith(name + "=")),
+      `${name} names the terminal this run came from, and a box that can name a pane can be woken in place of the agent in it`);
+  }
+  // ...while what the box legitimately needs still arrives: it may know THAT
+  // it is a box and which one, because a hook inside has to behave differently.
+  for (const name of Object.keys(harmless)) {
+    assert.ok(carried.some((p) => p.startsWith(name + "=")),
+      `${name} is withheld for no harm anyone can demonstrate, and a list of guesses gets ignored`);
+  }
+  assert.ok(carried.some((p) => p === "BROKER_BOX=demo"), "a box still knows it is one");
+  assert.ok(carried.some((p) => p.startsWith("TERM=")), "and the terminal still works");
+});

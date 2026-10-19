@@ -50,7 +50,21 @@ BOX_ENV = {
 #   "codebase-memory": { "type": "local", "command": ["/path/to/server"],
 #                        "environment": {...} }
 MCP_CONFIG = ("~/.config/opencode/opencode.jsonc", "jsonc", "mcp")
-BOX_SETTINGS = ("~/.config/opencode/opencode.jsonc",)
+# Its plugins, which are how it reaches the bus and reports its state to the
+# terminal manager. They are loaded by CONVENTION — the config says
+# "plugin": [], and the directory is read anyway — so nothing in the config
+# hints that they matter, and a box without them looks like a working box that
+# simply never answers. Measured: an opencode box got opencode.jsonc and an
+# empty tmpfs where this directory should be, so agntbus could be called but
+# could not call back, and the pane reported no state at all.
+#
+# Read-only, with the directory listed in BOX_SETTINGS below. This is code the
+# HOST runs as well, and a box able to rewrite it could leave a line for the
+# host's own opencode to run at its next start.
+BOX_HOME = ("~/.config/opencode/plugins",)
+
+BOX_SETTINGS = ("~/.config/opencode/opencode.jsonc",
+                "~/.config/opencode/plugins")
 
 # One SQLite database for every session it has ever had — a gigabyte of it
 # here. Shared across the container boundary it would tear: the journal lives

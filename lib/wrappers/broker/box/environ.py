@@ -15,6 +15,28 @@ from .paths import window_key
 TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
                 "LANG", "LC_ALL", "LC_CTYPE")
 
+# Variables that name the TERMINAL this run came from: the pane, the tab, the
+# window, the multiplexer's own socket. A box is never told any of them.
+#
+# box/report.py is careful about precisely this — a box may say WHICH BOX it is
+# and nothing more, because a box able to name a pane can be taken for the
+# agent sitting in that pane, and a wake aimed there reaches the wrong one.
+# Then carried() handed the same facts over anyway, straight out of the
+# launching shell, and nobody had to ask for them.
+#
+# Measured, not feared: an opencode box registered on the bus reporting
+# "pane": "wA:p3" — the pane of the chat that started it, not its own. It had
+# HERDR_PANE_ID, HERDR_TAB_ID and HERDR_WORKSPACE_ID in its environment.
+#
+# These three and nothing else. The first draft of this listed tmux, kitty,
+# wezterm, zellij, iTerm and the socket path of each, for symmetry — none of
+# which runs here, so none of which could be measured, and a rule kept for a
+# harm nobody can demonstrate is the rule that gets ignored on the day one
+# matters. A socket path is not in it either: no multiplexer's socket crosses
+# into a container, so inside it is a dead path and nothing can be done with
+# it. Add a name here when a box is seen reporting it.
+PLACE = {"HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID"}
+
 # Left out of what a box carries: see carried() below.
 OWN = {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "PWD", "OLDPWD", "TMPDIR",
        "SHLVL", "_", "XPC_SERVICE_NAME", "XPC_FLAGS", "__CF_USER_TEXT_ENCODING",
@@ -56,7 +78,8 @@ def carried(profile, env, home, box):
         return True
 
     for variable, value in sorted((env or os.environ).items()):
-        if variable in OWN or variable.startswith("BROKER_") or not wanted(variable):
+        if (variable in OWN or variable in PLACE
+                or variable.startswith("BROKER_") or not wanted(variable)):
             continue
         if "\n" in value or "\0" in value:
             continue  # docker takes one line per variable

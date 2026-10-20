@@ -188,17 +188,19 @@ print("STILL", os.path.isdir(idle))
   assert.match(out, /STILL True/);
 });
 
-test("a box is not told which pane launched it, however the launcher was started", async (t) => {
+test("a box is told which pane it runs in, so the bus can wake it", async (t) => {
   const dir = await temp(t);
   const project = path.join(dir, "project");
   await fs.mkdir(project, { recursive: true });
   await fs.mkdir(path.join(dir, ".claude"), { recursive: true });
 
-  // The whole family, as a real herdr pane sets them, plus the multiplexers.
-  // This is the same guarantee the test above makes about the report
-  // directory, from the other side: there the box must not CHOOSE a pane, here
-  // it must not be HANDED one. It was handed one — an opencode box registered
-  // on the bus reporting "pane": "wA:p3", the pane of the chat that ran it.
+  // The whole family, as a real herdr pane sets them. 0.9.13 withheld these,
+  // and the fleet stopped being woken: the bus had a chat id, no pane, and so
+  // created no wake route at all — three agents sat on eight unread messages
+  // for a day. A box has no pane of its own; it runs IN the terminal the
+  // launcher was typed in, so this IS its pane and the hook tells the truth.
+  // Guarding against a forged pane is the bus's job, because `_session.pane`
+  // is an unsigned call argument either way.
   const place = { HERDR_PANE_ID: "wA:p3", HERDR_TAB_ID: "wA:t3", HERDR_WORKSPACE_ID: "wA" };
   // What is NOT withheld, and the absence is the point. The socket does not
   // cross into a container, so inside this is a dead path; and no other
@@ -223,10 +225,10 @@ print(json.dumps([p for i, p in enumerate(cmd) if cmd[i - 1] == "-e"]))
 
   const carried = JSON.parse(out);
   for (const name of Object.keys(place)) {
-    assert.ok(!carried.some((p) => p.startsWith(name + "=")),
-      `${name} names the terminal this run came from, and a box that can name a pane can be woken in place of the agent in it`);
+    assert.ok(carried.some((p) => p.startsWith(name + "=")),
+      `${name} has to reach the box: without it the bus gets no pane, builds no wake route, and the box is never woken`);
   }
-  // ...while what the box legitimately needs still arrives: it may know THAT
+  // ...along with the rest of what the box legitimately needs: it may know THAT
   // it is a box and which one, because a hook inside has to behave differently.
   for (const name of Object.keys(harmless)) {
     assert.ok(carried.some((p) => p.startsWith(name + "=")),

@@ -237,8 +237,24 @@ def exec_box(provider, asked, argv, env, account=None):
                 # mid-word, the harness's own resume line tangled into ours.
                 # fd 1 is flushed first so what the harness said still lands
                 # before what we say about it.
+                #
+                # That was not enough. A harness can leave the cursor PART WAY
+                # along a line — codex ends with "To continue this session,
+                # run:" and no newline — and our text then lands welded to it.
+                # Measured, from the owner's screen:
+                #
+                #   Resume it in this box with:un:
+                #
+                # our first line with the tail of codex's "run:" hanging off it.
+                # So erase the line the cursor is sitting on before writing.
+                # Only on a terminal: these are escape codes, and in a file or a
+                # pipe they would be noise in the one record of the session id.
                 sys.stdout.flush()
-                sys.stderr.write(text)
+                try:
+                    clear = "\r\033[2K" if sys.stderr.isatty() else ""
+                except (AttributeError, ValueError):
+                    clear = ""
+                sys.stderr.write(clear + text)
                 sys.stderr.flush()
             except (OSError, ValueError):
                 pass

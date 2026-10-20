@@ -212,3 +212,29 @@ test("a connector for a host caller dials what the listener bound, not the conta
   assert.match(refused, /--target takes 'host' or 'container'/,
     "an unknown target is named, not silently treated as one of them");
 });
+
+test("a CommonJS connector is refused a .mjs path, where it could only fail later", async (t) => {
+  const home = await temp(t);
+  t.after(() => stopListeners(home));
+  await fs.mkdir(path.join(home, "run-esm"), { recursive: true });
+
+  // .mjs is an ES module ALWAYS — the directory's package.json does not enter
+  // into it — and this connector calls require(). Accepted, it dies at run time
+  // with "require is not defined in ES module scope", which names neither this
+  // command nor the flag behind it. Crew lost a launch to exactly that.
+  let refused = "";
+  try {
+    cli(home, ["box", "connect", "probe", "--out", path.join(home, "run-esm", "probe.mjs"),
+      "--lang", "js", "--", "cat"], { stdio: "pipe" });
+  } catch (error) {
+    refused = String(error.stderr || error.message);
+  }
+  assert.match(refused, /ES module/, "the refusal says what is wrong");
+  assert.match(refused, /\.cjs/, "and what to use instead");
+
+  // ...while the extension that works is written as before.
+  const good = path.join(home, "run-esm", "probe.cjs");
+  cli(home, ["box", "connect", "probe", "--out", good, "--lang", "js", "--", "cat"]);
+  assert.match(await fs.readFile(good, "utf8"), /require\("node:net"\)|require\(/,
+    "a .cjs connector is still the CommonJS one Crew runs");
+});

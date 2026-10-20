@@ -69,6 +69,11 @@ def main(provider_name, argv=None):
 
     # `login`/`logout`/`update` are about the installation, not about running
     # work: they must reach the harness untouched, without picking an account.
+    # A bare `update` is ours: the harness's own updater cannot tell how it was
+    # installed once we start it directly (see run.update_harness). With arguments
+    # it is the harness's business and goes through untouched.
+    if argv == ["update"] and hasattr(provider, "update_methods"):
+        return run.update_harness(provider)
     if argv and argv[0] in provider.PASSTHROUGH:
         return run.exec_passthrough(provider, argv)
 

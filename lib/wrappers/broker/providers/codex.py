@@ -6,6 +6,7 @@ Everything else in the package is provider-agnostic and works off this table.
 
 import os
 import re
+import shutil
 import urllib.parse
 
 from . import codex_db, codex_usage
@@ -189,6 +190,50 @@ SHARED_GLOBS = ("*.sqlite",)
 # revoke whichever account the picker landed on), and purely local questions —
 # asking for --help must not depend on the broker, or the network, being up.
 PASSTHROUGH = ("login", "logout", "update", "--help", "-h", "--version", "-V", "help")
+
+# How `update` reaches the real binary, in the order worth trying. codex's own
+# updater picks its method from environment its JS launcher sets
+# (CODEX_MANAGED_BY_NPM and friends) and, failing that, from where the binary sits.
+# The wrapper starts the vendored binary directly, to skip that launcher, so the
+# variables are never set and a Homebrew-prefix npm install looks like a brew cask:
+# `brew upgrade --cask codex` against a cask that does not exist.
+#
+# So the install is recognised here, from the path, and updated with the tool that
+# put it there. The last entry is always codex's own `update`, for what nothing above
+# recognised.
+PACKAGE = "@openai/codex"
+
+
+def update_methods(target):
+    """[(name, argv)] to try for `update`, most specific first."""
+    real = os.path.realpath(target)
+    methods = []
+
+    def offered(tool, name, argv):
+        if shutil.which(tool):
+            methods.append((name, argv))
+
+    npm_root = re.match(r"^(.*?/node_modules)/@openai/codex(/|$)", real)
+    if npm_root:
+        modules = npm_root.group(1)
+        if "/.bun/install/global/" in real:
+            offered("bun", "bun", ["bun", "install", "-g", PACKAGE + "@latest"])
+        elif "/pnpm/" in real:
+            offered("pnpm", "pnpm", ["pnpm", "add", "-g", PACKAGE + "@latest"])
+        else:
+            # --prefix names the install we are actually running: the npm on PATH
+            # may belong to a different node than the one this codex came from.
+            prefix = modules[: -len("/lib/node_modules")] if modules.endswith("/lib/node_modules") else None
+            argv = ["npm", "install", "-g"] + (["--prefix", prefix] if prefix else []) + [PACKAGE + "@latest"]
+            offered("npm", "npm", argv)
+    if "/Caskroom/" in real:
+        offered("brew", "brew cask", ["brew", "upgrade", "--cask", "codex"])
+    if os.sep + os.path.join("packages", "standalone") + os.sep in real:
+        methods.append(("standalone", [target, "update"]))
+    if not any(argv == [target, "update"] for _, argv in methods):
+        methods.append(("codex update", [target, "update"]))
+    return methods
+
 
 # What a box implies about how the harness may run. The bypass flag's own help
 # says it is "intended solely for running in environments that are externally

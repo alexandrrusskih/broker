@@ -1,6 +1,7 @@
 """Handing control to the real harness binary."""
 
 import os
+import subprocess
 import sys
 
 from . import credentials, profile
@@ -191,3 +192,52 @@ def exec_passthrough(provider, argv):
         os.environ["PATH"] = _path_without_shim(provider, target)
     os.execv(target, [provider.BIN] + argv)
     sys.exit(0)
+
+
+def _version(target):
+    try:
+        out = subprocess.run([target, "--version"], capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.strip().splitlines()[0] if out.strip() else None
+
+
+def update_harness(provider):
+    """Update the real harness: walk the provider's ways of doing it until one works.
+
+    A provider that knows its installs (`update_methods`) is updated with the tool
+    that put it there; one that does not gets its own `update`, as before. The
+    harness's own updater is the last resort rather than the only try, because it
+    guesses the install from where the binary sits, and a wrapper that starts the
+    binary directly gives it nothing else to go on.
+
+    Returns an exit code; the caller decides what a failure costs.
+    """
+    target = real_bin(provider)
+    if not target:
+        warn("cannot find the real %s — is it installed?" % provider.BIN)
+        return 1
+    methods = getattr(provider, "update_methods", lambda t: [("update", [t, "update"])])(target)
+    env = dict(os.environ)
+    # Shield only where the ways are ours to choose: a provider without
+    # update_methods is updated exactly as it was before this walk existed.
+    if hasattr(provider, "update_methods") and getattr(provider, "PATH_SHIELD", True):
+        env["PATH"] = _path_without_shim(provider, target)
+    before = _version(target)
+    failed = []
+    for name, argv in methods:
+        warn("updating via %s: %s" % (name, " ".join(argv)))
+        try:
+            code = subprocess.call(argv, env=env)
+        except OSError as exc:
+            warn("%s could not start: %s" % (name, exc))
+            code = 127
+        if code == 0:
+            after = _version(real_bin(provider) or target)
+            warn("%s: %s → %s" % (provider.BIN, before or "?", after or "?") if before != after
+                 else "%s: already current (%s)" % (provider.BIN, after or "?"))
+            return 0
+        failed.append(name)
+        warn("%s failed (exit %d)%s" % (name, code, " — trying the next way" if name != methods[-1][0] else ""))
+    warn("no way to update %s worked: %s" % (provider.BIN, ", ".join(failed)))
+    return 1

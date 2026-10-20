@@ -130,13 +130,9 @@ def cmd_upgrade(cfg, provider, args):
     else:
         warn("broker CLI not in PATH — %s was left as it is" % os.path.basename(sys.argv[0]))
 
-    from .run import real_bin
+    from .run import update_harness
 
-    target = real_bin(provider)
-    if target:
-        failed += 1 if run([target, "update"]) else 0
-    else:
-        warn("cannot find the real %s — skipping its update" % provider.BIN)
+    failed += 1 if update_harness(provider) else 0
 
     # The harness's own updater just rewrote the native name, taking the shim with
     # it. Put it back — a no-op when no shim was installed in the first place.

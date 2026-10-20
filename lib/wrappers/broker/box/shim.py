@@ -193,19 +193,35 @@ def _write_shim(provider, name, live):
                   name, live)
 
 
-def _write(path, name, live, lang="py"):
-    """The connector itself, written atomically and 0700."""
+def _write(path, name, live, lang="py", target="container"):
+    """The connector itself, written atomically and 0700.
+
+    `target` decides which address it dials. A container reaches the host by
+    the gateway NAME, which is the default and what every box uses. A caller on
+    this machine cannot: host.docker.internal resolves only inside a container,
+    and a host process asking for it gets "nodename nor servname provided".
+    Measured on this machine, which is how Crew's host dispatchers found it.
+    So a host connector dials exactly what the listener bound.
+    """
     try:
         template = SHIM_TEMPLATES[lang]
     except KeyError:
         raise ValueError("unknown connector language %r — use 'py' or 'js'" % lang)
+    if target not in ("host", "container"):
+        raise ValueError("unknown connector target %r — use 'host' or 'container'" % target)
+    if target == "host":
+        from .. import mcpserve
+
+        where = mcpserve.bind_address()
+    else:
+        where = HOST_GATEWAY
     # Quoting belongs to the language the file is in, so the template asks for
     # an already-quoted value. The name only reaches a comment, but a newline
     # in it would end that comment and leave the rest of the name as code —
     # and since the CLI took a name as an argument, that name is now input.
     quote = repr if lang == "py" else json.dumps
     body = template % {"name": name.replace("\n", " ").replace("\r", " "),
-                       "host": quote(HOST_GATEWAY),
+                       "host": quote(where),
                        "port": live["port"], "token": quote(live["token"])}
     tmp = path + ".new"
     with open(tmp, "w") as fh:
@@ -243,7 +259,7 @@ def _write_shim_many(provider, target, routes):
 
 
 def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py",
-                identity=()):
+                identity=(), target="container"):
     """A connector for a host MCP server, for a container that is not a box.
 
     Written for Crew, which builds its own container and needs the same bridge:
@@ -266,6 +282,10 @@ def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py",
                carries the allowed root when it arrives through `roots`:
                nothing else would tell two callers with different roots apart,
                and they would share one listener answering about one of them.
+      target   who runs the connector: "container" (the default, and what a box
+               needs) or "host". They differ only in the address dialled, and
+               the wrong one fails at connect time rather than quietly — see
+               _write. A dispatcher running on this machine needs "host".
 
     A live listener is reused only when its command AND its caller identity
     match — the identity folds in the pane, the workspace, the bus home, every
@@ -305,4 +325,4 @@ def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py",
     live = _start_bridge(name, server, profile, [str(r) for r in roots])
     if not live:
         raise LookupError("no listener for the %r MCP server could be started" % name)
-    return _write(out, name, live, lang)
+    return _write(out, name, live, lang, target)

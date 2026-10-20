@@ -172,3 +172,43 @@ test("a different root alone is a different caller, with no flag to remember", a
   assert.notEqual(await port(path.join(home, "r1")), await port(path.join(home, "r3")),
     "a different root gets its own listener");
 });
+
+test("a connector for a host caller dials what the listener bound, not the container gateway", async (t) => {
+  const home = await temp(t);
+  t.after(() => stopListeners(home));
+
+  const hostOut = path.join(home, "run-host", "probe");
+  await fs.mkdir(path.dirname(hostOut), { recursive: true });
+  cli(home, ["box", "connect", "probe", "--out", hostOut, "--lang", "js",
+    "--target", "host", "--", "cat"]);
+  const body = await fs.readFile(hostOut, "utf8");
+
+  // host.docker.internal is a name ONLY a container resolves. A dispatcher on
+  // this machine asking for it gets "nodename nor servname provided" — which is
+  // how Crew's host dispatchers found this, having been handed a connector that
+  // could never connect. The listener binds loopback here, or the docker0
+  // gateway on Linux, so that address is what a host caller must dial.
+  assert.doesNotMatch(body, /host\.docker\.internal/,
+    "a host caller cannot resolve the container gateway name");
+  assert.match(body, /"127\.0\.0\.1"|"10\.|"172\.|"192\.168\./,
+    "it dials the address the listener actually bound");
+
+  // ...while the default is untouched, because every box in the fleet uses it.
+  const boxOut = path.join(home, "run-box", "probe");
+  await fs.mkdir(path.dirname(boxOut), { recursive: true });
+  cli(home, ["box", "connect", "probe", "--out", boxOut, "--lang", "js", "--", "cat"]);
+  assert.match(await fs.readFile(boxOut, "utf8"), /host\.docker\.internal/,
+    "a container still reaches the host by the gateway name, as it did before");
+
+  // A wrong value is refused rather than guessed: a connector that dials the
+  // wrong address fails at connect time, far from the typo that caused it.
+  let refused = "";
+  try {
+    cli(home, ["box", "connect", "probe", "--out", path.join(home, "run-bad", "probe"),
+      "--target", "sideways", "--", "cat"], { stdio: "pipe" });
+  } catch (error) {
+    refused = String(error.stderr || error.message);
+  }
+  assert.match(refused, /--target takes 'host' or 'container'/,
+    "an unknown target is named, not silently treated as one of them");
+});

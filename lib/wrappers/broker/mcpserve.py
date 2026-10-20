@@ -293,8 +293,12 @@ def _session(conn, command, token, policy=None):
                 child.kill()
 
 
-def _bind_address():
+def bind_address():
     """Where a box can reach this listener, and nothing beyond this machine can.
+
+    Public, because a connector written for a HOST caller has to dial exactly
+    what this binds: host.docker.internal is a name only a container resolves.
+    See box/shim.py, target="host".
 
     A box dials host.docker.internal. Docker Desktop forwards that name to the
     host's loopback, so 127.0.0.1 is enough there. Docker Engine on Linux maps
@@ -325,7 +329,7 @@ def serve(name, command, key=""):
     token = secrets.token_hex(16)
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    host = _bind_address()
+    host = bind_address()
     listener.bind((host, 0))
     listener.listen(16)
     port = listener.getsockname()[1]

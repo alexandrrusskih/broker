@@ -8,7 +8,8 @@ import sys
 from ..out import die, warn
 # Imported as modules, not as names: a test that replaces one of these replaces
 # it where it lives, and a bound name here would keep pointing at the original.
-from . import clones, environ, extras, harness, herdr, http_mcp, mcp, nested, report, shim
+from . import (browser, clones, environ, extras, harness, herdr, http_mcp, mcp, nested,
+               report, shim)
 from .mcp import HOST_GATEWAY
 from .paths import _bind, _mount, _paths, expand, home_dir
 
@@ -83,8 +84,10 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     cmd += extras.gitlab(profile, env, name, home)
     # The terminal manager, for a box that was told it may reach it. Its own
     # socket cannot cross into a container on this platform, so the command
-    # crosses instead — see box/herdr.py.
-    cmd += herdr.mount(provider, profile, name)
+    # crosses instead — see box/herdr.py. The browser bridge is the same
+    # shape: the window opens on the host, only the URL crosses.
+    bridged = herdr.mount(provider, profile, name) + browser.mount(profile, name)
+    cmd += bridged
 
     writable = list(_paths(profile, "rw"))
     for host, target in writable:
@@ -106,12 +109,14 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     # missing package, which looks nothing like a path problem.
     cwd = os.path.realpath(os.getcwd())
     inside = any(cwd == p or cwd.startswith(p + os.sep) for p in map(os.path.realpath, projects))
-    cmd += ["-w", cwd if inside else (os.path.realpath(projects[0]) if projects else home)]
+    workdir = cwd if inside else (os.path.realpath(projects[0]) if projects else home)
+    cmd += ["-w", workdir]
 
     cmd += extras.own_copies(provider, profile, name)
 
     inherited, claimed = {}, {}
-    cmd += _harness(provider, profile, env, name, remote, mounted, projects, claimed, inherited)
+    cmd += _harness(provider, profile, env, name, remote, mounted, projects, claimed,
+                    inherited, workdir)
     # The other harnesses this box carries, each set up exactly as it would be
     # as the box's own. Two of them may want the same thing at the same place —
     # the same MCP server, the same writable cache — and docker refuses a
@@ -119,13 +124,16 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     for other, other_env in companions:
         cmd += environ.companion(env, other_env)
         cmd += _unclaimed(cmd, _harness(other, profile, other_env, name, remote, mounted,
-                                        projects, claimed, inherited))
+                                        projects, claimed, inherited, workdir))
 
     for variable, value in sorted(inherited.items()):
         cmd += ["-e", "%s=%s" % (variable, value)]
-    if claimed:
+    if claimed or bridged:
         # Docker Desktop resolves this name already; Colima and plain Linux
-        # need to be told, and saying it twice costs nothing.
+        # need to be told, and saying it twice costs nothing. The bridges need
+        # it as much as a claimed MCP server does: the stand-in they mount
+        # dials this same name, and a box with a bridge and no MCP server used
+        # to be given the shim and no way to resolve where to send it.
         cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
 
     # What each harness needs set only inside a box — a flag for most of them,
@@ -182,7 +190,8 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     return cmd
 
 
-def _harness(provider, profile, env, name, remote, mounted, projects, claimed, inherited):
+def _harness(provider, profile, env, name, remote, mounted, projects, claimed, inherited,
+             workdir=None):
     """Everything one harness needs in the box: its home, its account, its MCP."""
     args = []
     # ...and anywhere else this harness insists on writing. Mounting a file
@@ -210,7 +219,7 @@ def _harness(provider, profile, env, name, remote, mounted, projects, claimed, i
         args += _bind(http_config[0], http_config[2], http_mode)
 
     args += harness.settings(provider, profile, env, name, canonical, http_config,
-                             settings_mounted)
+                             settings_mounted, workdir)
     args += environ.credentials(provider, env, remote)
 
     # MCP servers that exist only on this machine. Half of them cannot come

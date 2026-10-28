@@ -232,7 +232,7 @@ existing: an empty `args` means the harness behaves exactly as it does outside.
 A plain list applies to every harness; flags you type yourself win, because the
 box's come first.
 
-Two decisions are worth knowing about:
+Three decisions are worth knowing about:
 
 **Paths match the host exactly.** `~/Projects/example` is mounted at
 `~/Projects/example`, and `$HOME` is your `$HOME`. Harnesses key session history
@@ -246,6 +246,16 @@ parts of it would silently drop whatever the next release adds. The one exceptio
 is the credentials file, which is covered by an empty one — the token arrives
 from the broker in the environment, and a copy on disk inside the box is a copy
 that can leave it.
+
+**codex's folder trust is answered for you.** codex asks it on its first screen,
+and inside a box the answer cannot be saved: `config.toml` travels read-only, so
+the write dies with `-32603` and the session never starts. The broker mounts a
+staged copy instead, with the box's own `rw` paths trusted and the directory the
+box starts in with them. Both are needed: codex keys trust on that exact path
+and inherits nothing from a parent, so a box whose `rw` list is one wide tree
+would otherwise pre-answer a question codex never asks and leave the real one to
+die on the read-only mount. Your `~/.codex/config.toml` is not touched, and a
+path you have already decided on, either way, keeps your decision.
 
 Everything after a bare `--` reaches the harness untouched, so a prompt that
 mentions `--box` is a prompt.
@@ -453,6 +463,80 @@ to disk — so it travels into a box like the rest of the directory.
 
 A server that speaks stdio needs none of this: it runs on the host as you, and a
 box reaches it through the bridge above.
+
+### A browser on the host, opened from a box
+
+An agent in a box meets a login wall — IAP, OAuth, a console that wants a human
+— and has nowhere to put a browser. The container has no display, and the
+browser you are already signed in to is on the host, with the host's cookies. A
+Chromium inside the box is a different browser with an empty profile, and Xvfb
+is a display nobody is looking at.
+
+So the browser stays on the host and only the URL crosses. A box that asks for
+it gets a stand-in at `open` and `xdg-open`:
+
+```bash
+open https://admin-staging.example.com/settings
+# → opened on the host in Google Chrome: https://admin-staging.example.com/settings
+```
+
+It is **off unless a box asks**, and a box may be held to the hosts it needs:
+
+```jsonc
+"work": {
+  "rw": ["~/Projects/example"],
+  "browser": ["admin-staging.example.com", ".example.com"]
+}
+```
+
+| value | what the box may open |
+| --- | --- |
+| `true` | any `http`/`https` address |
+| `["host", …]` | those hosts; an entry starting with `.` matches subdomains |
+| `{"app": …, "allow": …}` | the same, plus which browser to open |
+
+A URL opened in a signed-in session is not passive — a plain GET can change
+state, and a session that reaches an admin console reaches it as you — so the
+host decides, every time: `http`/`https` only, no credentials in the URL, one
+address per call, at most one window every two seconds and thirty in an hour.
+The address is decided on as a parsed URL rather than as a string, because an
+allowlist a caller can get past by spelling the host differently is decoration.
+Every request is appended to `~/.config/broker/box/browser.log`, allowed and
+refused alike.
+
+Two things it does not do. The window opens in the session of the user running
+the broker **on the machine the box runs on** — a box on another machine opens
+it there, not on yours, and with no one logged in to that screen `open` fails
+and the box is told so. And it does not hand the agent your login: the cookies
+stay in the host's browser. An OAuth flow whose callback must return to
+`127.0.0.1` inside the container needs more than this bridge.
+
+### Reaching the terminal manager from a box
+
+Herdr runs on the host and a box can be told it may call it. Its socket is not
+the obstacle — it crosses, and a process inside connects to it — the client is:
+`herdr` is a macOS binary and a Linux container has nothing to run it with. So
+the socket stays on the host and the command crosses, the same shape as the
+browser above.
+
+```jsonc
+"work": {
+  "rw": ["~/Projects/example"],
+  "herdr": ["tab", "pane"]
+}
+```
+
+The first word decides, which is how herdr groups its own commands. `true`
+gives everything; a box that declares nothing gets no stand-in at all. Narrow
+it on purpose: through that socket `herdr agent read` shows any agent's screen,
+`send-keys` types into any of them, and `pane process-info` prints command lines
+that carry the fleet's tokens.
+
+Both bridges keep their rule for as long as they live, and they outlive the
+container — the port and the secret are written into the stand-in when the box
+starts. A rule you narrow in `boxes.json` replaces the listener, so boxes
+already running hold the old port and lose the bridge, which is the right
+direction to fail when access is being taken away.
 
 ## Accounts
 

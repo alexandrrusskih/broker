@@ -1,5 +1,6 @@
 """The harness's own files and directories, as the box sees them."""
 
+import hashlib
 import json
 import os
 import re
@@ -346,7 +347,7 @@ def _trust_toml(path, targets):
     return True
 
 
-def _trusted_config(provider, profile, name):
+def _trusted_config(provider, profile, name, workdir=None):
     """A staged copy of codex's config.toml with the box's folders trusted.
 
     codex asks folder trust on its first screen, and inside a box the answer
@@ -355,10 +356,18 @@ def _trusted_config(provider, profile, name):
     own rw list, given by the same person the question is meant for — so the
     answer is written into the copy the box is mounted, and the host's file
     is not touched. None when there is nothing to add: the real file will do.
+
+    The directory the box STARTS in is trusted as well, and it is the one that
+    matters: codex keys trust on that exact path and inherits nothing from a
+    parent, so a box whose rw list is one wide tree — `/Volumes/hdd/Projects`
+    for this machine's `m` — pre-answered a question codex never asks and left
+    the real one, `…/Projects/kopanev-me`, to die on the read-only mount.
     """
     if provider.NAME != "codex":
         return None
     targets = [target for _, target in _paths(profile, "rw")]
+    if workdir and workdir not in targets:
+        targets.append(workdir)
     if not targets:
         return None
     host = None
@@ -369,8 +378,14 @@ def _trusted_config(provider, profile, name):
             break
     if not host:
         return None
+    # One file per box AND per set of trusted folders. The content now depends
+    # on where the run started, and copy2 truncates the file it writes — the
+    # same inode a container already running this box has bind-mounted. Two
+    # boxes of one name in two directories would rewrite each other's config
+    # under them; keyed this way, each gets its own.
+    tag = hashlib.sha256("\n".join(sorted(targets)).encode("utf-8")).hexdigest()[:12]
     copy = os.path.join(config.CONFIG_DIR, "box", "files", name.replace("/", "_"),
-                        "config.toml")
+                        tag, "config.toml")
     try:
         os.makedirs(os.path.dirname(copy), mode=0o700, exist_ok=True)
         shutil.copy2(host, copy)
@@ -382,7 +397,8 @@ def _trusted_config(provider, profile, name):
     return copy
 
 
-def settings(provider, profile, env, name, canonical, http_config, settings_mounted):
+def settings(provider, profile, env, name, canonical, http_config, settings_mounted,
+             workdir=None):
     """What the host decided and the box may read but not rewrite."""
     args = []
     # Host settings stay read-only. Runtime state in the same home stays writable.
@@ -405,7 +421,7 @@ def settings(provider, profile, env, name, canonical, http_config, settings_moun
     # every config.toml mount below serves that copy instead of the host's
     # file — read-only either way, so the box still cannot rewrite what the
     # host decided. See _trusted_config above.
-    trusted = _trusted_config(provider, profile, name)
+    trusted = _trusted_config(provider, profile, name, workdir)
     for entry in getattr(provider, "BOX_SETTINGS", ()):
         host = expand(entry)
         if os.path.isfile(host):

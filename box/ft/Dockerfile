@@ -37,6 +37,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 # A bare `--exclude README.md` matches that name at ANY depth, so it would also
 # drop the README and LICENSE files npm ships inside lib/node_modules — found
 # by the finik agent reviewing the same recipe, and it was wrong here first.
+#
+# --no-same-owner because the tarball's members belong to iojs, uid 1000:
+# measured in the listing of the published archive. Under root tar would
+# restore that owner, so /usr/local/bin/node would belong to uid 1000 — and a
+# nested box drops to the HOST's uid, which on most Linux machines IS 1000.
+# That user would then own the node binary it runs. The official node image
+# passes this flag for the same reason.
 ARG NODE_VERSION=v26.13.0
 RUN set -eu; \
     arch="$(dpkg --print-architecture)"; \
@@ -48,7 +55,7 @@ RUN set -eu; \
     curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt"; \
     grep " ${file}\$" SHASUMS256.txt | sha256sum -c -; \
     top="node-${NODE_VERSION}-linux-${node_arch}"; \
-    tar -xzf "$file" -C /usr/local --strip-components=1 --anchored \
+    tar -xzf "$file" -C /usr/local --strip-components=1 --no-same-owner --anchored \
         --exclude "$top/CHANGELOG.md" \
         --exclude "$top/LICENSE" \
         --exclude "$top/README.md"; \

@@ -32,6 +32,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 # xz. Measured — `tar -xJf` died with exit 2 on a build that had already
 # downloaded the file and verified its checksum. gzip is built into GNU tar, so
 # this costs no package and one extra megabyte of download.
+#
+# The three excludes are ANCHORED and spelled with the archive's top directory.
+# A bare `--exclude README.md` matches that name at ANY depth, so it would also
+# drop the README and LICENSE files npm ships inside lib/node_modules — found
+# by the finik agent reviewing the same recipe, and it was wrong here first.
 ARG NODE_VERSION=v26.13.0
 RUN set -eu; \
     arch="$(dpkg --print-architecture)"; \
@@ -42,8 +47,11 @@ RUN set -eu; \
     curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/${file}"; \
     curl -fsSLO "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt"; \
     grep " ${file}\$" SHASUMS256.txt | sha256sum -c -; \
-    tar -xzf "$file" -C /usr/local --strip-components=1 \
-        --exclude CHANGELOG.md --exclude LICENSE --exclude README.md; \
+    top="node-${NODE_VERSION}-linux-${node_arch}"; \
+    tar -xzf "$file" -C /usr/local --strip-components=1 --anchored \
+        --exclude "$top/CHANGELOG.md" \
+        --exclude "$top/LICENSE" \
+        --exclude "$top/README.md"; \
     rm -f "$file" SHASUMS256.txt; \
     node --version; npm --version
 

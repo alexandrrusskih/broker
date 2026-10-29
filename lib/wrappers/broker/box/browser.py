@@ -7,11 +7,12 @@ with the host's cookies. Chromium inside the box is a different browser with
 an empty profile, and Xvfb is a display nobody is looking at.
 
 So the browser stays on the host and only the URL crosses, which is the shape
-box/herdr.py already uses for the terminal manager. A box gets a stand-in at
-`open` and `xdg-open`; it sends the one argument it was called with, the host
-opens it in the person's own browser, and the box is told what happened. The
-box never gets the browser, the profile, the cookies or a command — it gets
-to ASK, and the host decides.
+box/herdr.py already uses for the terminal manager — they share box/bridge.py,
+because they are the same door. A box gets a stand-in at `open` and
+`xdg-open`; it sends the one argument it was called with, the host opens it in
+the person's own browser, and the box is told what happened. The box never
+gets the browser, the profile, the cookies or a command — it gets to ASK, and
+the host decides.
 
 Deciding is the point of the allowlist. A URL opened in a logged-in session is
 not a passive thing: a plain GET can change state, and a session that reaches
@@ -32,17 +33,15 @@ refused, because an agent that opens a hundred tabs in somebody's face should
 be answerable for it afterwards.
 """
 
-import json
 import os
-import socket
 import subprocess
 import sys
-import threading
 import time
 
 from .. import config
-from ..out import warn
+from . import bridge
 
+KIND = "browser"
 ANY = "*"
 # The browser a person means by "my session": the one they are logged in to.
 # Overridable per box, because a machine may keep its work in another one.
@@ -54,44 +53,10 @@ EVERY_SECONDS = 2.0
 PER_HOUR = 30
 LOG = os.path.join(config.CONFIG_DIR, "box", "browser.log")
 
-STAND_IN = "\n".join([
-    "#!/usr/bin/env python3",
-    "# Written by the broker: the browser runs on the host; this carries the URL.",
-    "import json, socket, sys",
-    "HOST, PORT, TOKEN = %(host)s, %(port)d, %(token)s",
-    "ask = json.dumps({'token': TOKEN, 'argv': sys.argv[1:]}).encode() + b'\\n'",
-    "addresses = socket.getaddrinfo(HOST, PORT, socket.AF_INET, socket.SOCK_STREAM)",
-    "family, kind, proto, _, address = addresses[0]",
-    "try:",
-    "    with socket.socket(family, kind, proto) as conn:",
-    "        conn.connect(address)",
-    "        conn.sendall(ask)",
-    "        conn.shutdown(socket.SHUT_WR)",
-    "        body = b''",
-    "        while True:",
-    "            chunk = conn.recv(65536)",
-    "            if not chunk:",
-    "                break",
-    "            body += chunk",
-    "except OSError as error:",
-    "    sys.stderr.write('open: the broker bridge is not answering (%%s)\\n' %% error)",
-    "    raise SystemExit(1)",
-    "said = json.loads(body.decode('utf-8', 'replace') or '{}')",
-    "sys.stdout.write(said.get('out', ''))",
-    "sys.stderr.write(said.get('err', ''))",
-    "raise SystemExit(int(said.get('code', 1)))",
-    "",
-])
-
 # Where the stand-in lands. A Linux container has neither, so each is a file
 # docker creates and this mounts over — and both names are reached for: `open`
 # is the habit of a person on a mac, `xdg-open` is what a tool on Linux calls.
 STAND_IN_PATHS = ("/usr/bin/open", "/usr/bin/xdg-open")
-
-
-def _state_file(name):
-    return os.path.join(config.CONFIG_DIR, "box", "browser",
-                        "%s.json" % name.replace("/", "_"))
 
 
 def rule(profile):
@@ -116,17 +81,14 @@ def rule(profile):
 
 
 def allowed(url, hosts):
-    """Whether this box may open this address, and why not when it may not.
+    """Whether a box may open this address, and why not when it may not.
 
     Returns (True, host) or (False, reason). Everything about the answer comes
-    from the URL as parsed, never from the string: a box that could get a
-    refusal past this by writing the address differently would make the
-    allowlist decoration.
+    from the URL as parsed, never from the string: an allowlist a caller can
+    get past by spelling the host differently is decoration.
     """
-    try:
-        from urllib.parse import urlsplit
-    except ImportError:  # pragma: no cover - python 2 has it elsewhere
-        from urlparse import urlsplit
+    from urllib.parse import urlsplit
+
     if not url or url.startswith("-"):
         return False, "open takes one URL, not a flag"
     if len(url) > 2000:
@@ -173,37 +135,12 @@ def _command(app, url):
     return ["xdg-open", url]
 
 
-def _answer(conn, name, hosts, app, recent):
-    """One request: check the secret, check the URL, open it, say what happened."""
-    with conn:
-        conn.settimeout(20)
-        try:
-            asked = b""
-            while not asked.endswith(b"\n") and len(asked) < 65536:
-                chunk = conn.recv(4096)
-                if not chunk:
-                    return
-                asked += chunk
-            want = json.loads(asked.decode("utf-8", "replace"))
-        except (OSError, ValueError):
-            return
-        import secrets as _secrets
-        if not _secrets.compare_digest(str(want.get("token", "")), _answer.token):
-            return  # not ours: say nothing, open nothing
-        argv = [str(a) for a in (want.get("argv") or [])]
-        said = _decide(name, argv, hosts, app, recent)
-        try:
-            conn.sendall(json.dumps(said).encode())
-        except OSError:
-            pass
-
-
-def _decide(name, argv, hosts, app, recent):
+def _open(name, argv, hosts, app, recent):
     """The answer to one request, with nothing of the socket in it."""
     if len(argv) != 1:
-        reason = "open takes exactly one URL (got %d arguments)" % len(argv)
         _note(name, " ".join(argv) or "-", "refused")
-        return {"out": "", "err": "open: %s\n" % reason, "code": 1}
+        return {"out": "", "code": 1,
+                "err": "open: open takes exactly one URL (got %d arguments)\n" % len(argv)}
     url = argv[0]
     ok, why = allowed(url, hosts)
     if not ok:
@@ -213,12 +150,12 @@ def _decide(name, argv, hosts, app, recent):
     recent[:] = [t for t in recent if now - t < 3600]
     if recent and now - recent[-1] < EVERY_SECONDS:
         _note(name, url, "too-fast")
-        return {"out": "", "err": "open: one window at a time — try again in a moment\n",
-                "code": 1}
+        return {"out": "", "code": 1,
+                "err": "open: one window at a time — try again in a moment\n"}
     if len(recent) >= PER_HOUR:
         _note(name, url, "too-many")
-        return {"out": "", "err": "open: %d windows this hour is enough; ask the owner\n"
-                                  % PER_HOUR, "code": 1}
+        return {"out": "", "code": 1,
+                "err": "open: %d windows this hour is enough; ask the owner\n" % PER_HOUR}
     try:
         done = subprocess.run(_command(app, url), capture_output=True,
                               text=True, timeout=60)
@@ -229,85 +166,18 @@ def _decide(name, argv, hosts, app, recent):
         _note(name, url, "failed")
         # The usual reason on a mac is that nobody is logged in to the screen,
         # and `open` says so itself. Passed through rather than summarised.
-        return {"out": done.stdout, "err": done.stderr or "open: the host refused to open it\n",
-                "code": done.returncode}
+        return {"out": done.stdout, "code": done.returncode,
+                "err": done.stderr or "open: the host refused to open it\n"}
     recent.append(now)
     _note(name, url, "opened")
     return {"out": "opened on the host in %s: %s\n" % (app, url), "err": "", "code": 0}
 
 
-def live(name):
-    """The listener already serving this box, or None.
-
-    Alive is not the same as ours — see box/herdr.py, which learned it the
-    hard way: a state file outlives its process and pids come round again.
-    """
-    from ..mcpserve import started
-
-    try:
-        with open(_state_file(name)) as handle:
-            state = json.load(handle)
-        os.kill(state["pid"], 0)
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    was = state.get("started")
-    if was and started(state["pid"]) != was:
-        return None
-    return state
-
-
-def _stop(state):
-    """Put down a listener of ours, for a box whose rule has changed."""
-    import signal
-
-    try:
-        os.kill(state["pid"], signal.SIGTERM)
-    except (OSError, KeyError, TypeError):
-        pass
-
-
 def serve(name, app, hosts):
-    """Listen on loopback for one box, for as long as that box may ask.
-
-    It outlives the container for the same reason the herdr bridge does: the
-    port and the secret are written INTO the stand-in when the box starts, so
-    a listener that goes away leaves the box holding a dead port and no way to
-    learn a new one.
-    """
-    import secrets
-    from ..mcpserve import started
-
-    token = secrets.token_urlsafe(24)
-    _answer.token = token
+    """Listen for one box, opening what it is allowed to open."""
     recent = []
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen(8)
-    port = listener.getsockname()[1]
-
-    path = _state_file(name)
-    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-    tmp = path + ".new"
-    with open(tmp, "w") as handle:
-        json.dump({"port": port, "token": token, "pid": os.getpid(),
-                   "started": started(os.getpid()), "app": app,
-                   "hosts": sorted(hosts)}, handle)
-    os.chmod(tmp, 0o600)  # it carries the connection secret
-    os.replace(tmp, path)
-
-    while True:
-        try:
-            conn, _ = listener.accept()
-        except OSError:
-            break
-        threading.Thread(target=_answer, args=(conn, name, hosts, app, recent),
-                         daemon=True).start()
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-    return 0
+    return bridge.serve(KIND, name, lambda argv: _open(name, argv, hosts, app, recent),
+                        {"app": app, "hosts": sorted(hosts)})
 
 
 def mount(profile, name):
@@ -316,58 +186,13 @@ def mount(profile, name):
     Returns docker arguments. A box that declares nothing gets nothing: the
     person's own browser session is not part of being a box.
     """
-    from .paths import _bind, window_key
-
     asked = rule(profile)
     if not asked:
         return []
     hosts, app = asked
-
-    state = live(name)
-    # A listener keeps the rule it started with, and it lives longer than the
-    # container does, so a rule the owner NARROWS would otherwise go on being
-    # answered under the old one. A changed rule replaces the listener. Boxes
-    # already running hold the old port and lose `open`, which is the right
-    # direction to fail when access is being taken away.
-    if state and (sorted(state.get("hosts") or []) != sorted(hosts)
-                  or state.get("app") != app):
-        _stop(state)
-        state = None
-    if not state:
-        try:
-            subprocess.Popen(
-                [sys.executable, "-m", "broker.box.browser", "serve", name, app] + hosts,
-                cwd=os.path.dirname(os.path.dirname(os.path.dirname(
-                    os.path.abspath(__file__)))),
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, start_new_session=True)
-        except OSError as exc:
-            warn("could not start the browser bridge: %s" % exc)
-            return []
-        for _ in range(50):
-            state = live(name)
-            if state:
-                break
-            time.sleep(0.1)
-    if not state:
-        warn("the browser bridge did not come up — the box will not reach it")
-        return []
-
-    from .mcp import HOST_GATEWAY
-    body = STAND_IN % {"host": repr(HOST_GATEWAY), "port": state["port"],
-                       "token": repr(state["token"])}
-    directory = os.path.join(config.CONFIG_DIR, "box", "shims", "browser")
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    path = os.path.join(directory, "open-%s" % window_key())
-    tmp = path + ".new"
-    with open(tmp, "w") as handle:
-        handle.write(body)
-    os.chmod(tmp, 0o700)
-    os.replace(tmp, path)
-    args = []
-    for target in STAND_IN_PATHS:
-        args += _bind(path, target, "ro")
-    return args
+    return bridge.mount(KIND, name, "broker.box.browser", [app] + hosts,
+                        {"app": app, "hosts": sorted(hosts)},
+                        "open", STAND_IN_PATHS, "open")
 
 
 def main(argv=None):

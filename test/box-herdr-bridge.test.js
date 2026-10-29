@@ -24,7 +24,7 @@ armed = []
 real = socket.socket.settimeout
 socket.socket.settimeout = lambda self, value: (armed.append(value), real(self, value))[1]
 
-from broker.box import herdr
+from broker.box import bridge, herdr
 
 name, binary = "boxy", os.path.join(os.environ["HOME"], "fake-herdr")
 threading.Thread(target=herdr.serve, args=(name, binary, ${JSON.stringify(groups)}),
@@ -32,7 +32,7 @@ threading.Thread(target=herdr.serve, args=(name, binary, ${JSON.stringify(groups
 
 state = None
 for _ in range(100):
-    state = herdr.live(name)
+    state = bridge.live("herdr", name)
     if state:
         break
     time.sleep(0.05)
@@ -139,7 +139,7 @@ test("a recycled pid is not mistaken for our listener", async (t) => {
 
   const said = execFileSync("python3", ["-c",
     `import sys; sys.path.insert(0, ${JSON.stringify(path.join(root, "lib", "wrappers"))});` +
-    "from broker.box import herdr; print(herdr.live('boxy') is None)"
+    "from broker.box import bridge; print(bridge.live('herdr', 'boxy') is None)"
   ], { encoding: "utf8", env: { ...process.env, HOME: home, PYTHONDONTWRITEBYTECODE: "1" } });
 
   assert.equal(said.trim(), "True",

@@ -33,6 +33,56 @@ def _must_exist(name, host):
     die("the '%s' box lists %s, which does not exist" % (name, host))
 
 
+def _ports(name, profile):
+    """Host ports this box answers on — the only way IN to a container.
+
+    Out is already open: host.docker.internal resolves inside a box and Docker
+    Desktop carries it to the host's own loopback. In is not, and a published
+    port is the one thing in a profile that can be reached from OTHER machines.
+    So the address is part of the setting rather than a default:
+
+        "ports": [5173]                     127.0.0.1:5173 -> 5173
+        "ports": ["5173:5173"]              127.0.0.1:5173 -> 5173
+        "ports": ["100.64.0.2:5173:5173"]   that address alone
+        "ports": ["0.0.0.0:5173:5173"]      every network this machine is on
+
+    A bare number binds LOOPBACK, which is the opposite of what docker does
+    with `-p 5173:5173` — docker publishes that to every interface. A dev
+    server nobody meant to leave the machine should not reach the LAN because
+    somebody wrote the short form. Reaching it from another machine is spelled
+    out, and the address a person spells is usually the one Tailscale gave them.
+
+    Docker takes a published port at creation and never after, so changing this
+    takes effect the next time the box starts.
+    """
+    want = (profile or {}).get("ports")
+    if not want:
+        return []
+    if not isinstance(want, (list, tuple)):
+        want = [want]
+    args = []
+    for entry in want:
+        if isinstance(entry, bool) or not isinstance(entry, (int, str)):
+            die("the '%s' box asks to publish %r, which is not a port" % (name, entry))
+        text = str(entry).strip()
+        parts = text.split(":")
+        if len(parts) == 1:
+            address, host_port, box_port = "127.0.0.1", parts[0], parts[0]
+        elif len(parts) == 2:
+            address, host_port, box_port = "127.0.0.1", parts[0], parts[1]
+        elif len(parts) == 3:
+            address, host_port, box_port = parts
+        else:
+            die("the '%s' box asks to publish '%s': expected [address:]host:box"
+                % (name, text))
+        for number in (host_port, box_port):
+            if not number.isdigit() or not 1 <= int(number) <= 65535:
+                die("the '%s' box asks to publish '%s': '%s' is not a port number"
+                    % (name, text, number))
+        args += ["-p", "%s:%s:%s" % (address, host_port, box_port)]
+    return args
+
+
 def command(provider, name, profile, argv, env, remote=False, companions=()):
     """The full container command line for this run.
 
@@ -135,6 +185,11 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
         # dials this same name, and a box with a bridge and no MCP server used
         # to be given the shim and no way to resolve where to send it.
         cmd += ["--add-host", "%s:host-gateway" % HOST_GATEWAY]
+
+    # The way in, for a box running something a browser has to reach. Nothing
+    # is published unless the profile says so, and what it says includes the
+    # address — see _ports.
+    cmd += _ports(name, profile)
 
     # What each harness needs set only inside a box — a flag for most of them,
     # a variable for one that has no flag. See environ.harness_box.

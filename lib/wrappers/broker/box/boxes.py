@@ -80,7 +80,9 @@ def _defaults(raw):
     # would hand every project on the machine the same one. A Dockerfile is
     # built per box, under that box's name, and a box made on the spot has no
     # image built for it — "image" names a tag that exists, and is fine here.
-    for key in ("rw", "dockerfile"):
+    # "ports" for the same reason, one step further: two boxes publishing one
+    # host port do not share it — the second to start fails outright.
+    for key in ("rw", "dockerfile", "ports"):
         if key in base:
             die("%s in %s cannot say \"%s\": it would apply to every box" % (DEFAULTS, PATH, key))
     return base

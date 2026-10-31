@@ -235,11 +235,29 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
         extra = extra.get(provider.NAME) or []
     flags = [str(flag) for flag in getattr(provider, "BOX_ARGS", ())]
     flags += [str(flag) for flag in extra or []]
-    added = set(argv)
-    for flag in flags:
-        if flag not in added:
-            cmd.append(flag)
-            added.add(flag)
+    # What is already on the command line wins, and a flag that CARRIES A VALUE
+    # has to be weighed as the pair it is. Weighing each word on its own was
+    # right while every one of these was a lone switch like
+    # --dangerously-skip-permissions. The first pair broke it: with
+    # ["--model", "argon-high"] in the profile and `--model other` typed, the
+    # flag was seen as present and skipped while its value was not, so the
+    # value was appended on its own — and a bare word on a harness command line
+    # is the PROMPT. The model's name would have gone silently into the
+    # question.
+    def present(flag):
+        return flag in argv or any(a.startswith(flag + "=") for a in argv)
+    position = 0
+    while position < len(flags):
+        flag = flags[position]
+        value = flags[position + 1] if position + 1 < len(flags) else None
+        pair = (flag.startswith("-") and value is not None
+                and not value.startswith("-"))
+        position += 2 if pair else 1
+        if present(flag):
+            continue
+        cmd.append(flag)
+        if pair:
+            cmd.append(value)
 
     cmd += argv
     return cmd

@@ -139,6 +139,22 @@ def install_credentials(cfg, provider, account, auth, env):
             # against it, and "~" would otherwise mean the profile.
             if provider.HOME_ENV == "HOME" and env.get("HOME"):
                 env.setdefault(box_home_env(), env["HOME"])
+                # The token store stays behind with the person, not with the
+                # account's profile. mcp-remote keeps every remote MCP server's
+                # OAuth tokens in $HOME/.mcp-auth, so moving HOME moves the
+                # store — and an account that has never logged in there finds
+                # none. Measured on this machine: the agy account's own home
+                # held 842 files of abandoned attempts and not one tokens.json,
+                # so joppa and ntk sat in "initializing" forever, waiting on a
+                # browser callback nobody was going to answer. Both worked for
+                # claude and codex, whose HOME is not replaced — which is
+                # exactly the tell.
+                #
+                # setdefault, because a person who names this themselves means
+                # it. Only this branch: a provider with a home variable of its
+                # own (CODEX_HOME) leaves HOME alone and was never affected.
+                env.setdefault("MCP_REMOTE_CONFIG_DIR",
+                               os.path.join(env["HOME"], ".mcp-auth"))
             env[provider.HOME_ENV] = home
     provider.route_refresh(env, cfg, account, auth)
     harness_env = getattr(provider, "harness_env", None)

@@ -191,10 +191,6 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     # address — see _ports.
     cmd += _ports(name, profile)
 
-    # Which machine this is, as a path rather than only a variable: `ls
-    # /machine` tells a box where it is standing. See environ.machine_mark.
-    cmd += environ.machine_mark(profile)
-
     # What each harness needs set only inside a box — a flag for most of them,
     # a variable for one that has no flag. See environ.harness_box.
     cmd += environ.harness_box(provider)

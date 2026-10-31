@@ -1,8 +1,6 @@
 """What a box carries in its environment, and what it decides for itself."""
 
 import os
-import re
-import socket
 
 from ..out import warn
 from .http_mcp import _box_url
@@ -39,80 +37,6 @@ TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
 OWN = {"HOME", "USER", "LOGNAME", "PATH", "SHELL", "PWD", "OLDPWD", "TMPDIR",
        "SHLVL", "_", "XPC_SERVICE_NAME", "XPC_FLAGS", "__CF_USER_TEXT_ENCODING",
        "DISPLAY", "SSH_AUTH_SOCK", "SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY"}
-
-
-# Where this machine says its own name. A box could not tell which machine it
-# was on: the paths inside match the host exactly, which is the point, and
-# host.docker.internal resolves to the same Docker Desktop address everywhere.
-# So two boxes on two machines looked identical from inside, and an agent told
-# to act on mini had no way to check it was there. Measured on this fleet: the
-# only tell was the home directory's name — /Users/skopanev against
-# /Users/finik — which is indirect and fails the day two machines share a user.
-#
-# MOUNTED, not only named, because a path can be looked at without knowing
-# what to ask: `ls /machine` answers the question. The variable is set as well,
-# for a hook that would rather read one than list a directory.
-#
-# OFF unless a box asks, like the browser and herdr doors above it:
-#
-#     "aic":        { "machine": true }      this box alone
-#     "__defaults": { "machine": true }      every box on the machine
-#
-# Which machine a container sits on is a fact about the person's fleet, not a
-# part of being a box, and a box that declares nothing gets nothing. Both the
-# mount and the variable are behind the one key: a box told nothing should not
-# learn it from the environment instead.
-MACHINE_DIR = "/machine"
-MACHINE_KEY = "machine"
-
-
-def wants_machine(profile):
-    """Whether this box asked to be told which machine it is on."""
-    return bool((profile or {}).get(MACHINE_KEY))
-
-
-def machine_name():
-    """What this machine is called: short, lowercase, and overridable.
-
-    The hostname, because it is already right on both machines of this fleet
-    and needs nobody to write it down. BROKER_MACHINE wins where it is set —
-    including inside a box, where it is set by this very code, so a nested box
-    inherits the name of the machine it is really on rather than asking the
-    container's own hostname, which is a container id.
-    """
-    named = (os.environ.get("BROKER_MACHINE") or "").strip()
-    # The same shortening either way. Taking the override verbatim made
-    # "finik.local" a different machine from "finik", so the marker's name
-    # depended on whether somebody had set the variable — which is the one
-    # thing a name used for identity must not do.
-    return ((named or socket.gethostname() or "machine").split(".")[0].lower())
-
-
-def machine_mark(profile, name=None):
-    """An empty directory named after this machine, for a box to look at.
-
-    Empty on purpose: the name is the whole message, and a directory with
-    nothing in it cannot carry anything else by accident. Read-only, so a box
-    cannot rename the machine it is standing on.
-    """
-    from .. import config
-    from .paths import _bind
-
-    if not wants_machine(profile):
-        return []
-    safe = re.sub(r"[^a-z0-9_.-]+", "-", (name or machine_name()).lower()).strip("-.")
-    if not safe:
-        # Say so rather than leaving the box unmarked and the person guessing
-        # why `ls /machine` is empty.
-        warn("this machine's name is not usable as a path — the box will not be marked")
-        return []
-    where = os.path.join(config.CONFIG_DIR, "box", "machine", safe)
-    try:
-        os.makedirs(where, mode=0o700, exist_ok=True)
-    except OSError as exc:
-        warn("could not mark this machine's name for the box: %s" % exc)
-        return []
-    return _bind(where, "%s/%s" % (MACHINE_DIR, safe), "ro")
 
 
 def carried(profile, env, home, box):
@@ -168,11 +92,6 @@ def carried(profile, env, home, box):
     # exists for — it reports the chat it is in to a terminal manager that
     # cannot see into a container, and it has to know to do that.
     args += ["-e", "BROKER_BOX=%s" % box]
-    # ...and which machine it is on, but only where the box asked for it. See
-    # machine_name: the same fact the /machine mount states by being there,
-    # under a name a hook can read instead of listing a directory.
-    if wants_machine(profile):
-        args += ["-e", "BROKER_MACHINE=%s" % machine_name()]
     # The same fact under the name the bus hooks already read. They are on the
     # host, in the harness settings this box mounts read-only, so they run in
     # here as they do out there — and their box branch was dead, because

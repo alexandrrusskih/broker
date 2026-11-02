@@ -208,11 +208,11 @@ def mount(kind, name, module, argv, rule, shim, targets, prefix):
     directory = os.path.join(config.CONFIG_DIR, "box", "shims", kind)
     os.makedirs(directory, mode=0o700, exist_ok=True)
     path = os.path.join(directory, "%s-%s" % (prefix, window_key()))
-    tmp = path + ".new"
-    with open(tmp, "w") as handle:
-        handle.write(body)
-    os.chmod(tmp, 0o700)
-    os.replace(tmp, path)
+    # Only when it would change — see shim._put for what a needless replace
+    # costs a bind mount.
+    from .shim import _put
+
+    path = _put(path, body)
     args = []
     for target in targets:
         args += _bind(path, target, "ro")

@@ -1,5 +1,6 @@
 """The stand-in a box runs in place of an MCP server that stayed on the host."""
 
+import hashlib
 import json
 import os
 import stat
@@ -193,6 +194,40 @@ def _write_shim(provider, name, live):
                   name, live)
 
 
+def _put(path, body):
+    """Write the connector at a path that spells out what is in it.
+
+    The name carries a digest of the body, so a connector that changed is a NEW
+    file and the old one is left alone. Two things want that. A box already
+    running has the old file bind-mounted: replacing it would leave that mount
+    pointing at an inode nothing links to, and the box inside sees the shim
+    vanish. And Docker Desktop resolves a bind source through its own cache of
+    the host filesystem — a path it once found missing comes back "bind source
+    path does not exist" for minutes afterwards, with the file sitting right
+    there. Measured on this machine: four runs in a row, cured by writing the
+    next connector under a name Docker had never looked for.
+
+    Replacing a file that already says the same thing costs an inode, and the
+    cost is not abstract: Docker Desktop resolves a bind source through its own
+    cache of the host filesystem, and a source replaced microseconds before
+    `docker run` comes back as "bind source path does not exist" — with the
+    file sitting right there. Measured on this machine, three runs in a row,
+    while the shim's content had not changed at all.
+    """
+    path = "%s-%s" % (path, hashlib.sha256(body.encode("utf-8")).hexdigest()[:8])
+    try:
+        if open(path).read() == body:
+            return path
+    except OSError:
+        pass
+    tmp = path + ".new"
+    with open(tmp, "w") as fh:
+        fh.write(body)
+    os.chmod(tmp, 0o700)  # it carries the connection secret
+    os.replace(tmp, path)
+    return path
+
+
 def _write(path, name, live, lang="py", target="container"):
     """The connector itself, written atomically and 0700.
 
@@ -223,12 +258,7 @@ def _write(path, name, live, lang="py", target="container"):
     body = template % {"name": name.replace("\n", " ").replace("\r", " "),
                        "host": quote(where),
                        "port": live["port"], "token": quote(live["token"])}
-    tmp = path + ".new"
-    with open(tmp, "w") as fh:
-        fh.write(body)
-    os.chmod(tmp, 0o700)  # it carries the connection secret
-    os.replace(tmp, path)
-    return path
+    return _put(path, body)
 
 
 
@@ -250,12 +280,7 @@ def _write_shim_many(provider, target, routes):
                                  "routes": repr(json.dumps(table, sort_keys=True))}
     path = os.path.join(directory, "%s-%s"
                         % (os.path.basename(target).replace("/", "_"), window_key()))
-    tmp = path + ".new"
-    with open(tmp, "w") as fh:
-        fh.write(body)
-    os.chmod(tmp, 0o700)  # it carries the connection secrets
-    os.replace(tmp, path)
-    return path
+    return _put(path, body)
 
 
 def connect_mcp(name, command, out, env=None, roots=(), inherit=(), lang="py",

@@ -1,5 +1,6 @@
 """Give a box its own MCP config with host HTTP endpoints it can reach."""
 
+import hashlib
 import json
 import os
 import re
@@ -117,7 +118,16 @@ def stage(provider, env, box):
     directory = os.path.join(config.CONFIG_DIR, "box", "http-mcp", box, window_key())
     try:
         os.makedirs(directory, mode=0o700, exist_ok=True)
-        target = os.path.join(directory, provider.NAME + "-" + os.path.basename(path))
+        # The name says what is in it, so a config that changed is a new file
+        # and the one a running box has mounted is never replaced under it. The
+        # same rule as shim._put, and for the second reason given there too:
+        # Docker Desktop keeps its own cache of the host filesystem, and a bind
+        # source it once failed to find stays "does not exist" for minutes.
+        target = os.path.join(directory, "%s-%s-%s" % (
+            provider.NAME, os.path.basename(path),
+            hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]))
+        if os.path.exists(target):
+            return target, path, os.path.realpath(path)
         fd, temporary = tempfile.mkstemp(dir=directory)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:

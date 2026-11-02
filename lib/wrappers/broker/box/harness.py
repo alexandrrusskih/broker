@@ -26,7 +26,14 @@ def _trust(path, profile):
     So it is answered here, in that copy, for those paths and nothing else. The
     host's file is not touched, and a directory the box was not given is still
     asked about.
+
+    Only when the box asks for it: "trust": true in its entry. The engine
+    carries no setup of its own — what a box does to its harness is written in
+    the file the owner edits, and a box that says nothing gets the first screen
+    the harness would show anywhere else.
     """
+    if not profile.get("trust"):
+        return
     targets = [target for _, target in _paths(profile, "rw")]
     if not targets:
         return
@@ -364,6 +371,10 @@ def _trusted_config(provider, profile, name, workdir=None):
     the real one, `…/Projects/kopanev-me`, to die on the read-only mount.
     """
     if provider.NAME != "codex":
+        return None
+    # Same as _trust above: the box asks for this with "trust": true, or it
+    # answers codex's first screen itself.
+    if not profile.get("trust"):
         return None
     targets = [target for _, target in _paths(profile, "rw")]
     if workdir and workdir not in targets:

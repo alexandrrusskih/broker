@@ -235,17 +235,6 @@ def update_methods(target):
     return methods
 
 
-# What a box implies about how the harness may run. The bypass flag's own help
-# says it is "intended solely for running in environments that are externally
-# sandboxed" — a broker box is exactly that, a container whose boundary is the
-# directories its entry mounts, so a permission prompt inside it only asks the
-# container. Hook trust rides along for the same reason: codex asks it once
-# per config, cannot persist the answer through a read-only config.toml, and
-# with folder trust pre-answered (see box/harness.py, _trusted_config) it was
-# the next first screen a box session died on.
-BOX_ARGS = ("--dangerously-bypass-approvals-and-sandbox", "--dangerously-bypass-hook-trust")
-
-
 def is_handle(auth):
     """True when the broker handed us an opaque handle, not a real token.
 

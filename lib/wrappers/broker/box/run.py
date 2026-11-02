@@ -191,12 +191,10 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     # address — see _ports.
     cmd += _ports(name, profile)
 
-    # What each harness needs set only inside a box — a flag for most of them,
-    # a variable for one that has no flag. See environ.harness_box.
-    cmd += environ.harness_box(provider)
-    for other, _carried in companions:
-        cmd += environ.harness_box(other)
-
+    # What a harness needs set only inside a box — opencode's permission model,
+    # which has no flag — is a variable like any other, and the box says it:
+    # environ.own below, from "env" in boxes.json. The engine adds nothing of
+    # its own here.
     cmd += environ.own(profile)
 
     # The one place a box may say which chat is in it. See box/report.py: the
@@ -221,11 +219,12 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
         cmd += http_mcp.codex_args(provider, env)
 
     # Flags the box hands the harness, before what you typed — so a flag you
-    # pass on the command line still wins. First the engine's own defaults
-    # (provider BOX_ARGS): a broker box is the externally sandboxed environment
-    # the danger flags describe — its boundary is what it mounts, and a
-    # permission prompt inside it only asks the container. Then the box's own
-    # "args" on top of those, which may still tighten or widen per harness:
+    # pass on the command line still wins. They come from the box's own "args"
+    # and from nowhere else. The engine used to add a harness's danger flags by
+    # itself, on the grounds that a box IS the externally sandboxed environment
+    # those flags describe. The owner's answer: a box says what its harness may
+    # do, in the file he edits. So "__defaults" in boxes.json carries what every
+    # box passes, and a box tightens or widens it per harness:
     #
     #   "args": { "codex": ["--full-auto"], "claude": ["--permission-mode", "plan"] }
     #
@@ -233,8 +232,7 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     extra = profile.get("args")
     if isinstance(extra, dict):
         extra = extra.get(provider.NAME) or []
-    flags = [str(flag) for flag in getattr(provider, "BOX_ARGS", ())]
-    flags += [str(flag) for flag in extra or []]
+    flags = [str(flag) for flag in extra or []]
     # What is already on the command line wins, and a flag that CARRIES A VALUE
     # has to be weighed as the pair it is. Weighing each word on its own was
     # right while every one of these was a lone switch like
@@ -244,8 +242,18 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     # value was appended on its own — and a bare word on a harness command line
     # is the PROMPT. The model's name would have gone silently into the
     # question.
+    # ...and a flag this list ALREADY GAVE must not go a second time. The two
+    # sources that feed it, "__defaults" and the box itself, name the same
+    # switch often — and codex 0.166 refuses a repeat outright ("cannot be used
+    # multiple times"), prints its usage and exits before the session starts.
+    # Only what this loop appended counts: the docker command above carries
+    # words of its own, and `-c` there is codex's MCP override, not a flag
+    # anybody meant to pass twice.
+    given = []
+
     def present(flag):
-        return flag in argv or any(a.startswith(flag + "=") for a in argv)
+        return (flag in argv or flag in given
+                or any(a.startswith(flag + "=") for a in argv + given))
     position = 0
     while position < len(flags):
         flag = flags[position]
@@ -256,8 +264,10 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
         if present(flag):
             continue
         cmd.append(flag)
+        given.append(flag)
         if pair:
             cmd.append(value)
+            given.append(value)
 
     cmd += argv
     return cmd

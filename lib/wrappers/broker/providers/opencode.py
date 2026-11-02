@@ -7,7 +7,6 @@ this harness needs in order to run inside a box, and what must not be shared
 with the copy outside it.
 """
 
-import json
 import os
 
 from .. import config
@@ -24,26 +23,22 @@ CREDENTIALS = None
 HOME_ENV = "HOME"
 CANONICAL_HOME = os.path.expanduser("~")
 
-# The other harnesses get a flag for this — claude and agy take
-# --dangerously-skip-permissions, codex takes --dangerously-bypass-approvals.
-# opencode has NO such flag: not at the top level, not on `run`. Its permission
-# model lives in the config and nowhere else.
+# This harness has NO permission flag: not at the top level, not on `run`. Its
+# permission model lives in the config and nowhere else, and inside a box a
+# prompt asks the container, where nobody can answer — opencode stopped on
+# every write and every shell command and looked broken.
 #
-# So the box is told through the config, and the config arrives in a variable
-# rather than a file. opencode layers OPENCODE_CONFIG_CONTENT on top of whatever
-# real config it finds, which is what makes this safe to do: the box keeps the
-# "mcp" and "provider" blocks from ~/.config/opencode/opencode.jsonc and gains
-# only the permission. Writing "permission" into that file instead would take
-# the prompts off the HOST too, outside any box — the same file serves both.
+# The answer is a variable, and it is NOT set here. opencode layers
+# OPENCODE_CONFIG_CONTENT on top of the real config it finds, so the box keeps
+# the "mcp" and "provider" blocks of ~/.config/opencode/opencode.jsonc and
+# gains only what the variable says. The owner writes it in boxes.json, under
+# "env" — in "__defaults" to give it to every box:
 #
-# A box is the externally sandboxed environment those flags describe: its
-# boundary is what it mounts. A prompt inside it asks the container, and there
-# is nobody in there to answer — so opencode stopped on every write and every
-# shell command and looked broken.
-BOX_ENV = {
-    "OPENCODE_CONFIG_CONTENT": json.dumps(
-        {"$schema": "https://opencode.ai/config.json", "permission": "allow"}),
-}
+#   "env": { "OPENCODE_CONFIG_CONTENT":
+#            "{\"permission\": \"allow\"}" }
+#
+# Writing "permission" into opencode.jsonc instead would take the prompts off
+# the HOST too, outside any box: one file serves both.
 
 # Its servers are declared in JSON with comments, under "mcp", and each entry
 # spells a command as a LIST rather than a string:

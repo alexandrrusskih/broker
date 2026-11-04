@@ -1,8 +1,10 @@
 """The container command line: every flag that makes a box a box."""
 
+import errno
 import os
 import re
 import shutil
+import socket
 import sys
 
 from ..out import die, warn
@@ -31,6 +33,45 @@ def _must_exist(name, host):
     if os.path.exists(host):
         return
     die("the '%s' box lists %s, which does not exist" % (name, host))
+
+
+def _in_use(address, port):
+    """Whether this host port is already answered by something else.
+
+    Docker takes a published port when it CREATES a container, and refuses the
+    whole container when the port is gone: `docker run` exits 125 before the
+    harness starts a single line. Measured, and it cost an hour: the aic
+    profile publishes one port for the dev server, the box holding that server
+    had it, and every later box in the same profile died at creation. The
+    screen showed the broker's banner, then the resume line the exit path
+    prints, and no error at all — the box looked like a harness that starts and
+    stops for no reason.
+
+    One profile serves many boxes, and only one of them can hold a port. So a
+    taken port is not a reason to refuse the box: the second box wants the
+    project and the harness, not the port the first one is already serving on.
+
+    The probe deliberately does NOT set SO_REUSEADDR. The question here is the
+    one docker will ask — may this address and port be bound right now — and
+    that flag answers a different question, about a socket that closed.
+
+    Only EADDRINUSE counts. An address that this machine does not have
+    (Tailscale down, so the address in the profile resolves to nothing) fails
+    with EADDRNOTAVAIL, which is not a port conflict: leave the flag in place
+    and let docker say what is wrong in its own words.
+    """
+    try:
+        family = socket.AF_INET6 if ":" in address else socket.AF_INET
+        probe = socket.socket(family, socket.SOCK_STREAM)
+    except OSError:
+        return False  # cannot ask; let docker answer
+    try:
+        probe.bind((address, int(port)))
+    except OSError as exc:
+        return exc.errno == errno.EADDRINUSE
+    finally:
+        probe.close()
+    return False
 
 
 def _ports(name, profile):
@@ -79,6 +120,13 @@ def _ports(name, profile):
             if not number.isdigit() or not 1 <= int(number) <= 65535:
                 die("the '%s' box asks to publish '%s': '%s' is not a port number"
                     % (name, text, number))
+        if _in_use(address, host_port):
+            warn("the '%s' box does not publish %s:%s — that port is already "
+                 "held, most likely by another box of this profile. This box "
+                 "runs without it; the one holding the port keeps serving. "
+                 "Find it with: docker ps --format '{{.ID}} {{.Ports}}'"
+                 % (name, address, host_port))
+            continue
         args += ["-p", "%s:%s:%s" % (address, host_port, box_port)]
     return args
 

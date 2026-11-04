@@ -216,7 +216,7 @@ def command(provider, name, profile, argv, env, remote=False, companions=()):
     cmd.append("broker-box-entry")
     cmd.append(provider.BIN)
     if profile.get("mcp") is not False:
-        cmd += http_mcp.codex_args(provider, env)
+        cmd += http_mcp.codex_args(provider, env, profile)
 
     # Flags the box hands the harness, before what you typed — so a flag you
     # pass on the command line still wins. They come from the box's own "args"
@@ -318,7 +318,7 @@ def _harness(provider, profile, env, name, remote, mounted, projects, claimed, i
     # mounted at the command's path, so there is one shim for all of them, and
     # it tells them apart by the arguments it is handed.
     by_command = {}
-    for server_name, server in sorted(mcp.mcp_servers(provider, env).items()):
+    for server_name, server in sorted(mcp.mcp_servers(provider, env, profile).items()):
         by_command.setdefault(server["command"][0], []).append((server_name, server))
 
     for target, group in sorted(by_command.items()):

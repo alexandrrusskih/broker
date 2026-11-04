@@ -59,7 +59,7 @@ def own_home(provider, profile, env, name, mounted):
     # points at an inode nothing links to any more, and inside the box the file
     # has simply vanished: claude reported ~/.claude.json missing and started
     # offering to restore it from a backup, while the host's copy was fine.
-    http_config = None if profile.get("mcp") is False or provider.NAME == "codex" else http_mcp.stage(provider, env, name)
+    http_config = None if profile.get("mcp") is False or provider.NAME == "codex" else http_mcp.stage(provider, env, name, profile)
     http_config_mounted = False
     http_mode = "rw" if provider.NAME == "claude" else "ro"
     settings_mounted = set()

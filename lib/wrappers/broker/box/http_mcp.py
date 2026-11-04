@@ -47,13 +47,33 @@ def _box_url(value):
     return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
 
 
-def codex_args(provider, env):
-    """Override loopback MCP URLs without mounting Codex's writable config file."""
+def codex_args(provider, env, profile=None):
+    """Spell out, on the command line, what codex's config file cannot say here.
+
+    Two things. A loopback MCP URL, which the box cannot dial as it stands. And
+    a server the BOX declares (see mcp.declared): codex's config travels
+    read-only, so the declaration arrives as `-c` instead of as a line in the
+    file.
+    """
     if provider.NAME != "codex":
         return []
+    extra = []
+    from .mcp import declared
+
+    for name, server in sorted(declared(profile or {}).items()):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            warn("cannot declare MCP server %r for the box: the name is not a "
+                 "bare TOML key" % name)
+            continue
+        argv = server["command"]
+        extra += ["-c", "mcp_servers.%s.command=%s" % (name, json.dumps(argv[0]))]
+        if argv[1:]:
+            extra += ["-c", "mcp_servers.%s.args=%s" % (name, json.dumps(list(argv[1:])))]
+        for key, value in sorted((server.get("env") or {}).items()):
+            extra += ["-c", "mcp_servers.%s.env.%s=%s" % (name, key, json.dumps(str(value)))]
     path = _config_path(provider, env)
     if not path or not os.path.isfile(path):
-        return []
+        return extra
     try:
         import tomllib
 
@@ -61,8 +81,8 @@ def codex_args(provider, env):
             servers = tomllib.load(handle).get("mcp_servers", {})
     except (OSError, ValueError) as error:
         warn("could not read MCP URLs for the box: %s" % error)
-        return []
-    args = []
+        return extra
+    args = list(extra)
     for name, server in servers.items():
         if not isinstance(server, dict):
             continue
@@ -75,8 +95,31 @@ def codex_args(provider, env):
     return args
 
 
-def stage(provider, env, box):
-    """Return (box copy, source path, mount target), or None if no URL changes."""
+def _shape(provider, server):
+    """One declared server, as THIS harness spells a server it starts itself."""
+    argv = server["command"]
+    if provider.NAME == "opencode":
+        entry = {"type": "local", "command": list(argv), "enabled": True}
+        if server.get("env"):
+            entry["environment"] = dict(server["env"])
+        return entry
+    entry = {"command": argv[0], "args": list(argv[1:])}
+    if provider.NAME == "claude":
+        entry["type"] = "stdio"
+    else:
+        entry["disabled"] = False
+    if server.get("env"):
+        entry["env"] = dict(server["env"])
+    return entry
+
+
+def stage(provider, env, box, profile=None):
+    """Return (box copy, source path, mount target), or None if nothing changes.
+
+    Two things can change: a loopback URL, which the box cannot dial as it
+    stands, and a server the BOX declares (see mcp.declared) and the machine's
+    own config says nothing about.
+    """
     path = _config_path(provider, env)
     if not path or not os.path.isfile(path):
         return None
@@ -108,11 +151,28 @@ def stage(provider, env, box):
     for server in servers.values():
         if not isinstance(server, dict):
             continue
-        for key in ("url", "serverUrl"):
-            old = server.get(key)
+        for name in ("url", "serverUrl"):
+            old = server.get(name)
             new = _box_url(old)
             if new:
                 text = text.replace(old, new)
+
+    # What the box declares for itself. Written out as JSON rather than patched
+    # into the text: there is no line to replace, the server is not in the file
+    # at all. The box's copy loses the comments of the original, which only the
+    # person editing the real file reads.
+    from .mcp import declared
+
+    extra = declared(profile or {}) if kind in ("json", "jsonc") else {}
+    if extra:
+        if kind == "jsonc":
+            data = json.loads(_strip_comments(text))
+        else:
+            data = json.loads(text)
+        servers = data.setdefault(key, {})
+        for name, server in sorted(extra.items()):
+            servers[name] = _shape(provider, server)
+        text = json.dumps(data, indent=2)
     if text == original:
         return None
     directory = os.path.join(config.CONFIG_DIR, "box", "http-mcp", box, window_key())

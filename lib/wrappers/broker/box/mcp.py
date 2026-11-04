@@ -19,7 +19,45 @@ from .paths import expand
 # Inside a container "localhost" is the container. This is the host.
 HOST_GATEWAY = "host.docker.internal"
 
-def mcp_servers(provider, env=None):
+def declared(profile):
+    """The servers a BOX declares, for itself alone.
+
+    A machine's harness config is the whole fleet's: a server written there is
+    in every agent's tool list and in every box. Some belong to one box — an
+    analytics service one team works with, say. So a box may declare its own,
+    in the same "mcp" block that configures the others, by giving a command:
+
+      "mcp": { "bqmcp": { "command": ["mcp-remote", "https://..."] } }
+
+    It is bridged like any other command server: the server runs on THIS
+    machine and the box gets a stand-in at the command's own path. So its
+    login is this machine's login, made once, and no credential of its own
+    ever enters the box.
+    """
+    found = {}
+    for name, entry in sorted((profile.get("mcp") or {}).items()):
+        if not isinstance(entry, dict):
+            continue
+        command = entry.get("command")
+        if not command:
+            continue  # the usual case: settings for a server already declared
+        argv = [str(part) for part in command] if isinstance(command, (list, tuple)) \
+            else [str(command)] + [str(part) for part in entry.get("args") or []]
+        # The stand-in is mounted AT the command's path, so the path is what
+        # the box needs: a bare name has nowhere to be mounted, and docker
+        # would refuse the whole box over it.
+        if not argv or not argv[0].startswith("/"):
+            warn("box MCP server %r needs the command's full path, not %r"
+                 % (name, argv[0] if argv else ""))
+            continue
+        found[name] = {"command": argv,
+                       "env": dict(entry.get("env") or {}),
+                       "inherit": [v for v in (entry.get("env_vars") or [])
+                                   if isinstance(v, str)]}
+    return found
+
+
+def mcp_servers(provider, env=None, profile=None):
     """The MCP servers this harness declares that a box would otherwise lose.
 
     Only the ones started as a COMMAND: a server reached over http needs nothing
@@ -87,6 +125,8 @@ def mcp_servers(provider, env=None):
             # as "server missing" and is nothing of the kind.
             "inherit": [v for v in (server.get("env_vars") or []) if isinstance(v, str)],
         }
+    # What the box declares comes last: its own word about its own servers.
+    found.update(declared(profile or {}))
     return found
 
 

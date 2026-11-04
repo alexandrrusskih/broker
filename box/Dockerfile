@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # `broker box build --claude <v> --codex <v>` overrides these.
 # Pinned rather than floating: an image whose harness version changes between
 # builds is an image you cannot reproduce a bug in. Raise them deliberately.
-ARG CLAUDE_VERSION=2.1.309
+ARG CLAUDE_VERSION=2.1.311
 ARG CODEX_VERSION=0.166.0
 # bun is a project dependency, not a harness one: repositories pin it in
 # "packageManager", and without it `bun install` and every script that shells out
@@ -77,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
 ARG RTK_VERSION=1.1.0
-ARG AGY_VERSION=1.4.12
+ARG AGY_VERSION=1.5.0
 ARG GH_VERSION=2.103.3
 ARG GLAB_VERSION=1.126.0
 ARG GITLEAKS_VERSION=8.30.1

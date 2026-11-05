@@ -1,5 +1,6 @@
 """The harness's own files and directories, as the box sees them."""
 
+import datetime
 import hashlib
 import json
 import os
@@ -108,20 +109,67 @@ def own_home(provider, profile, env, name, mounted):
 
 
 def _expiry(path):
-    """When the token in this auth file runs out, as the string it is stored as.
+    """When the token in this auth file runs out, as the instant it names.
 
-    Comparable with itself and nothing else: ISO-8601 instants of one shape
-    sort as time, and anything unreadable sorts before everything, which means
-    "do not prefer this one".
+    Parsed, not compared as text. Two writers fill this field in two shapes:
+    a refresh out here writes the local offset ("…+01:00") and the harness
+    inside a box writes UTC ("…Z"). Read as strings they compare by digit, so
+    18:31Z — an hour in the future — sorted BELOW 18:45+01:00, which is the
+    same minute as 17:45Z. The comparison decided which credential survived,
+    and on this machine it decided it backwards.
+
+    Anything unreadable is None, which prefers nothing.
     """
     try:
         with open(path) as handle:
             loaded = json.load(handle)
     except (OSError, ValueError):
-        return ""
+        return None
     token = loaded.get("token") if isinstance(loaded, dict) else None
     when = token.get("expiry") if isinstance(token, dict) else None
-    return when if isinstance(when, str) else ""
+    if not isinstance(when, str):
+        return None
+    text = when.strip()
+    if text[-1:] in ("Z", "z"):
+        text = text[:-1] + "+00:00"
+    # Go writes nanoseconds; fromisoformat takes microseconds.
+    text = re.sub(r"(\.\d{6})\d+", r"\1", text)
+    try:
+        parsed = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    # A bare instant is UTC here: both writers state a zone, and treating one
+    # that does not as local time would move it by the machine's offset.
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
+def _merged_credentials(copy, source):
+    """The box's refreshed token inside the profile's own record.
+
+    Not a file swap. The two harnesses do not write the same record: the agy
+    in an image built last week writes auth_method, id_token_email and token,
+    and the newer one on this machine writes auth_method, id_token and token.
+    Copying the file whole therefore DELETED id_token from the profile — one
+    box run left the host account a field short, and nothing said so.
+
+    So keep every field the profile has, and let the box's own fields win on
+    top of them. Returns None when either side is not a record to merge, and
+    the caller then copies the file as it stands.
+    """
+    try:
+        with open(copy) as handle:
+            fresh = json.load(handle)
+        with open(source) as handle:
+            held = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(fresh, dict) or not isinstance(held, dict):
+        return None
+    merged = dict(held)
+    merged.update(fresh)
+    return merged
 
 
 def _carry_credentials_back(copy, source):
@@ -140,10 +188,24 @@ def _carry_credentials_back(copy, source):
     """
     if not os.path.exists(copy):
         return
-    if _expiry(copy) <= _expiry(source):
+    fresh = _expiry(copy)
+    if fresh is None:
         return
+    held = _expiry(source)
+    if held is not None and fresh <= held:
+        return
+    merged = _merged_credentials(copy, source)
     try:
-        shutil.copy2(copy, source)
+        if merged is None:
+            shutil.copy2(copy, source)
+        else:
+            # Beside and renamed over, like every other writer of this file:
+            # a reader that opens it mid-write must not see half a record.
+            temp = source + ".box-carry"
+            with open(temp, "w") as handle:
+                os.chmod(temp, 0o600)  # it is a credential
+                json.dump(merged, handle)
+            os.replace(temp, source)
         os.chmod(source, 0o600)  # it is a credential
     except OSError as exc:
         warn("could not carry the box's %s token back (%s)"

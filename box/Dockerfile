@@ -53,10 +53,10 @@ RUN npm install -g --no-fund --no-audit \
 # compose is not packaged for bookworm, so the plugin comes from its release
 # directly. Pinned: a test suite that pulls a different compose between runs is
 # a test suite whose failures you cannot reproduce.
-ARG COMPOSE_VERSION=v5.6.1
+ARG COMPOSE_VERSION=v5.7.0
 # A project's own build may ask for buildx — and a box that has docker but not
 # buildx fails at the first `docker build` with a plugin that is simply absent.
-ARG BUILDX_VERSION=v0.38.1
+ARG BUILDX_VERSION=v0.38.2
 # docker.io is the daemon only on Debian 13; the client is its own package now,
 # and without it the box has a daemon nothing can talk to.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -77,9 +77,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # so bridging it to the host would cost a round trip per command — it belongs in
 # the image.
 ARG RTK_VERSION=1.1.0
-ARG AGY_VERSION=1.5.0
+ARG AGY_VERSION=1.5.1
 ARG GH_VERSION=2.103.3
-ARG GLAB_VERSION=1.126.0
+ARG GLAB_VERSION=1.128.0
 ARG GITLEAKS_VERSION=8.30.1
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \

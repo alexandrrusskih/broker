@@ -8,6 +8,7 @@ declares it, and the provider module imports this one.
 
 import os
 import re
+import sqlite3
 
 
 def session_error(path):
@@ -119,6 +120,7 @@ def harness_env(env, canonical, home_env):
     _unlink_shared_databases(env.get(home_env), canonical)
     # Not forced: someone who set it meant it.
     if env.get(SQLITE_ENV):
+        _share_threads(env[SQLITE_ENV], canonical)
         _repair_rollout_paths(env[SQLITE_ENV], canonical)
         return
     from ..box.paths import window_key
@@ -135,6 +137,7 @@ def harness_env(env, canonical, home_env):
     if fresh:
         _seed_databases(own, canonical)
     env[SQLITE_ENV] = own
+    _share_threads(own, canonical)
     _repair_rollout_paths(own, canonical)
 
 
@@ -327,3 +330,195 @@ def _seed_databases(own, canonical):
                 shutil.copy2(source, target)
         except OSError:
             return  # an empty set still works, it is only slower
+
+
+# The tables that hold a conversation, and the column that ties a row to one.
+# state_5 holds the index a resume looks up. thread_history holds the body:
+# this harness moved the turns of a conversation into SQLite and now writes
+# almost none of them to the rollout file.
+THREAD_TABLES = (
+    ("state_5.sqlite", (("threads", "id"),)),
+    ("thread_history_1.sqlite", (("thread_items", "thread_id"),
+                                 ("thread_turns", "thread_id"))),
+)
+
+# One publisher at a time. Every one of them is a broker on this host, so a
+# file lock is enough — which is the whole reason this works at all.
+SHARE_LOCK = os.path.join(SQLITE_BASE, "share.lock")
+SHARE_WAIT_S = 2
+
+
+def _share_threads(own, canonical):
+    """Make a conversation written in one window readable from every window.
+
+    Each window gets its own databases because this harness cannot share one:
+    a SQLite file written from a container and from the host at the same time
+    tears, because the lock does not cross the boundary. Nothing, though, ever
+    carried a window's conversations back out again, so a thread existed only
+    for the window that created it.
+
+    Measured here: the shared index knew 13,777 threads, the nine window copies
+    knew between 13,780 and 13,807, and one thread the person asked for lived in
+    three of the nine. Every other window answered "no rollout found for thread
+    id", which reads as lost work and is a thread sitting in the window next to
+    it.
+
+    The shared set is the meeting point, and no container ever mounts it: these
+    databases are not in BOX_SHARED, and a link to them is taken out of the
+    profile at every start. So it has exactly one writer at a time, on this
+    host, where the lock does work.
+
+    Rows are only ever added. A thread the other side already holds is left
+    exactly as that side holds it.
+    """
+    handle = _share_lock()
+    if handle is None:
+        return  # another window is at it. A start must not wait on this.
+    try:
+        for name, tables in THREAD_TABLES:
+            mine = os.path.join(own, name)
+            theirs = os.path.join(canonical, name)
+            if not os.path.isfile(mine) or not os.path.isfile(theirs):
+                continue
+            try:
+                _share_one(mine, theirs, tables)
+            except (OSError, sqlite3.Error) as exc:
+                from ..out import warn
+                warn("could not share Codex threads through %s (%s)"
+                     % (os.path.basename(theirs), exc))
+    finally:
+        handle.close()
+
+
+def _share_lock():
+    """The lock, or None when somebody else holds it.
+
+    Never a blocking wait: this runs before every start, and a window that
+    cannot share its threads this second still has to open.
+    """
+    import fcntl
+    import time
+
+    try:
+        os.makedirs(os.path.dirname(SHARE_LOCK), mode=0o700, exist_ok=True)
+        handle = open(SHARE_LOCK, "a")
+    except OSError:
+        return None
+    for _ in range(int(SHARE_WAIT_S * 10)):
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return handle
+        except OSError:
+            time.sleep(0.1)
+    handle.close()
+    return None
+
+
+def _share_one(mine, theirs, tables):
+    """Share one pair of databases, and say which way the rows may travel."""
+    ours = shared = None
+    connection = sqlite3.connect(mine, timeout=10)
+    try:
+        connection.execute("ATTACH DATABASE ? AS shared", (theirs,))
+        ours = _schema_version(connection, "main")
+        shared = _schema_version(connection, "shared")
+        if ours is None or shared is None:
+            return  # an empty file somebody left behind, not a database of ours
+        # Down first, always: this copy is either on the same migration as the
+        # shared one or on a later one, and a later schema has the columns of
+        # the earlier one. So the rows fit.
+        for table, key in tables:
+            _copy_new_threads(connection, table, key, "shared", "main")
+        # Up only on the same migration. Writing into an earlier schema would
+        # mean dropping the columns it does not have yet, and the next window to
+        # read the row would find the fields it needs missing.
+        if ours == shared:
+            for table, key in tables:
+                _copy_new_threads(connection, table, key, "main", "shared")
+        connection.commit()
+    finally:
+        connection.close()  # this detaches the other database too
+    if ours is not None and shared is not None and ours > shared:
+        _publish(mine, theirs)
+
+
+def _publish(mine, theirs):
+    """Put this window's copy where the shared one was, schema and all.
+
+    The harness does not open the shared set any more, so nothing migrates it:
+    measured here, the windows were on migration 59 of the index and 8 of the
+    history while the shared copy sat on 55 and 6, four and two behind. A merge
+    into it had nowhere to put the newer columns, so the shared copy could never
+    learn a new thread again — which is the state this whole machine was in.
+
+    The copy already holds every thread the shared one held: it was merged down
+    first, inside the same lock. So handing the file over loses nothing and
+    brings the schema forward in the one way that is certainly right, which is
+    the harness's own migration of its own database.
+
+    Copied through SQLite rather than cloned: a clone of a file another process
+    is writing can tear, and this file is the one every later window starts
+    from. 634 MB takes 1.1 s, measured, and this happens once per migration.
+    """
+    staging = theirs + ".sharing"
+    try:
+        source = sqlite3.connect("file:%s?mode=ro" % mine, uri=True)
+        try:
+            target = sqlite3.connect(staging)
+            try:
+                source.backup(target)
+            finally:
+                target.close()
+        finally:
+            source.close()
+        os.replace(staging, theirs)
+    except (OSError, sqlite3.Error):
+        for leftover in (staging, staging + "-wal", staging + "-shm"):
+            try:
+                os.unlink(leftover)
+            except OSError:
+                pass
+        raise
+    # The journals of the file that was here belong to a database that is gone.
+    # Leaving one beside the new file is how a fresh start reads "database disk
+    # image is malformed".
+    for extra in ("-wal", "-shm"):
+        try:
+            os.unlink(theirs + extra)
+        except OSError:
+            pass
+
+
+def _schema_version(connection, schema):
+    """The migration this database last applied, or None when it has none."""
+    try:
+        row = connection.execute(
+            "SELECT max(version) FROM %s._sqlx_migrations" % schema).fetchone()
+    except sqlite3.Error:
+        return None
+    return row[0] if row and row[0] is not None else None
+
+
+def _shared_columns(connection, table):
+    """The columns both copies of a table have, in the order the first holds them."""
+    mine = [row[1] for row in connection.execute("PRAGMA main.table_info(%s)" % table)]
+    theirs = {row[1] for row in connection.execute("PRAGMA shared.table_info(%s)" % table)}
+    return [name for name in mine if name in theirs]
+
+
+def _copy_new_threads(connection, table, key, source, target):
+    """Copy the rows of the threads the target has never seen.
+
+    By thread, not by row. Half a conversation is worse than none of it, and a
+    row-level merge of a table the harness writes as well would have to decide
+    which copy of a row is the current one. A thread the target does not have at
+    all asks no such question.
+    """
+    columns = _shared_columns(connection, table)
+    if not columns:
+        return  # one side does not have this table: an empty file, or an older set
+    names = ", ".join('"%s"' % column for column in columns)
+    connection.execute(
+        'INSERT OR IGNORE INTO %s."%s" (%s) SELECT %s FROM %s."%s" '
+        'WHERE "%s" NOT IN (SELECT "%s" FROM %s."%s")'
+        % (target, table, names, names, source, table, key, key, target, table))

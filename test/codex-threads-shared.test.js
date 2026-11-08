@@ -115,3 +115,43 @@ print("own is untouched", threads(own))
   assert.match(out, /size 0\b|size 4096/);
   assert.match(out, /own is untouched \['mine'\]/);
 });
+
+test("the first window makes the meeting point when there is none", async (t) => {
+  const dir = await temp(t);
+  const out = engine(`
+import os
+${build()}
+from broker.providers import codex_db
+own, shared = "${dir}/own", "${dir}/shared"
+os.makedirs(own); os.makedirs(shared)
+make(own, 61, "", ["mine"], [("mine", "a")])
+codex_db._share_threads(own, shared)
+print("shared index exists", os.path.isfile(shared + "/state_5.sqlite"))
+print("shared holds", threads(shared))
+print("the body came too", items(shared, "mine"))
+`);
+
+  // Measured on the second host here: nine window copies and not one database
+  // in the shared home, so no thread was ever readable from a second window.
+  assert.match(out, /shared index exists True/);
+  assert.match(out, /shared holds \['mine'\]/);
+  assert.match(out, /the body came too \['a'\]/);
+});
+
+test("an empty leftover does not become the meeting point", async (t) => {
+  const dir = await temp(t);
+  const out = engine(`
+import os, sqlite3
+${build()}
+from broker.providers import codex_db
+own, shared = "${dir}/own", "${dir}/shared"
+os.makedirs(own); os.makedirs(shared)
+for name in ("state_5.sqlite", "thread_history_1.sqlite"):
+    sqlite3.connect(own + "/" + name).close()  # no migration table at all
+codex_db._share_threads(own, shared)
+print("shared index exists", os.path.isfile(shared + "/state_5.sqlite"))
+`);
+
+  // Handing that over would give every later window an empty start.
+  assert.match(out, /shared index exists False/);
+});

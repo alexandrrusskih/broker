@@ -378,10 +378,19 @@ def _share_threads(own, canonical):
         for name, tables in THREAD_TABLES:
             mine = os.path.join(own, name)
             theirs = os.path.join(canonical, name)
-            if not os.path.isfile(mine) or not os.path.isfile(theirs):
+            if not os.path.isfile(mine):
                 continue
             try:
-                _share_one(mine, theirs, tables)
+                if os.path.isfile(theirs):
+                    _share_one(mine, theirs, tables)
+                elif _version_of(mine) is not None:
+                    # There is no meeting point yet. A machine set up after
+                    # windows got their own databases never had one: measured
+                    # on the second host here, nine window copies and not a
+                    # single database in the shared home, so every window
+                    # started from nothing and no thread was readable twice.
+                    # The first window with something to share makes it.
+                    _publish(mine, theirs)
             except (OSError, sqlite3.Error) as exc:
                 from ..out import warn
                 warn("could not share Codex threads through %s (%s)"
@@ -462,6 +471,7 @@ def _publish(mine, theirs):
     """
     staging = theirs + ".sharing"
     try:
+        os.makedirs(os.path.dirname(theirs), exist_ok=True)
         source = sqlite3.connect("file:%s?mode=ro" % mine, uri=True)
         try:
             target = sqlite3.connect(staging)
@@ -487,6 +497,23 @@ def _publish(mine, theirs):
             os.unlink(theirs + extra)
         except OSError:
             pass
+
+
+def _version_of(path):
+    """The migration a database on its own applied, or None when it has none.
+
+    Used before a file becomes the shared one: an empty leftover has no
+    migration table, and handing that over as the meeting point would give
+    every later window an empty start.
+    """
+    try:
+        connection = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        return _schema_version(connection, "main")
+    finally:
+        connection.close()
 
 
 def _schema_version(connection, schema):

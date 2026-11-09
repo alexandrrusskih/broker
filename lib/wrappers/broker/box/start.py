@@ -13,7 +13,8 @@ from . import boxes, report, state, watch
 from .companions import companions
 from .run import command
 from .sync import _sync_back
-from .sessions import _exit_note, _pin_session, _session_from_argv, _session_it_named
+from .sessions import (_exit_note, _pin_session, _session_from_argv,
+                       _session_it_named, _session_path)
 from .store import _remember, _resume_hint, _session_from_store
 from .terminal import (_guard_terminal, _restore_terminal, _terminal_state,
                        _through_terminal)
@@ -75,6 +76,20 @@ def _over_ssh(cmd, machine, name):
     # side. Without it the pane comes up in line mode and nothing redraws.
     ssh = ["ssh", "-t", "-o", "ServerAliveInterval=20", "-o", "ServerAliveCountMax=120", target]
     return ssh + ["--"] + [shlex.quote(part) for part in out]
+
+
+def _proved(provider, session, workdir, env):
+    """The id back, but only when a session of that name is on disk.
+
+    For an id the broker GUESSED. A harness that files its sessions where we
+    can see them makes this one glob, and it is the difference between a way
+    back and a sentence that looks like one.
+    """
+    if not session or isinstance(session, (list, tuple)):
+        return session
+    if not getattr(provider, "SESSION_GLOB", None):
+        return session  # nothing to check it against
+    return session if _session_path(provider, session, workdir, env) else None
 
 
 def exec_box(provider, asked, argv, env, account=None):
@@ -217,13 +232,31 @@ def exec_box(provider, asked, argv, env, account=None):
     # it can be printed is not a source, it is a guess with paperwork.
     # The id the watcher last recorded comes first: after a /clear the pinned id
     # names a chat the person has left, and the way back must name the new one.
-    session = (watcher.sent
-               or pinned
-               or _session_it_named(printed, getattr(provider, "SESSION_PRINTED", None), provider)
-               or _session_from_argv(provider, argv))
+    # A GUESS IS OFFERED ONLY WHEN ITS FILE IS THERE. The two sources below read
+    # a screen and a command line, and neither one proves that the conversation
+    # exists. agy prints `warning: conversation "<id>" not found` as it starts,
+    # _session_it_named takes the LAST id in the tail whatever the line around it
+    # says, and so the broker read the id out of the very message that said it
+    # was absent, wrote it down, and offered it back as the way in. The person
+    # pasted it, agy ignored the flag again, and the broker handed over the same
+    # id once more. Measured: three runs of `agy --box m` in three minutes,
+    # three ids in sessions.log, and no database for any of the three.
+    #
+    # What the box itself reported, and the id this process chose before the
+    # start, are not checked. Those are facts rather than guesses, and a chat
+    # that has only just begun has nothing on disk yet.
+    session = watcher.sent or pinned
+    if session is None:
+        for guess in (_session_it_named(printed, getattr(provider, "SESSION_PRINTED", None), provider),
+                      _session_from_argv(provider, argv)):
+            session = _proved(provider, guess, workdir, env)
+            if session:
+                break
     _remember(provider, asked, workdir, session, account, status)
     if session is None:
-        session = _session_from_store(provider, name, started)
+        # The same rule for the store. The ids written there before this check
+        # existed name conversations that were never on this machine.
+        session = _proved(provider, _session_from_store(provider, name, started), workdir, env)
     # Said whatever happened, including when there is no id to say: a box that
     # goes quiet leaves someone staring at a prompt wondering what became of an
     # hour's conversation. Without an id the line points at the harness's own

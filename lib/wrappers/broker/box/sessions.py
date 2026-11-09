@@ -131,7 +131,18 @@ def _session_from_argv(provider, argv):
     for word in argv or ():
         if wanted and _id_shape(provider).fullmatch(word.encode()):
             return word
-        wanted = word in pickers
+        # `--conversation=<id>` is the same instruction as `--conversation <id>`,
+        # and this read only the spaced form. _pin_session above has always cut
+        # the word on "=", so the two functions read one command line two ways:
+        # the id was pinned and then not recognised as named. Measured with
+        # `agy --conversation=d8c68f72-... --box m`.
+        key, _, inline = word.partition("=")
+        if key in pickers and inline:
+            if _id_shape(provider).fullmatch(inline.encode()):
+                return inline
+            wanted = False
+            continue
+        wanted = key in pickers
     return None
 # How a session id looks. Most harnesses use a uuid; opencode spells its own
 # "ses_" and then letters and digits, so the shape is asked of the provider

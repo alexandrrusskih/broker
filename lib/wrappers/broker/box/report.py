@@ -112,8 +112,16 @@ def release(box):
     other's.
     """
     shutil.rmtree(directory(box), ignore_errors=True)
-    # The window above it, only while it is empty: another launch may be in it.
-    try:
-        os.rmdir(os.path.dirname(directory(box)))
-    except OSError:
-        pass
+    # THE WINDOW ABOVE IT STAYS, empty. It used to go as soon as it emptied,
+    # and that made the first launch in a window hand docker a path whose every
+    # part was made moments earlier. Twice a start failed on exactly such a
+    # path — "bind source path does not exist", once for the joppa box and once
+    # for m — and by the time anyone looked the directory was gone, because
+    # this function had already run.
+    #
+    # That docker refused it FOR that reason is not proven, and this is not
+    # offered as the cure. It is that an empty directory costs one inode, the
+    # question it raises costs an afternoon, and the comment above this one
+    # already says of the launches inside it that removing them is a person's
+    # job rather than a guess made by whichever launch is starting. The window
+    # is the same kind of thing.

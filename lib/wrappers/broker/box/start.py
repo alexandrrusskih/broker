@@ -169,6 +169,13 @@ def exec_box(provider, asked, argv, env, account=None):
         # The pane this box belonged to, and whatever it said about its chat.
         # Left behind, both would name a conversation that has ended.
         watcher.stop()
+        # Asked BEFORE the directory is taken away, because a mount that failed
+        # names this path and nothing afterwards can say whether it was there.
+        # Measured: a start refused with "bind source path does not exist" on
+        # the report directory, and the only evidence left by then was that the
+        # path was absent — which this line removes either way.
+        reported = report.directory(name)
+        report_was_there = os.path.isdir(reported)
         report.release(name)
         state.release(name)
 
@@ -176,9 +183,22 @@ def exec_box(provider, asked, argv, env, account=None):
     # container at all. Nothing ran in there, so there is no session to fold back
     # and nothing to resume — and everything below this line is about a box that
     # held a conversation. Said as a failure instead, which is what it is.
-    if status == 125 and not printed.strip():
+    # Whether docker explained itself or not. This used to ask for silence as
+    # well, and docker is never silent about a mount it cannot make: a refused
+    # bind printed its own reason, so this line was skipped, and the run went on
+    # to offer `--resume` into a box that never came up — the very thing the
+    # comment at _daemon_is_up above was written to prevent. Measured on `claude
+    # --box m`: the daemon's "bind source path does not exist" and a resume hint
+    # under it, in one screen.
+    if status == 125:
         _remember(provider, asked, workdir, None, account, status)
-        die("the '%s' box did not start — the reason is above" % name, status)
+        said = "the '%s' box did not start — the reason is above" % name
+        if not report_was_there:
+            # A mount failure names this path, so say what it held. The box is
+            # still wakeable without the directory; it is the only part of a
+            # refused mount that this process can speak to.
+            said += "\n  its report directory was already gone: %s" % reported
+        die(said, status)
 
     # What the harness itself recorded, where it could not be confused with
     # another window's — better than any guess made from file times.

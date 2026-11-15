@@ -19,9 +19,9 @@ not a passive thing: a plain GET can change state, and a session that reaches
 an admin console reaches it as the person. So this is off unless a box asks
 for it, and a box may be held to the hosts it actually needs:
 
-    "finik": {
-      "rw": ["~/Projects/finik"],
-      "browser": ["admin-staging.finik.ai", ".finik.ai"]
+    "acme": {
+      "rw": ["~/Projects/acme"],
+      "browser": ["admin-staging.example.com", ".example.com"]
     }
 
     true          any http/https address

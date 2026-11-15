@@ -64,7 +64,7 @@ test("a box gets no browser unless it asks for one", async (t) => {
 
 test("a box that asks gets a stand-in for open, and the host keeps the rule", async (t) => {
   const box = await machine(t);
-  const cmd = mounts({ browser: ["admin-staging.finik.ai", ".finik.ai"] }, box);
+  const cmd = mounts({ browser: ["admin-staging.example.com", ".example.com"] }, box);
 
   // Both names a caller reaches for, read-only, and the same shim behind them.
   const shims = cmd.filter((a) => a.startsWith("type=bind,")
@@ -102,7 +102,7 @@ exec(open(${JSON.stringify(shim)}).read())
     }
   };
 
-  const good = dial("https://admin-staging.finik.ai/compliance/kyt-categories");
+  const good = dial("https://admin-staging.example.com/compliance/kyt-categories");
   assert.equal(good.code, 0, good.err);
   assert.match(good.out, /opened on the host in Google Chrome/);
 
@@ -117,7 +117,7 @@ exec(open(${JSON.stringify(shim)}).read())
   // Only the allowed address reached a browser, and it reached the named one.
   const log = await fs.readFile(box.opened, "utf8");
   assert.equal(log.trim().split("\n").length, 1);
-  assert.match(log, /-a Google Chrome -- https:\/\/admin-staging\.finik\.ai\//);
+  assert.match(log, /-a Google Chrome -- https:\/\/admin-staging\.example\.com\//);
 
   // Every request is answerable for afterwards, refusals included.
   const audit = await fs.readFile(

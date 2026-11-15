@@ -403,10 +403,10 @@ def _parents(cmd, home):
     to, and the failure names the child rather than the cause: "EACCES:
     permission denied, mkdir".
 
-    Measured on finik, where six boxes of twelve had ~/.cache owned by
+    Measured on one machine, where six boxes of twelve had ~/.cache owned by
     root:root — the codex session database is mounted at
     ~/.cache/broker-box/codex-db/<id>, so the container made ~/.cache on the
-    way to it, and a gate that wanted ~/.cache/finik/pre-push-gates could not
+    way to it, and a gate that wanted ~/.cache/acme/pre-push-gates could not
     have it.
 
     This was being cured one path at a time: ~/.bun and ~/.bun/install above,

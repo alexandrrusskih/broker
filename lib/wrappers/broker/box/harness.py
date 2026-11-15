@@ -313,7 +313,7 @@ def _profile_ignore(root, shared):
     siblings() binds every BOX_SHARED directory over this copy at its own path,
     and the bind's target is deeper, so whatever is copied here is shadowed the
     moment the container starts and the box never reads it. codex keeps its
-    sessions in one pile per config directory: 24 GB on the finik Mac, copied
+    sessions in one pile per config directory: 24 GB on one of these machines, copied
     once per box and charged to the disk until that box exited. Five boxes took
     120 GB and the free space fell 143 GB in fifteen minutes, which is how that
     disk filled and took docker down with it.

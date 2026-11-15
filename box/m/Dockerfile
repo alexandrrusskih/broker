@@ -1,7 +1,7 @@
 # The m box: the owner's general box over all projects, on the shared base.
 #
-# FROM broker-box, not broker-box-finik. That image is finik's own and is built
-# from a Dockerfile in the finik repository, which is not on this machine — so a
+# FROM broker-box, not broker-box-acme. That image is acme's own and is built
+# from a Dockerfile in the acme repository, which is not on this machine — so a
 # box standing on it cannot be rebuilt here at all. That is not a theory: it is
 # how the aic box came to be missing medulla for two weeks, because the base
 # moved on and the borrowed image could not follow.

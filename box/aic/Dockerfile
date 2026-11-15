@@ -1,7 +1,7 @@
 # The aic box: Accounting Intake, on the shared base plus medulla.
 #
-# FROM broker-box, not broker-box-finik. The finik image is finik's own: it is
-# built from a Dockerfile in the finik repository, which is not on this
+# FROM broker-box, not broker-box-acme. The acme image is acme's own: it is
+# built from a Dockerfile in the acme repository, which is not on this
 # machine, so a box standing on it cannot be rebuilt here at all — which is
 # how this box came to be missing medulla in the first place. Borrowing
 # another project's image also borrows its schedule and its contents.
@@ -34,7 +34,7 @@ RUN set -eu; \
     rm -rf /tmp/medulla; \
     medulla --version
 
-# gcloud, which is the one thing this box kept from the finik image it used to
+# gcloud, which is the one thing this box kept from the acme image it used to
 # stand on. psql and tofu came from there too and are deliberately not here:
 # the owner named gcloud and nothing else.
 #

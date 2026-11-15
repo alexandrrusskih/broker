@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 # The three excludes are ANCHORED and spelled with the archive's top directory.
 # A bare `--exclude README.md` matches that name at ANY depth, so it would also
 # drop the README and LICENSE files npm ships inside lib/node_modules — found
-# by the finik agent reviewing the same recipe, and it was wrong here first.
+# by the acme agent reviewing the same recipe, and it was wrong here first.
 #
 # --no-same-owner because the tarball's members belong to iojs, uid 1000:
 # measured in the listing of the published archive. Under root tar would

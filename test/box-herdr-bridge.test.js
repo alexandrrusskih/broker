@@ -108,7 +108,7 @@ test("a box is held to the groups it was given, and a bare herdr is refused outr
 
   const out = run(home, ["tab"], [
     [null, ["tab", "list"]],
-    [null, ["agent", "read", "finik/lane5"]],
+    [null, ["agent", "read", "acme/lane5"]],
     [null, []],
     [null, ["--json", "tab", "list"]]
   ]);

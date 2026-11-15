@@ -238,7 +238,7 @@ test("every pin in the image is one the machine can be read for", async () => {
 });
 
 // A box may name a Dockerfile that belongs to ANOTHER project, and that file is
-// theirs. finik pins Playwright to the version its own package.json depends on,
+// theirs. acme pins Playwright to the version its own package.json depends on,
 // says so in a comment, and a browser build it did not expect makes the harness
 // refuse to start. This sync wrote 1.63.0 -> 1.64.0 into their tracked file and
 // broke their preflight on a dirty tree. Drift outside the checkout being built

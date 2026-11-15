@@ -24,7 +24,7 @@ TERMINAL_ENV = ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
 # launcher was typed in and occupies it, so the pane it carries is its own and
 # the hook reporting it tells the truth. Measured the other way: with these
 # stripped, the bus had a chat id and no pane, created no wake route at all,
-# and three agents on finik sat on eight unread messages for a day.
+# and three agents on one machine sat on eight unread messages for a day.
 #
 # Nor did holding them back close anything. The bus takes `_session.pane` as an
 # ordinary call argument and nothing signs it, so a box that wants to name

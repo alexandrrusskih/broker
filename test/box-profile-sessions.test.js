@@ -1,7 +1,7 @@
 // A box must not be charged for a directory it never reads. codex keeps its
 // sessions in one pile per config directory, and siblings() binds that pile
 // over the box's profile copy at its own path — so copying it is paid for
-// twice and used once. Measured on the finik Mac: 24 GB per box, five boxes,
+// twice and used once. Measured on one of these machines: 24 GB per box, five boxes,
 // 120 GB, and the free space fell 143 GB in fifteen minutes.
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -42,7 +42,7 @@ ${preamble(dir)}
 canonical = "${dir}/.codex"
 home = "${dir}/.codex-sk"
 seed(home)
-args = harness.chosen_home(provider, {"CODEX_HOME": home}, "finik", None, [], canonical)
+args = harness.chosen_home(provider, {"CODEX_HOME": home}, "acme", None, [], canonical)
 copy = shadow(args)
 print("the copy was made", copy is not None)
 print("sessions holds", os.listdir(copy + "/sessions"))
@@ -73,7 +73,7 @@ canonical = "${dir}/.codex"
 # cover the copy. Skipping the pile here would take the sessions away.
 home = "${dir}/elsewhere"
 seed(home)
-args = harness.chosen_home(provider, {"CODEX_HOME": home}, "finik", None, [], canonical)
+args = harness.chosen_home(provider, {"CODEX_HOME": home}, "acme", None, [], canonical)
 copy = shadow(args)
 print("sessions holds", sorted(os.listdir(copy + "/sessions/2026/11/15")))
 `);

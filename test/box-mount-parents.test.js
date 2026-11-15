@@ -38,9 +38,9 @@ test("a mount deep under home has its parents claimed, so the box can still writ
   const project = path.join(dir, "project");
   await fs.mkdir(project);
 
-  // The case this was found by: six boxes of twelve on finik had ~/.cache owned
+  // The case this was found by: six boxes of twelve on one machine had ~/.cache owned
   // by root:root, because the codex session database is mounted below it. A
-  // push gate that wanted ~/.cache/finik/pre-push-gates got EACCES, and the
+  // push gate that wanted ~/.cache/acme/pre-push-gates got EACCES, and the
   // cause was two directories above the one in the message.
   const deep = path.join(dir, ".cache", "broker-box", "codex-db", "41718f0d");
   const cmd = command(dir, {

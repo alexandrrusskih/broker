@@ -307,6 +307,30 @@ def _uncopyable(directory, names):
     return skip
 
 
+def _profile_ignore(root, shared):
+    """_uncopyable, plus the directories a bind mount covers anyway.
+
+    siblings() binds every BOX_SHARED directory over this copy at its own path,
+    and the bind's target is deeper, so whatever is copied here is shadowed the
+    moment the container starts and the box never reads it. codex keeps its
+    sessions in one pile per config directory: 24 GB on the finik Mac, copied
+    once per box and charged to the disk until that box exited. Five boxes took
+    120 GB and the free space fell 143 GB in fifteen minutes, which is how that
+    disk filled and took docker down with it.
+
+    Only the top level, and only when the bind is really coming: `shared` is
+    empty for a home that is not a sibling of the canonical one, because then
+    siblings() never looks at it and the copy is all the box has.
+    """
+    def ignore(directory, names):
+        skip = list(_uncopyable(directory, names))
+        if shared and os.path.realpath(directory) == os.path.realpath(root):
+            skip += [entry for entry in names if entry in shared]
+        return skip
+
+    return ignore
+
+
 def chosen_home(provider, env, name, remote, mounted, canonical):
     """The config directory this run was pointed at, and the name for it."""
     args = []
@@ -325,7 +349,17 @@ def chosen_home(provider, env, name, remote, mounted, canonical):
                                     name.replace("/", "_"))
                 os.makedirs(root, mode=0o700, exist_ok=True)
                 source = os.path.join(root, uuid.uuid4().hex)
-                shutil.copytree(host, source, symlinks=True, ignore=_uncopyable)
+                # What siblings() binds at its own path is left out of the copy:
+                # the bind shadows it anyway. See _profile_ignore.
+                shared = frozenset(getattr(provider, "BOX_SHARED", ())) \
+                    if host.startswith(canonical + "-") else frozenset()
+                shutil.copytree(host, source, symlinks=True,
+                                ignore=_profile_ignore(host, shared))
+                for entry in shared:
+                    # The mount point, so the bind lands where the harness
+                    # expects it even when docker is asked for it first.
+                    os.makedirs(os.path.join(source, entry), mode=0o700,
+                                exist_ok=True)
             args += _mount(source, target=host)
             args += ["-e", "%s=%s" % (home_env, host)]
     return args

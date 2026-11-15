@@ -232,7 +232,59 @@ def _pump(src, dst, close_on_done=None):
                 pass
 
 
-def _session(conn, command, token, policy=None):
+class _Live:
+    """The children of the sessions still running, so an exit can take them too.
+
+    _session cleans up its own child in a finally, and while the listener lives
+    that is the only path that matters. But those finallys run in DAEMON
+    threads: when this process returns, the interpreter kills them where they
+    stand and no finally runs at all. The children are re-parented to launchd
+    and stay, each holding whatever its server holds — for a code index, most
+    of a gigabyte. Measured on one machine: 92 index servers, 30 of them with
+    ppid 1 and no bridge left to own them, the oldest 28 minutes old.
+
+    So the listener keeps the set as well, and empties it on the way out. The
+    thread's own finally still runs first on every ordinary disconnect; this
+    only catches what is left when there is no thread any more.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._children = set()
+
+    def add(self, child):
+        with self._lock:
+            self._children.add(child)
+
+    def drop(self, child):
+        with self._lock:
+            self._children.discard(child)
+
+    def close(self):
+        """Ask them all to go, then make sure they went."""
+        with self._lock:
+            children = list(self._children)
+            self._children = set()
+        # Terminated in one pass before any wait, so a slow one does not hold
+        # the next five seconds of the shutdown for the rest of them.
+        for child in children:
+            try:
+                child.terminate()
+            except OSError:
+                pass
+        for child in children:
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    child.kill()
+                except OSError:
+                    pass
+            except OSError:
+                pass
+
+
+def _session(conn, command, token, policy=None, live=None):
     """One client: check the secret, spawn a server, be the wire between them."""
     with conn:
         conn.settimeout(10)
@@ -254,6 +306,8 @@ def _session(conn, command, token, policy=None):
         except OSError as exc:
             conn.sendall(json.dumps({"error": str(exc)}).encode() + b"\n")
             return
+        if live is not None:
+            live.add(child)
         client = _Sender(conn)
         try:
             # Only the box-to-server direction is read line by line: a rule
@@ -291,6 +345,8 @@ def _session(conn, command, token, policy=None):
                 child.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 child.kill()
+            if live is not None:
+                live.drop(child)
 
 
 def bind_address():
@@ -359,10 +415,11 @@ def serve(name, command, key=""):
     # mid-sentence, with nothing in the log to say why.
     open_sessions = [0]
     counted = threading.Lock()
+    live = _Live()
 
     def session(conn):
         try:
-            _session(conn, command, token, policy)
+            _session(conn, command, token, policy, live)
         finally:
             with counted:
                 open_sessions[0] -= 1
@@ -381,6 +438,9 @@ def serve(name, command, key=""):
                 open_sessions[0] += 1
             threading.Thread(target=session, args=(conn,), daemon=True).start()
     finally:
+        # Before the state file goes: a reader that sees no file and a live
+        # server would have nothing to connect to and no way to say why.
+        live.close()
         try:
             os.remove(path)
         except OSError:

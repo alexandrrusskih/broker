@@ -23,6 +23,7 @@ is closed before a server is spawned.
 import hashlib
 import json
 import os
+import signal
 import socket
 import sys
 import threading
@@ -103,6 +104,11 @@ def connect(host, port, token):
     return 0
 
 
+def _bow_out(signum, frame):
+    """Turn a termination signal into an ordinary exit, so finallys run."""
+    raise SystemExit(0)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "serve":
@@ -117,6 +123,16 @@ def main(argv=None):
         # bridged server then reported itself missing inside the box, while the
         # http ones, which need no bridge, connected fine.
         key = argv[argv.index("--key") + 1] if "--key" in argv[:argv.index("--")] else identity_key()
+        # A plain `kill` must reach serve()'s finally, where the spawned
+        # servers are taken down. Without this the default disposition ends
+        # the process outright: the listener's state file stays on disk and
+        # every server it had spawned is re-parented to launchd and kept.
+        # Ctrl-C already arrives as KeyboardInterrupt and unwinds correctly;
+        # SIGKILL cannot be caught by anything and is not claimed here.
+        #
+        # Installed at the entry point and not in serve(): the signal
+        # disposition belongs to a process, and serve() is also importable.
+        signal.signal(signal.SIGTERM, _bow_out)
         return serve(name, command, key)
     if argv and argv[0] == "connect":
         # Inside the box everything comes from the environment the shim sets.

@@ -257,18 +257,35 @@ def _start_bridge(name, server, profile, projects):
     workspace = os.path.realpath(projects[0]) if projects else engine
     if not os.path.isdir(workspace):
         workspace = engine
+    # stderr is a FILE, not DEVNULL. A session's server inherits whatever the
+    # listener was given, so DEVNULL here discarded everything every bridged
+    # server ever said about itself — including the line a server prints when
+    # it needs a person: "Please authorize this client by visiting: <url>".
+    # Measured on one machine, that line was printed fourteen hundred times
+    # over ten hours and existed nowhere afterwards, so the one action that
+    # would have fixed the failure could not be taken. See mcpserve.log_file.
+    try:
+        errors = mcpserve.open_log(name, key)
+    except OSError as exc:
+        warn("could not open the %s bridge log: %s" % (name, exc))
+        errors = subprocess.DEVNULL
     try:
         subprocess.Popen(
             [sys.executable, "-m", "broker.mcpbridge", "serve", name, "--key", key, "--"]
             + server["command"],
             cwd=workspace,
             env=bridge_env,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
             start_new_session=True,  # it outlives this process: the box is its client
         )
     except OSError as exc:
         warn("could not bridge the %s MCP server: %s" % (name, exc))
         return None
+    finally:
+        # The child holds a descriptor of its own now. Ours would otherwise
+        # travel into every box this process goes on to start.
+        if errors is not subprocess.DEVNULL:
+            errors.close()
     for _ in range(50):
         # Not verified: we are waiting for the listener this call just
         # started, so asking the system about its pid fifty times over would
@@ -277,5 +294,6 @@ def _start_bridge(name, server, profile, projects):
         if live:
             return live
         time.sleep(0.1)
-    warn("the %s MCP bridge did not come up — it will be missing inside the box" % name)
+    warn("the %s MCP bridge did not come up — it will be missing inside the box. "
+         "What it said on the way is in %s" % (name, mcpserve.log_file(name, key)))
     return None

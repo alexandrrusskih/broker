@@ -4,6 +4,7 @@ Started as `python -m broker.mcpbridge serve`; the entry point is there, and
 the state file that says where this listener answers is here.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -12,6 +13,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 
 from . import config
 
@@ -49,6 +51,179 @@ def _state_file(name, key=""):
     if key:
         stem += "-" + key
     return os.path.join(state_dir(), "%s.json" % stem)
+
+
+def log_file(name, key=""):
+    """Where a bridged server's own words go.
+
+    They used to go nowhere. box/mcp.py started the listener with
+    stderr=DEVNULL, and a server spawned by a session inherits that, so
+    everything a server said about itself was discarded. Measured on one
+    machine: mcp-remote printed "Please authorize this client by visiting:
+    <url>" fourteen hundred times over ten hours, and not one of those lines
+    existed anywhere afterwards. The sign-in was the only way out of the
+    failure and nothing on the machine would say where to go.
+
+    A listener's own traceback went the same way, which is why "the bridge did
+    not come up" has never had a reason attached to it.
+
+    Private, like the state file beside it: a server that fails while holding a
+    credential may well name it on the way down.
+    """
+    stem = name.replace("/", "_")
+    if key:
+        stem += "-" + key
+    return os.path.join(state_dir(), "%s.log" % stem)
+
+
+# One generation of a log is kept, and this is where the live one is rolled.
+LOG_MAX = 1 << 20
+
+
+def open_log(name, key=""):
+    """The log to hand a listener as its stderr, rolled if the old one is big.
+
+    Rolled by whoever STARTS the listener, because that is the only moment
+    anybody owns the file's lifetime: the listener then holds the descriptor
+    for as long as it lives, and a server appending through it cannot be made
+    to change files underneath. So the bound is per listener rather than
+    absolute. A server that talks for a whole day in one session outgrows it,
+    and that is the trade for never losing the FIRST lines, which are the ones
+    that say why.
+    """
+    path = log_file(name, key)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    try:
+        if os.path.getsize(path) > LOG_MAX:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass  # not there yet, or not ours to move: appending is still right
+    handle = open(path, "a")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return handle
+
+
+# A listener spawns a fresh server for every connection, and a harness
+# reconnects on a schedule of its own. So a server that is BROKEN rather than
+# busy is started again, and again, for as long as it stays broken, and each
+# start fails the same way. Measured on one machine: fourteen hundred doomed
+# starts of a single command in ten hours, with nothing counting them.
+#
+# A command that dies at once WITHOUT EVER SPEAKING MCP, enough times in a row,
+# is therefore left alone for a while, and the client is told why instead of
+# being handed another corpse. See _breaker_note for what does not count.
+FAST_FAIL_SECONDS = 5
+FAST_FAIL_LIMIT = 5
+COOLDOWN_SECONDS = 60
+COOLDOWN_MAX = 15 * 60
+# The count is shared by every listener for this command, so one number stands
+# for the whole machine. Keyed by the command and not by the server's name,
+# because the same command under two names is one broken thing, and two
+# commands under one name are two.
+BREAKER_ENV = "BROKER_MCP_BREAKER"
+
+
+def _breaker_off():
+    return os.environ.get(BREAKER_ENV) == "0"
+
+
+def _breaker_file(command):
+    digest = hashlib.sha1(repr(list(command)).encode()).hexdigest()[:12]
+    return os.path.join(state_dir(), "fail-%s.json" % digest)
+
+
+def _breaker(command):
+    try:
+        with open(_breaker_file(command)) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def _breaker_write(command, state):
+    path = _breaker_file(command)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = "%s.%d.new" % (path, os.getpid())
+    try:
+        with open(tmp, "w") as fh:
+            json.dump(state, fh)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _breaker_clear(command):
+    try:
+        os.remove(_breaker_file(command))
+    except OSError:
+        pass
+
+
+def _cooling(command, about=None):
+    """The reason to refuse this spawn, or "" to go ahead.
+
+    Two listeners can read a stale count and both spawn. That is the right way
+    round for a guard like this: it exists to stop a run of hundreds, and a
+    doubled start costs one process.
+    """
+    if _breaker_off():
+        return ""
+    state = _breaker(command)
+    if not state:
+        return ""
+    left = (state.get("until") or 0) - time.time()
+    if left <= 0:
+        return ""
+    return ("%s stopped at once %d times in a row, so it is not being started "
+            "again for %ds. What it said is in %s"
+            % ((about or {}).get("name") or command[0], state.get("fails") or 0,
+               int(left + 0.5), (about or {}).get("log") or "the bridge log"))
+
+
+def _breaker_note(command, lifetime, own_death, spoke):
+    """Record how that start went, so the next one can decide.
+
+    Three things have to hold before a start counts as a failure, and each one
+    was a false positive without it.
+
+    `own_death` separates a server that fell over from one this listener ended
+    because its client went away. Without it every ordinary disconnect read as
+    a failure.
+
+    `spoke` is whether the server wrote any MCP at all. A stdio server exits
+    when its stdin closes, so a short, perfectly good session — connect, ask,
+    close — ends with the server exiting by itself in under a second. Five of
+    those would have held off a server that was answering every time. One that
+    never spoke is the case this guard is for.
+
+    `lifetime` keeps a server that ran for a while and then died out of it:
+    that is a server with a problem of its own, and refusing to start it again
+    hides the problem instead of showing it.
+    """
+    if _breaker_off():
+        return
+    if not own_death or spoke or lifetime >= FAST_FAIL_SECONDS:
+        # A good start clears the whole history: a server that was down and
+        # came back must not be held off for something it no longer does.
+        if _breaker(command):
+            _breaker_clear(command)
+        return
+    fails = ((_breaker(command) or {}).get("fails") or 0) + 1
+    wait = 0
+    if fails >= FAST_FAIL_LIMIT:
+        # Doubling, so a thing that stays broken is asked about less and less,
+        # and capped, so it is still asked about: the cure is usually a person
+        # doing something, and the next start is what tells them it worked.
+        wait = min(COOLDOWN_MAX,
+                   COOLDOWN_SECONDS * (2 ** min(fails - FAST_FAIL_LIMIT, 10)))
+    _breaker_write(command, {"fails": fails, "until": time.time() + wait})
 
 
 class _Sender:
@@ -203,12 +378,16 @@ def _filter(src, dst, policy, client, close_on_done=None):
 
 
 def _pump(src, dst, close_on_done=None):
-    """Move bytes as they arrive.
+    """Move bytes as they arrive, and say how many there were.
 
     read1() rather than read(): on a pipe, read(n) blocks until it has all n
     bytes, so a request smaller than the buffer would sit there unanswered until
     the next one arrived — a bridge that deadlocks on every first message.
+
+    The count is for the one caller that needs it: a server which never wrote a
+    byte of MCP did not start, whatever its exit code said. See _breaker_note.
     """
+    moved = 0
     try:
         while True:
             if hasattr(src, "recv"):
@@ -222,6 +401,7 @@ def _pump(src, dst, close_on_done=None):
             else:
                 dst.write(chunk)
                 dst.flush()
+            moved += len(chunk)
     except (OSError, ValueError):
         pass
     finally:
@@ -230,6 +410,7 @@ def _pump(src, dst, close_on_done=None):
                 close_on_done()
             except OSError:
                 pass
+    return moved
 
 
 class _Live:
@@ -284,7 +465,7 @@ class _Live:
                 pass
 
 
-def _session(conn, command, token, policy=None, live=None):
+def _session(conn, command, token, policy=None, live=None, about=None):
     """One client: check the secret, spawn a server, be the wire between them."""
     with conn:
         conn.settimeout(10)
@@ -301,6 +482,11 @@ def _session(conn, command, token, policy=None, live=None):
             return  # not ours: say nothing, spawn nothing
         conn.settimeout(None)
 
+        cooling = _cooling(command, about)
+        if cooling:
+            conn.sendall(json.dumps({"error": cooling}).encode() + b"\n")
+            return
+        began = time.monotonic()
         try:
             child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
         except OSError as exc:
@@ -309,6 +495,10 @@ def _session(conn, command, token, policy=None, live=None):
         if live is not None:
             live.add(child)
         client = _Sender(conn)
+        # Set before the try, because the finally below reads it: an exception
+        # on the way to the pump would otherwise raise a NameError over the
+        # real failure and lose it.
+        spoke = False
         try:
             # Only the box-to-server direction is read line by line: a rule
             # applies to requests, and the answers can stay raw bytes, which
@@ -318,7 +508,7 @@ def _session(conn, command, token, policy=None, live=None):
                          else (conn, child.stdin, child.stdin.close))
             up = threading.Thread(target=carry, args=arguments, daemon=True)
             up.start()
-            _pump(child.stdout, client)
+            spoke = bool(_pump(child.stdout, client))
         finally:
             # Shut the socket down before `with conn` closes it, or the client
             # is never told the server is gone.
@@ -340,6 +530,11 @@ def _session(conn, command, token, policy=None, live=None):
                 conn.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass  # already gone the other way; close() is enough
+            # Read BEFORE we end it. Afterwards every exit looks like the one
+            # this line is about to cause, and a healthy server would be
+            # counted as a failure on every ordinary disconnect.
+            _breaker_note(command, time.monotonic() - began,
+                          child.poll() is not None, spoke)
             child.terminate()
             try:
                 child.wait(timeout=5)
@@ -416,10 +611,13 @@ def serve(name, command, key=""):
     open_sessions = [0]
     counted = threading.Lock()
     live = _Live()
+    # What to call this server, and where its own words are, for the one
+    # message a refused client gets instead of a server.
+    about = {"name": name, "log": log_file(name, key)}
 
     def session(conn):
         try:
-            _session(conn, command, token, policy, live)
+            _session(conn, command, token, policy, live, about)
         finally:
             with counted:
                 open_sessions[0] -= 1
